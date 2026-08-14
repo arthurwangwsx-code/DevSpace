@@ -1,0 +1,24 @@
+[Unit]
+Description=DevSpace MCP test server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/Users/ai/project/ai-tools/devspace/lima-test-workspace
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=HOST=127.0.0.1
+Environment=PORT=7676
+Environment=DEVSPACE_AUTH_MODE=trusted-local
+# Parsed by the current checkout even though trusted-local mode does not use it.
+Environment=DEVSPACE_OAUTH_OWNER_TOKEN=lima-local-test-only-owner-token
+Environment=DEVSPACE_ALLOWED_ROOTS=/Users/ai/project/ai-tools/devspace/lima-test-workspace
+Environment=DEVSPACE_PUBLIC_BASE_URL=http://127.0.0.1:17676
+Environment=DEVSPACE_TOOL_MODE=codex
+Environment=DEVSPACE_WIDGETS=off
+ExecStart=/usr/local/bin/devspace serve
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

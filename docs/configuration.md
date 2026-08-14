@@ -34,10 +34,41 @@ npx @waishnav/devspace config set publicBaseUrl https://devspace.example.com
 | `PORT` | Local port. Defaults to `7676`. |
 | `DEVSPACE_ALLOWED_ROOTS` | Comma-separated local roots that workspaces may open. |
 | `DEVSPACE_PUBLIC_BASE_URL` | Public origin for the server, without `/mcp`. |
+| `DEVSPACE_AUTH_MODE` | `oauth` (default), or `trusted-local` for an authenticated outbound tunnel while binding only to loopback. |
 | `DEVSPACE_ALLOWED_HOSTS` | Optional Host header allowlist override. |
 | `DEVSPACE_OAUTH_OWNER_TOKEN` | Owner password for OAuth approval. Must be at least 16 characters. |
 | `DEVSPACE_WORKTREE_ROOT` | Directory for managed Git worktrees. Defaults to `~/.devspace/worktrees`. |
 | `DEVSPACE_STATE_DIR` | Directory for SQLite state. Defaults to `~/.local/share/devspace`. |
+
+## Resource Limits
+
+DevSpace bounds live MCP sessions, request concurrency, queues, child processes,
+and retained command output. Defaults are conservative for a single-user local
+server and prevent reconnect-heavy clients from retaining sessions until the
+Node heap is exhausted.
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `DEVSPACE_MCP_MAX_SESSIONS` | `256` | Hard limit including active sessions and concurrent initialize reservations. |
+| `DEVSPACE_MCP_MAX_IDLE_SESSIONS` | `128` | LRU bound for sessions without in-flight requests. |
+| `DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_SECONDS` | `600` | Close sessions idle for this duration. |
+| `DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_SECONDS` | `30` | TTL and memory-pressure cleanup interval. |
+| `DEVSPACE_MCP_MAX_CONCURRENT_REQUESTS` | `64` | Maximum `/mcp` requests executing at once. |
+| `DEVSPACE_MCP_MAX_QUEUED_REQUESTS` | `128` | FIFO waiting queue bound; `0` disables queuing. |
+| `DEVSPACE_MCP_REQUEST_QUEUE_TIMEOUT_MS` | `30000` | Maximum time a request may wait for an execution slot. |
+| `DEVSPACE_MCP_HEAP_SOFT_LIMIT_PERCENT` | `60` | Shrink the idle LRU after V8 heap use reaches this percentage. |
+| `DEVSPACE_MCP_HEAP_HARD_LIMIT_PERCENT` | `75` | Reject new initialize requests and close all idle sessions at this percentage. |
+| `DEVSPACE_PROCESS_MAX_CONCURRENT` | `16` | Maximum concurrently running command processes. |
+| `DEVSPACE_PROCESS_MAX_SESSIONS` | `64` | Maximum retained running and completed process sessions. |
+| `DEVSPACE_PROCESS_BUFFER_CHARACTERS` | `524288` | Head/tail output buffer retained per process session. |
+
+The idle session limit must not exceed the total session limit. The heap soft
+percentage must be lower than the hard percentage, and the process session
+limit must be at least the concurrent process limit. Overloaded MCP requests
+return HTTP 503, JSON-RPC error `-32002`, and `Retry-After: 1`.
+
+See [MCP Resource Control](mcp-resource-control.md) for lifecycle, memory-pressure,
+and load-test details.
 
 ## OAuth
 

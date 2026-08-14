@@ -28,9 +28,28 @@ assert.equal(unicodeResult.truncated, true);
 assert.match(unicodeResult.output, /^a🙂/);
 assert.match(unicodeResult.output, /🙂c$/);
 
+const largeUnicodeBuffer = new HeadTailBuffer(1_000);
+largeUnicodeBuffer.append("🙂".repeat(100_000));
+const largeUnicodeResult = largeUnicodeBuffer.drain(1_000);
+assert.equal(largeUnicodeResult.truncated, true);
+for (let index = 0; index < largeUnicodeResult.output.length; index += 1) {
+  const codeUnit = largeUnicodeResult.output.charCodeAt(index);
+  if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+    const next = largeUnicodeResult.output.charCodeAt(index + 1);
+    assert.ok(next >= 0xdc00 && next <= 0xdfff, "high surrogate must retain its low surrogate");
+    index += 1;
+  } else {
+    assert.ok(
+      codeUnit < 0xdc00 || codeUnit > 0xdfff,
+      "low surrogate must not appear without its high surrogate",
+    );
+  }
+}
+
 const manager = new ProcessSessionManager({
   maxBufferCharacters: 1_024,
   completedSessionTtlMs: 1_000,
+  maxConcurrentProcesses: 16,
 });
 
 const node = process.platform === "win32"
@@ -215,3 +234,74 @@ try {
 } finally {
   manager.shutdown();
 }
+
+const limitedManager = new ProcessSessionManager({
+  maxConcurrentProcesses: 1,
+  maxSessions: 2,
+  maxBufferCharacters: 1_024,
+});
+try {
+  const held = await limitedManager.start({
+    workspaceId: "workspace-a",
+    cwd: process.cwd(),
+    command: `${node} -e "setInterval(() => {}, 1000)"`,
+    yieldTimeMs: 5,
+  });
+  assert.equal(held.running, true);
+  assert.ok(held.sessionId);
+  assert.equal(limitedManager.stats.active, 1);
+  await assert.rejects(
+    limitedManager.start({
+      workspaceId: "workspace-a",
+      cwd: process.cwd(),
+      command: `${node} -e "console.log('should-not-run')"`,
+      yieldTimeMs: 100,
+    }),
+    /Concurrent process limit reached \(1\)/,
+  );
+  limitedManager.terminate("workspace-a", held.sessionId);
+} finally {
+  limitedManager.shutdown();
+}
+
+const retainedManager = new ProcessSessionManager({
+  maxConcurrentProcesses: 1,
+  maxSessions: 1,
+  maxBufferCharacters: 1_024,
+  completedSessionTtlMs: 10_000,
+});
+try {
+  const retained = await retainedManager.start({
+    workspaceId: "workspace-a",
+    cwd: process.cwd(),
+    command: `${node} -e "setTimeout(() => console.log('retained'), 20)"`,
+    yieldTimeMs: 1,
+  });
+  assert.equal(retained.running, true);
+  assert.ok(retained.sessionId);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  const replacement = await retainedManager.start({
+    workspaceId: "workspace-a",
+    cwd: process.cwd(),
+    command: `${node} -e "console.log('replacement')"`,
+    yieldTimeMs: 2_000,
+  });
+  assert.equal(replacement.running, false);
+  assert.match(replacement.output, /replacement/);
+  await assert.rejects(
+    retainedManager.write({
+      workspaceId: "workspace-a",
+      sessionId: retained.sessionId,
+      yieldTimeMs: 1,
+    }),
+    /Unknown process session/,
+  );
+} finally {
+  retainedManager.shutdown();
+}
+
+assert.throws(
+  () => new ProcessSessionManager({ maxConcurrentProcesses: 2, maxSessions: 1 }),
+  /maxSessions must be an integer no smaller than maxConcurrentProcesses/,
+);

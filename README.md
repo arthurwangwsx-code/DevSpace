@@ -182,6 +182,8 @@ devspace doctor
 - [Configuration Reference](https://github.com/Waishnav/devspace/blob/main/docs/configuration.md)
 - [Security Model](https://github.com/Waishnav/devspace/blob/main/docs/security.md)
 - [Troubleshooting Gotchas](https://github.com/Waishnav/devspace/blob/main/docs/gotchas.md)
+- [Running DevSpace in Lima (Chinese)](docs/lima-devspace.md)
+- [MCP Resource Control and High-Concurrency Stability (Chinese)](docs/mcp-resource-control.md)
 
 ## Philosophy
 

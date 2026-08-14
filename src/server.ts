@@ -39,7 +39,15 @@ import { SingleUserOAuthProvider } from "./oauth-provider.js";
 import {
   McpSessionRegistry,
   type McpSessionCloseResult,
+  type McpSessionLease,
+  type McpSessionReservation,
 } from "./mcp-sessions.js";
+import {
+  BoundedRequestGate,
+  MemoryGuard,
+  ResourceLimitError,
+  type MemorySnapshot,
+} from "./mcp-resource-control.js";
 import { ProcessSessionManager, type ProcessSnapshot } from "./process-sessions.js";
 import { createReviewCheckpointManager } from "./review-checkpoints.js";
 import { shutdownHttpServer } from "./server-shutdown.js";
@@ -54,10 +62,6 @@ import {
 } from "./local-agent-availability.js";
 
 type Transport = StreamableHTTPServerTransport;
-// MCP clients can reconnect without closing the previous transport. Bound stale
-// session retention so abandoned MCP servers do not accumulate for the life of the process.
-const MCP_SESSION_IDLE_TIMEOUT_MS = 24 * 60 * 60 * 1_000;
-const MCP_SESSION_CLEANUP_INTERVAL_MS = 5 * 60 * 1_000;
 const WORKSPACE_APP_URI = "ui://devspace/workspace-app.html";
 const WORKSPACE_APP_MANIFEST_ENTRY = "workspace-app.html";
 const WRITE_TOOL_ANNOTATIONS = {
@@ -288,6 +292,10 @@ function sendJsonRpcError(
     error: { code, message },
     id: null,
   });
+}
+
+function megabytes(bytes: number): number {
+  return Math.round((bytes / (1_024 * 1_024)) * 10) / 10;
 }
 
 function requestLogFields(req: Request, config: ServerConfig): Record<string, unknown> {
@@ -1605,7 +1613,19 @@ export function createServer(config = loadConfig()): RunningServer {
     host: config.host,
     ...(allowedHosts ? { allowedHosts } : {}),
   });
-  const transports = new McpSessionRegistry<Transport>();
+  const transports = new McpSessionRegistry<Transport>({
+    maxSessions: config.resources.mcpMaxSessions,
+    maxIdleSessions: config.resources.mcpMaxIdleSessions,
+  });
+  const requestGate = new BoundedRequestGate({
+    maxConcurrent: config.resources.mcpMaxConcurrentRequests,
+    maxQueued: config.resources.mcpMaxQueuedRequests,
+    queueTimeoutMs: config.resources.mcpRequestQueueTimeoutMs,
+  });
+  const memoryGuard = new MemoryGuard({
+    softLimitRatio: config.resources.mcpHeapSoftLimitRatio,
+    hardLimitRatio: config.resources.mcpHeapHardLimitRatio,
+  });
   const mcpUrl = new URL("/mcp", config.publicBaseUrl);
   const resourceServerUrl = resourceUrlFromServerUrl(mcpUrl);
   const oauthProvider = new SingleUserOAuthProvider(config.oauth, mcpUrl, config.stateDir);
@@ -1617,13 +1637,17 @@ export function createServer(config = loadConfig()): RunningServer {
   const workspaceStore = createWorkspaceStore(config.stateDir);
   const workspaces = new WorkspaceRegistry(config, workspaceStore);
   const reviewCheckpoints = createReviewCheckpointManager();
-  const processSessions = new ProcessSessionManager();
+  const processSessions = new ProcessSessionManager({
+    maxConcurrentProcesses: config.resources.processMaxConcurrent,
+    maxSessions: config.resources.processMaxSessions,
+    maxBufferCharacters: config.resources.processBufferCharacters,
+  });
   const localAgentProviders = config.subagents
     ? getLocalAgentProviderAvailabilitySnapshot()
     : [];
 
   const logSessionCloseResults = (
-    reason: "idle_timeout" | "server_shutdown",
+    reason: "capacity" | "idle_limit" | "idle_timeout" | "memory_pressure" | "server_shutdown",
     results: McpSessionCloseResult[],
   ) => {
     for (const result of results) {
@@ -1642,15 +1666,55 @@ export function createServer(config = loadConfig()): RunningServer {
       logEvent(config.logging, "info", "mcp_session_closed", {
         reason,
         sessionIdPrefix: sessionIdPrefix(result.sessionId),
+        ...transports.stats,
       });
     }
   };
 
+  const resourceLogFields = (memory: MemorySnapshot) => ({
+    heapPressure: memory.level,
+    heapUsedMb: megabytes(memory.heapUsed),
+    heapLimitMb: megabytes(memory.heapLimit),
+    heapRatioPercent: Math.round(memory.heapRatio * 1_000) / 10,
+    rssMb: megabytes(memory.rss),
+    externalMb: megabytes(memory.external),
+    arrayBuffersMb: megabytes(memory.arrayBuffers),
+    sessions: transports.stats,
+    requests: requestGate.stats,
+    processes: processSessions.stats,
+  });
+
+  let cleanupRunning = false;
+  let lastResourceLogAt = 0;
   const sessionCleanupTimer = setInterval(() => {
-    void transports
-      .closeIdle(MCP_SESSION_IDLE_TIMEOUT_MS)
-      .then((results) => logSessionCloseResults("idle_timeout", results));
-  }, MCP_SESSION_CLEANUP_INTERVAL_MS);
+    if (cleanupRunning) return;
+    cleanupRunning = true;
+    void (async () => {
+      const idleResults = await transports.closeIdle(config.resources.mcpSessionIdleTimeoutMs);
+      logSessionCloseResults("idle_timeout", idleResults);
+
+      const memory = memoryGuard.snapshot();
+      if (memory.level !== "normal") {
+        const idleTarget = memory.level === "hard"
+          ? 0
+          : Math.floor(config.resources.mcpMaxIdleSessions / 2);
+        const pressureResults = await transports.closeOldestIdle(idleTarget);
+        logSessionCloseResults("memory_pressure", pressureResults);
+      }
+
+      const now = Date.now();
+      if (now - lastResourceLogAt >= 60_000) {
+        lastResourceLogAt = now;
+        logEvent(config.logging, "info", "resource_snapshot", resourceLogFields(memory));
+      }
+    })().catch((error) => {
+      logEvent(config.logging, "error", "resource_cleanup_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }).finally(() => {
+      cleanupRunning = false;
+    });
+  }, config.resources.mcpSessionCleanupIntervalMs);
   sessionCleanupTimer.unref();
 
   if (config.logging.trustProxy) {
@@ -1680,16 +1744,18 @@ export function createServer(config = loadConfig()): RunningServer {
     next();
   });
 
-  app.use(
-    mcpAuthRouter({
-      provider: oauthProvider,
-      issuerUrl: new URL(config.publicBaseUrl),
-      baseUrl: new URL(config.publicBaseUrl),
-      resourceServerUrl,
-      scopesSupported: config.oauth.scopes,
-      resourceName: "DevSpace",
-    }),
-  );
+  if (config.authMode === "oauth") {
+    app.use(
+      mcpAuthRouter({
+        provider: oauthProvider,
+        issuerUrl: new URL(config.publicBaseUrl),
+        baseUrl: new URL(config.publicBaseUrl),
+        resourceServerUrl,
+        scopesSupported: config.oauth.scopes,
+        resourceName: "DevSpace",
+      }),
+    );
+  }
 
   app.options("/mcp-app-assets/{*asset}", (_req, res) => {
     setAssetHeaders(res);
@@ -1715,24 +1781,26 @@ export function createServer(config = loadConfig()): RunningServer {
     const sessionId = req.header("mcp-session-id");
     const initializeRequest = req.method === "POST" && isInitializeRequest(req.body);
 
-    await new Promise<void>((resolve, reject) => {
-      bearerAuth(req, res, (error?: unknown) => {
-        if (error) reject(error);
-        else resolve();
+    if (config.authMode === "oauth") {
+      await new Promise<void>((resolve, reject) => {
+        bearerAuth(req, res, (error?: unknown) => {
+          if (error) reject(error);
+          else resolve();
+        });
       });
-    });
-    if (res.headersSent) return;
+      if (res.headersSent) return;
 
-    if (!req.auth?.resource || !checkResourceAllowed({ requestedResource: req.auth.resource, configuredResource: resourceServerUrl })) {
-      logEvent(config.logging, "warn", "auth_denied", {
-        requestId,
-        method: req.method,
-        path: requestPath(req),
-        reason: "invalid_oauth_resource",
-        ...requestLogFields(req, config),
-      });
-      sendJsonRpcError(res, 401, -32001, "Unauthorized");
-      return;
+      if (!req.auth?.resource || !checkResourceAllowed({ requestedResource: req.auth.resource, configuredResource: resourceServerUrl })) {
+        logEvent(config.logging, "warn", "auth_denied", {
+          requestId,
+          method: req.method,
+          path: requestPath(req),
+          reason: "invalid_oauth_resource",
+          ...requestLogFields(req, config),
+        });
+        sendJsonRpcError(res, 401, -32001, "Unauthorized");
+        return;
+      }
     }
 
     logEvent(config.logging, "debug", "mcp_request", {
@@ -1743,27 +1811,64 @@ export function createServer(config = loadConfig()): RunningServer {
       isInitialize: initializeRequest,
     });
 
+    let releaseRequest: (() => void) | undefined;
+    let lease: McpSessionLease<Transport> | undefined;
+    let reservation: McpSessionReservation<Transport> | undefined;
+    let initializingTransport: Transport | undefined;
     try {
+      releaseRequest = await requestGate.acquire();
       let transport: Transport | undefined;
 
       if (sessionId) {
-        transport = transports.get(sessionId);
-        if (!transport) {
+        lease = transports.acquire(sessionId);
+        if (!lease) {
           sendJsonRpcError(res, 404, -32000, "Unknown MCP session");
           return;
         }
+        transport = lease.transport;
       } else if (initializeRequest) {
+        const memory = memoryGuard.snapshot();
+        if (memory.level !== "normal") {
+          const idleTarget = memory.level === "hard"
+            ? 0
+            : Math.floor(config.resources.mcpMaxIdleSessions / 2);
+          const pressureResults = await transports.closeOldestIdle(idleTarget);
+          logSessionCloseResults("memory_pressure", pressureResults);
+        }
+        if (memory.level === "hard") {
+          throw new ResourceLimitError(
+            "memory_pressure",
+            "DevSpace is under memory pressure; retry after active requests finish.",
+          );
+        }
+
+        const reserved = await transports.reserve();
+        logSessionCloseResults("capacity", reserved.closeResults);
+        reservation = reserved.reservation;
+        if (!reservation) {
+          throw new ResourceLimitError(
+            "session_capacity",
+            "MCP session capacity is full; retry after an active request finishes.",
+          );
+        }
+
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (newSessionId) => {
-            if (transport) transports.register(newSessionId, transport);
+            if (!transport || !reservation) {
+              throw new Error("MCP session initialized without a reserved capacity slot.");
+            }
+            lease = reservation.commit(newSessionId, transport);
+            reservation = undefined;
             logEvent(config.logging, "info", "mcp_session_created", {
               requestId,
               sessionIdPrefix: sessionIdPrefix(newSessionId),
+              ...transports.stats,
               ...requestLogFields(req, config),
             });
           },
         });
+        initializingTransport = transport;
 
         transport.onclose = () => {
           const closedSessionId = transport?.sessionId;
@@ -1771,6 +1876,7 @@ export function createServer(config = loadConfig()): RunningServer {
             logEvent(config.logging, "info", "mcp_session_closed", {
               reason: "transport_close",
               sessionIdPrefix: sessionIdPrefix(closedSessionId),
+              ...transports.stats,
             });
           }
         };
@@ -1790,13 +1896,45 @@ export function createServer(config = loadConfig()): RunningServer {
 
       await transport.handleRequest(req, res, req.body);
     } catch (error) {
-      logEvent(config.logging, "error", "mcp_request_error", {
-        requestId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      if (!res.headersSent) {
-        sendJsonRpcError(res, 500, -32603, "Internal server error");
+      if (error instanceof ResourceLimitError) {
+        const memory = memoryGuard.snapshot();
+        logEvent(config.logging, "warn", "mcp_overloaded", {
+          requestId,
+          reason: error.reason,
+          ...resourceLogFields(memory),
+          ...requestLogFields(req, config),
+        });
+        if (!res.headersSent) {
+          res.setHeader("Retry-After", "1");
+          sendJsonRpcError(res, 503, -32002, error.message);
+        }
+      } else {
+        logEvent(config.logging, "error", "mcp_request_error", {
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        if (!res.headersSent) {
+          sendJsonRpcError(res, 500, -32603, "Internal server error");
+        }
       }
+    } finally {
+      const initializationAbandoned = reservation !== undefined;
+      reservation?.cancel();
+      if (initializationAbandoned && initializingTransport) {
+        try {
+          await initializingTransport.close();
+        } catch (error) {
+          logEvent(config.logging, "warn", "mcp_session_close_failed", {
+            reason: "initialization_abandoned",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      if (lease) {
+        const idleLimitResults = await lease.release();
+        logSessionCloseResults("idle_limit", idleLimitResults);
+      }
+      releaseRequest?.();
     }
   });
 
@@ -1808,6 +1946,7 @@ export function createServer(config = loadConfig()): RunningServer {
     close: () => {
       closePromise ??= (async () => {
         clearInterval(sessionCleanupTimer);
+        requestGate.close();
         const results = await transports.closeAll();
         logSessionCloseResults("server_shutdown", results);
         processSessions.shutdown();
@@ -1834,11 +1973,17 @@ if (await isMainModule()) {
       `devspace listening on http://${config.host}:${config.port}/mcp`,
     );
     console.log(`allowed roots: ${config.allowedRoots.join(", ")}`);
-    console.log("auth: oauth owner-token flow required");
+    console.log(`auth: ${config.authMode === "oauth" ? "oauth owner-token flow required" : "trusted local tunnel"}`);
     console.log(`logging: ${config.logging.level} ${config.logging.format}`);
     console.log(`request logging: ${config.logging.requests ? "enabled" : "disabled"}`);
     console.log(`asset logging: ${config.logging.assets ? "enabled" : "disabled"}`);
     console.log(`trust proxy: ${config.logging.trustProxy ? "enabled" : "disabled"}`);
+    console.log(
+      `mcp resources: sessions=${config.resources.mcpMaxSessions} idle=${config.resources.mcpMaxIdleSessions} requests=${config.resources.mcpMaxConcurrentRequests}+${config.resources.mcpMaxQueuedRequests}`,
+    );
+    console.log(
+      `process resources: active=${config.resources.processMaxConcurrent} retained=${config.resources.processMaxSessions} buffer=${config.resources.processBufferCharacters}`,
+    );
     if (config.subagents) {
       console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);
     }

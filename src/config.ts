@@ -7,12 +7,29 @@ import { devspaceAgentsDir, devspaceSkillsDir, loadDevspaceFiles } from "./user-
 
 export type ToolMode = "minimal" | "full" | "codex";
 export type WidgetMode = "off" | "changes" | "full";
+export type AuthMode = "oauth" | "trusted-local";
 const DEFAULT_OAUTH_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const DEFAULT_OAUTH_REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+export interface ResourceLimitsConfig {
+  mcpMaxSessions: number;
+  mcpMaxIdleSessions: number;
+  mcpSessionIdleTimeoutMs: number;
+  mcpSessionCleanupIntervalMs: number;
+  mcpMaxConcurrentRequests: number;
+  mcpMaxQueuedRequests: number;
+  mcpRequestQueueTimeoutMs: number;
+  mcpHeapSoftLimitRatio: number;
+  mcpHeapHardLimitRatio: number;
+  processMaxConcurrent: number;
+  processMaxSessions: number;
+  processBufferCharacters: number;
+}
 
 export interface ServerConfig {
   host: string;
   port: number;
+  authMode: AuthMode;
   oauth: OAuthConfig;
   allowedRoots: string[];
   allowedHosts: string[];
@@ -27,7 +44,21 @@ export interface ServerConfig {
   devspaceAgentsDir: string;
   subagents: boolean;
   agentDir: string;
+  resources: ResourceLimitsConfig;
   logging: LoggingConfig;
+}
+
+function parseAuthMode(value: string | undefined, host: string): AuthMode {
+  const mode = value?.trim() || "oauth";
+  if (mode !== "oauth" && mode !== "trusted-local") {
+    throw new Error(`Invalid DEVSPACE_AUTH_MODE: ${value}`);
+  }
+
+  if (mode === "trusted-local" && !["127.0.0.1", "::1", "localhost"].includes(host)) {
+    throw new Error("DEVSPACE_AUTH_MODE=trusted-local requires HOST to be a loopback address.");
+  }
+
+  return mode;
 }
 
 function parsePort(value: string | number | undefined): number {
@@ -135,6 +166,113 @@ function parsePositiveInteger(value: string | undefined, fallback: number, name:
   return parsed;
 }
 
+function parseNonNegativeInteger(value: string | undefined, fallback: number, name: string): number {
+  if (value === undefined || value === "") return fallback;
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`Invalid ${name}: ${value}`);
+  }
+
+  return parsed;
+}
+
+function parsePercentage(value: string | undefined, fallback: number, name: string): number {
+  if (value === undefined || value === "") return fallback;
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 100) {
+    throw new Error(`Invalid ${name}: ${value}`);
+  }
+
+  return parsed / 100;
+}
+
+function parseResourceLimits(env: NodeJS.ProcessEnv): ResourceLimitsConfig {
+  const mcpMaxSessions = parsePositiveInteger(
+    env.DEVSPACE_MCP_MAX_SESSIONS,
+    256,
+    "DEVSPACE_MCP_MAX_SESSIONS",
+  );
+  const mcpMaxIdleSessions = parsePositiveInteger(
+    env.DEVSPACE_MCP_MAX_IDLE_SESSIONS,
+    128,
+    "DEVSPACE_MCP_MAX_IDLE_SESSIONS",
+  );
+  if (mcpMaxIdleSessions > mcpMaxSessions) {
+    throw new Error("DEVSPACE_MCP_MAX_IDLE_SESSIONS must not exceed DEVSPACE_MCP_MAX_SESSIONS.");
+  }
+
+  const mcpHeapSoftLimitRatio = parsePercentage(
+    env.DEVSPACE_MCP_HEAP_SOFT_LIMIT_PERCENT,
+    0.6,
+    "DEVSPACE_MCP_HEAP_SOFT_LIMIT_PERCENT",
+  );
+  const mcpHeapHardLimitRatio = parsePercentage(
+    env.DEVSPACE_MCP_HEAP_HARD_LIMIT_PERCENT,
+    0.75,
+    "DEVSPACE_MCP_HEAP_HARD_LIMIT_PERCENT",
+  );
+  if (mcpHeapSoftLimitRatio >= mcpHeapHardLimitRatio) {
+    throw new Error(
+      "DEVSPACE_MCP_HEAP_SOFT_LIMIT_PERCENT must be lower than DEVSPACE_MCP_HEAP_HARD_LIMIT_PERCENT.",
+    );
+  }
+
+  const processMaxConcurrent = parsePositiveInteger(
+    env.DEVSPACE_PROCESS_MAX_CONCURRENT,
+    16,
+    "DEVSPACE_PROCESS_MAX_CONCURRENT",
+  );
+  const processMaxSessions = parsePositiveInteger(
+    env.DEVSPACE_PROCESS_MAX_SESSIONS,
+    64,
+    "DEVSPACE_PROCESS_MAX_SESSIONS",
+  );
+  if (processMaxSessions < processMaxConcurrent) {
+    throw new Error("DEVSPACE_PROCESS_MAX_SESSIONS must be at least DEVSPACE_PROCESS_MAX_CONCURRENT.");
+  }
+
+  return {
+    mcpMaxSessions,
+    mcpMaxIdleSessions,
+    mcpSessionIdleTimeoutMs: parsePositiveInteger(
+      env.DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_SECONDS,
+      10 * 60,
+      "DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_SECONDS",
+    ) * 1_000,
+    mcpSessionCleanupIntervalMs: parsePositiveInteger(
+      env.DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_SECONDS,
+      30,
+      "DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_SECONDS",
+    ) * 1_000,
+    mcpMaxConcurrentRequests: parsePositiveInteger(
+      env.DEVSPACE_MCP_MAX_CONCURRENT_REQUESTS,
+      64,
+      "DEVSPACE_MCP_MAX_CONCURRENT_REQUESTS",
+    ),
+    mcpMaxQueuedRequests: parseNonNegativeInteger(
+      env.DEVSPACE_MCP_MAX_QUEUED_REQUESTS,
+      128,
+      "DEVSPACE_MCP_MAX_QUEUED_REQUESTS",
+    ),
+    mcpRequestQueueTimeoutMs: parsePositiveInteger(
+      env.DEVSPACE_MCP_REQUEST_QUEUE_TIMEOUT_MS,
+      30_000,
+      "DEVSPACE_MCP_REQUEST_QUEUE_TIMEOUT_MS",
+    ),
+    mcpHeapSoftLimitRatio,
+    mcpHeapHardLimitRatio,
+    processMaxConcurrent,
+    processMaxSessions,
+    processBufferCharacters: parsePositiveInteger(
+      env.DEVSPACE_PROCESS_BUFFER_CHARACTERS,
+      512 * 1_024,
+      "DEVSPACE_PROCESS_BUFFER_CHARACTERS",
+    ),
+  };
+}
+
 function parseLoggingConfig(env: NodeJS.ProcessEnv): LoggingConfig {
   return {
     level: parseLogLevel(env.DEVSPACE_LOG_LEVEL),
@@ -218,6 +356,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   return {
     host,
     port,
+    authMode: parseAuthMode(env.DEVSPACE_AUTH_MODE, host),
     oauth: parseOAuthConfig(env, files.auth.ownerToken),
     allowedRoots: parseAllowedRoots(env.DEVSPACE_ALLOWED_ROOTS ?? files.config.allowedRoots),
     allowedHosts: parseAllowedHosts(env.DEVSPACE_ALLOWED_HOSTS, derivedAllowedHosts),
@@ -235,6 +374,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
         ? files.config.subagents === true
         : parseBoolean(env.DEVSPACE_SUBAGENTS),
     agentDir: resolve(expandHomePath(env.DEVSPACE_AGENT_DIR ?? files.config.agentDir ?? defaultAgentDir())),
+    resources: parseResourceLimits(env),
     logging: parseLoggingConfig(env),
   };
 }

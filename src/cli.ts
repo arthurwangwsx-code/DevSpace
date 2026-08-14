@@ -222,8 +222,14 @@ async function serve(): Promise<void> {
     if (config.allowedHosts.includes("*")) {
       console.warn("warning: Host header allowlist is disabled because DEVSPACE_ALLOWED_HOSTS=*");
     }
-    console.log("auth: Owner password approval required");
+    console.log(`auth: ${config.authMode === "oauth" ? "Owner password approval required" : "trusted local tunnel"}`);
     console.log(`logging: ${config.logging.level} ${config.logging.format}`);
+    console.log(
+      `mcp resources: sessions=${config.resources.mcpMaxSessions} idle=${config.resources.mcpMaxIdleSessions} requests=${config.resources.mcpMaxConcurrentRequests}+${config.resources.mcpMaxQueuedRequests}`,
+    );
+    console.log(
+      `process resources: active=${config.resources.processMaxConcurrent} retained=${config.resources.processMaxSessions} buffer=${config.resources.processBufferCharacters}`,
+    );
     if (config.subagents) {
       console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);
     }

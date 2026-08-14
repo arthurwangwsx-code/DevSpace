@@ -7,7 +7,9 @@ const DEFAULT_POLL_YIELD_MS = 5_000;
 const MAX_COMMAND_YIELD_MS = 30_000;
 const MAX_POLL_YIELD_MS = 110_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 10_000;
-const DEFAULT_BUFFER_CHARACTERS = 1_000_000;
+const DEFAULT_BUFFER_CHARACTERS = 512 * 1_024;
+const DEFAULT_MAX_CONCURRENT_PROCESSES = 16;
+const DEFAULT_MAX_PROCESS_SESSIONS = 64;
 const COMPLETED_SESSION_TTL_MS = 5 * 60 * 1_000;
 const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
@@ -66,9 +68,11 @@ interface ProcessSession {
   cleanupTimer?: NodeJS.Timeout;
 }
 
-interface ProcessSessionManagerOptions {
+export interface ProcessSessionManagerOptions {
   maxBufferCharacters?: number;
   completedSessionTtlMs?: number;
+  maxConcurrentProcesses?: number;
+  maxSessions?: number;
 }
 
 function boundedInteger(value: number | undefined, fallback: number, maximum: number): number {
@@ -109,22 +113,47 @@ function processEnvironment(input?: {
 }
 
 function codePointLength(value: string): number {
-  return Array.from(value).length;
+  let length = 0;
+  for (const _character of value) length += 1;
+  return length;
 }
 
-function sliceCodePoints(value: string, start: number, end?: number): string {
-  return Array.from(value).slice(start, end).join("");
+function headCodeUnitIndex(value: string, count: number): number {
+  if (count <= 0) return 0;
+  let codeUnits = 0;
+  let codePoints = 0;
+  while (codeUnits < value.length && codePoints < count) {
+    const first = value.charCodeAt(codeUnits);
+    codeUnits += first >= 0xd800 && first <= 0xdbff && codeUnits + 1 < value.length ? 2 : 1;
+    codePoints += 1;
+  }
+  return codeUnits;
 }
 
 function takeHead(value: string, count: number): string {
   if (count <= 0) return "";
-  return sliceCodePoints(value, 0, count);
+  return value.slice(0, headCodeUnitIndex(value, count));
 }
 
 function takeTail(value: string, count: number): string {
   if (count <= 0) return "";
-  const characters = Array.from(value);
-  return characters.slice(Math.max(0, characters.length - count)).join("");
+  let codeUnits = value.length;
+  let codePoints = 0;
+  while (codeUnits > 0 && codePoints < count) {
+    codeUnits -= 1;
+    const last = value.charCodeAt(codeUnits);
+    if (
+      last >= 0xdc00
+      && last <= 0xdfff
+      && codeUnits > 0
+      && value.charCodeAt(codeUnits - 1) >= 0xd800
+      && value.charCodeAt(codeUnits - 1) <= 0xdbff
+    ) {
+      codeUnits -= 1;
+    }
+    codePoints += 1;
+  }
+  return value.slice(codeUnits);
 }
 
 function splitBudget(maxCharacters: number): { head: number; tail: number } {
@@ -215,14 +244,48 @@ export class ProcessSessionManager {
   private readonly sessions = new Map<number, ProcessSession>();
   private readonly maxBufferCharacters: number;
   private readonly completedSessionTtlMs: number;
+  private readonly maxConcurrentProcesses: number;
+  private readonly maxSessions: number;
   private nextSessionId = 1;
 
   constructor(options: ProcessSessionManagerOptions = {}) {
     this.maxBufferCharacters = options.maxBufferCharacters ?? DEFAULT_BUFFER_CHARACTERS;
     this.completedSessionTtlMs = options.completedSessionTtlMs ?? COMPLETED_SESSION_TTL_MS;
+    this.maxConcurrentProcesses = options.maxConcurrentProcesses ?? DEFAULT_MAX_CONCURRENT_PROCESSES;
+    this.maxSessions = options.maxSessions ?? DEFAULT_MAX_PROCESS_SESSIONS;
+    if (!Number.isInteger(this.maxConcurrentProcesses) || this.maxConcurrentProcesses < 1) {
+      throw new Error("maxConcurrentProcesses must be a positive integer.");
+    }
+    if (!Number.isInteger(this.maxSessions) || this.maxSessions < this.maxConcurrentProcesses) {
+      throw new Error("maxSessions must be an integer no smaller than maxConcurrentProcesses.");
+    }
+  }
+
+  get stats(): { total: number; active: number; maxConcurrent: number; maxSessions: number } {
+    let active = 0;
+    for (const session of this.sessions.values()) {
+      if (session.running) active += 1;
+    }
+    return {
+      total: this.sessions.size,
+      active,
+      maxConcurrent: this.maxConcurrentProcesses,
+      maxSessions: this.maxSessions,
+    };
   }
 
   async start(input: StartCommandInput): Promise<ProcessSnapshot> {
+    this.evictCompletedForCapacity();
+    if (this.sessions.size >= this.maxSessions) {
+      throw new Error(
+        `Process session limit reached (${this.maxSessions}); poll or terminate an existing command first.`,
+      );
+    }
+    if (this.stats.active >= this.maxConcurrentProcesses) {
+      throw new Error(
+        `Concurrent process limit reached (${this.maxConcurrentProcesses}); wait for a running command to finish.`,
+      );
+    }
     const session = this.createSession(input);
     this.sessions.set(session.id, session);
 
@@ -430,5 +493,16 @@ export class ProcessSessionManager {
     const session = this.sessions.get(sessionId);
     if (session?.cleanupTimer) clearTimeout(session.cleanupTimer);
     this.sessions.delete(sessionId);
+  }
+
+  private evictCompletedForCapacity(): void {
+    if (this.sessions.size < this.maxSessions) return;
+    const completed = Array.from(this.sessions.values())
+      .filter((session) => !session.running)
+      .sort((left, right) => left.startedAt - right.startedAt);
+    for (const session of completed) {
+      if (this.sessions.size < this.maxSessions) break;
+      this.removeSession(session.id);
+    }
   }
 }
