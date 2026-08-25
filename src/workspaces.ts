@@ -18,6 +18,7 @@ import {
   loadLocalAgentProfiles,
   type LocalAgentProfile,
 } from "./local-agent-profiles.js";
+import { resolveWorkspaceControlPlaneRoot } from "./workspace-control-plane.js";
 
 export interface LoadedAgentsFile {
   path: string;
@@ -174,11 +175,12 @@ export class WorkspaceRegistry {
   }
 
   private async openCheckoutWorkspace(path: string): Promise<WorkspaceContext> {
-    const root = assertAllowedPath(path, this.config.allowedRoots);
-    const rootStats = await ensureCheckoutWorkspaceRoot(root);
+    const requestedRoot = assertAllowedPath(path, this.config.allowedRoots);
+    const rootStats = await ensureCheckoutWorkspaceRoot(requestedRoot);
     if (!rootStats.isDirectory()) {
       throw new Error(`Workspace root must be a directory: ${path}`);
     }
+    const root = await resolveWorkspaceControlPlaneRoot(requestedRoot);
 
     return this.createWorkspaceContext({ root, mode: "checkout" });
   }
