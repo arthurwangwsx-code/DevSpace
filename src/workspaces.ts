@@ -237,6 +237,7 @@ export class WorkspaceRegistry {
       }
     }
 
+    if (forceNew) this.store?.supersedeActiveCheckoutSessions(root);
     return this.createWorkspaceContext({ root, mode: "checkout" });
   }
 

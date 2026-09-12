@@ -22,6 +22,11 @@ const migrations: Migration[] = [
     name: "local-agent-sessions",
     up: migrateLocalAgentSessions,
   },
+  {
+    version: 4,
+    name: "single-active-checkout-workspace",
+    up: migrateSingleActiveCheckoutWorkspace,
+  },
 ];
 
 export function migrateDatabase(sqlite: Database.Database): void {
@@ -172,6 +177,38 @@ function migrateLocalAgentSessions(sqlite: Database.Database): void {
   `);
 
   addColumnIfMissing(sqlite, "local_agent_sessions", "thinking", "text");
+}
+
+function migrateSingleActiveCheckoutWorkspace(sqlite: Database.Database): void {
+  sqlite.exec(`
+    update workspace_sessions as stale
+    set status = 'superseded'
+    where stale.mode = 'checkout'
+      and stale.status = 'active'
+      and exists (
+        select 1
+        from workspace_sessions as newer
+        where newer.root = stale.root
+          and newer.mode = 'checkout'
+          and newer.status = 'active'
+          and (
+            newer.last_used_at > stale.last_used_at
+            or (
+              newer.last_used_at = stale.last_used_at
+              and newer.created_at > stale.created_at
+            )
+            or (
+              newer.last_used_at = stale.last_used_at
+              and newer.created_at = stale.created_at
+              and newer.id > stale.id
+            )
+          )
+      );
+
+    create unique index if not exists workspace_sessions_active_checkout_root_unique
+      on workspace_sessions(root)
+      where mode = 'checkout' and status = 'active';
+  `);
 }
 
 function addColumnIfMissing(

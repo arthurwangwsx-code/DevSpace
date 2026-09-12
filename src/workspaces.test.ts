@@ -180,7 +180,7 @@ try {
   assert.equal(idleReleased.includes(persistentWorkspace.workspace.id), true);
   assert.equal(idleReleased.includes(persistentWorktree.workspace.id), true);
   assert.deepEqual(persistentRegistry.stats, { loaded: 0 });
-  firstStore.close();
+  await firstStore.close();
 
   const secondStore = new SqliteWorkspaceStore(stateDir);
   const restoredRegistry = new WorkspaceRegistry(config, secondStore);
@@ -195,13 +195,38 @@ try {
   const forcedWorkspace = await restoredRegistry.openWorkspace({ path: root, forceNew: true });
   assert.equal(forcedWorkspace.resumed, false);
   assert.notEqual(forcedWorkspace.workspace.id, persistentWorkspace.workspace.id);
+  assert.equal(secondStore.getSession(persistentWorkspace.workspace.id)?.status, "superseded");
+  assert.equal(secondStore.getSession(forcedWorkspace.workspace.id)?.status, "active");
+  assert.equal(secondStore.findLatestSession(root, "checkout")?.id, forcedWorkspace.workspace.id);
+  assert.equal(
+    restoredRegistry.getWorkspace(persistentWorkspace.workspace.id).root,
+    root,
+    "superseded handles remain directly recoverable",
+  );
 
   const restoredWorktree = restoredRegistry.getWorkspace(persistentWorktree.workspace.id);
   assert.equal(restoredWorktree.mode, "worktree");
   assert.equal(restoredWorktree.sourceRoot, gitRoot);
   assert.equal(restoredWorktree.root, persistentWorktree.workspace.root);
   assert.equal(restoredWorktree.worktree?.managed, true);
-  secondStore.close();
+  await secondStore.close();
+
+  const asyncTouchStateDir = join(root, ".async-touch-state");
+  const asyncTouchStore = new SqliteWorkspaceStore(asyncTouchStateDir, 60_000);
+  const asyncTouchSession = asyncTouchStore.createSession({ id: "ws_async_touch", root });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  asyncTouchStore.touchSession(asyncTouchSession.id);
+  assert.equal(
+    asyncTouchStore.getSession(asyncTouchSession.id)?.lastUsedAt,
+    asyncTouchSession.lastUsedAt,
+    "touches must leave the request thread without synchronously updating SQLite",
+  );
+  await asyncTouchStore.flushTouches();
+  assert.ok(
+    (asyncTouchStore.getSession(asyncTouchSession.id)?.lastUsedAt ?? "") > asyncTouchSession.lastUsedAt,
+    "flush must persist the latest coalesced touch",
+  );
+  await asyncTouchStore.close();
 
   if (platform() !== "win32") {
     const aliasRoot = join(root, "alias-root");

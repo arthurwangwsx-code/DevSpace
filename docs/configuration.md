@@ -61,6 +61,7 @@ Node heap is exhausted.
 | `DEVSPACE_MCP_HEAP_SOFT_LIMIT_PERCENT` | `65` | Shrink the least-recently-used idle set after V8 heap use reaches this percentage. |
 | `DEVSPACE_MCP_HEAP_HARD_LIMIT_PERCENT` | `80` | Reject new initialize requests and close all idle sessions at this percentage. |
 | `DEVSPACE_PROCESS_MAX_CONCURRENT` | `16` | Maximum concurrently running command processes. |
+| `DEVSPACE_PROCESS_MAX_CONCURRENT_PER_WORKSPACE` | `2` | Per-workspace running command limit. Prevents one build-heavy project from consuming every process slot. Must not exceed the global limit. |
 | `DEVSPACE_PROCESS_MAX_SESSIONS` | `64` | Maximum retained running and completed process sessions. |
 | `DEVSPACE_PROCESS_BUFFER_CHARACTERS` | `524288` | Head/tail output buffer retained per process session. |
 

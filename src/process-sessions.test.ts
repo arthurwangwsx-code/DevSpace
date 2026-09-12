@@ -237,6 +237,7 @@ try {
 
 const limitedManager = new ProcessSessionManager({
   maxConcurrentProcesses: 1,
+  maxConcurrentProcessesPerWorkspace: 1,
   maxSessions: 2,
   maxBufferCharacters: 1_024,
 });
@@ -262,6 +263,50 @@ try {
   limitedManager.terminate("workspace-a", held.sessionId);
 } finally {
   limitedManager.shutdown();
+}
+
+const fairManager = new ProcessSessionManager({
+  maxConcurrentProcesses: 3,
+  maxConcurrentProcessesPerWorkspace: 1,
+  maxSessions: 4,
+  maxBufferCharacters: 1_024,
+});
+try {
+  const firstWorkspace = await fairManager.start({
+    workspaceId: "workspace-a",
+    cwd: process.cwd(),
+    command: `${node} -e "setInterval(() => {}, 1000)"`,
+    yieldTimeMs: 5,
+  });
+  assert.equal(firstWorkspace.running, true);
+  await assert.rejects(
+    fairManager.start({
+      workspaceId: "workspace-a",
+      cwd: process.cwd(),
+      command: `${node} -e "console.log('same-workspace-should-not-run')"`,
+      yieldTimeMs: 100,
+    }),
+    /Concurrent process limit reached for workspace workspace-a \(1\)/,
+  );
+
+  const secondWorkspace = await fairManager.start({
+    workspaceId: "workspace-b",
+    cwd: process.cwd(),
+    command: `${node} -e "setInterval(() => {}, 1000)"`,
+    yieldTimeMs: 5,
+  });
+  assert.equal(secondWorkspace.running, true);
+  assert.deepEqual(fairManager.stats, {
+    total: 2,
+    active: 2,
+    maxConcurrent: 3,
+    maxConcurrentPerWorkspace: 1,
+    maxSessions: 4,
+  });
+  fairManager.terminate("workspace-a", firstWorkspace.sessionId!);
+  fairManager.terminate("workspace-b", secondWorkspace.sessionId!);
+} finally {
+  fairManager.shutdown();
 }
 
 const retainedManager = new ProcessSessionManager({
@@ -304,4 +349,11 @@ try {
 assert.throws(
   () => new ProcessSessionManager({ maxConcurrentProcesses: 2, maxSessions: 1 }),
   /maxSessions must be an integer no smaller than maxConcurrentProcesses/,
+);
+assert.throws(
+  () => new ProcessSessionManager({
+    maxConcurrentProcesses: 2,
+    maxConcurrentProcessesPerWorkspace: 3,
+  }),
+  /maxConcurrentProcessesPerWorkspace must be a positive integer no greater than maxConcurrentProcesses/,
 );

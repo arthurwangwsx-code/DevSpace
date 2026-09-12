@@ -228,7 +228,7 @@ async function serve(): Promise<void> {
       `mcp resources: sessions=${config.resources.mcpMaxSessions} idle=${config.resources.mcpMaxIdleSessions} requests=${config.resources.mcpMaxConcurrentRequests}+${config.resources.mcpMaxQueuedRequests}`,
     );
     console.log(
-      `process resources: active=${config.resources.processMaxConcurrent} retained=${config.resources.processMaxSessions} buffer=${config.resources.processBufferCharacters}`,
+      `process resources: active=${config.resources.processMaxConcurrent} per-workspace=${config.resources.processMaxConcurrentPerWorkspace} retained=${config.resources.processMaxSessions} buffer=${config.resources.processBufferCharacters}`,
     );
     if (config.subagents) {
       console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);

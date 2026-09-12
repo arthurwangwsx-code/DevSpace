@@ -24,6 +24,7 @@ export interface ResourceLimitsConfig {
   mcpHeapSoftLimitRatio: number;
   mcpHeapHardLimitRatio: number;
   processMaxConcurrent: number;
+  processMaxConcurrentPerWorkspace: number;
   processMaxSessions: number;
   processBufferCharacters: number;
 }
@@ -228,6 +229,16 @@ function parseResourceLimits(env: NodeJS.ProcessEnv): ResourceLimitsConfig {
     16,
     "DEVSPACE_PROCESS_MAX_CONCURRENT",
   );
+  const processMaxConcurrentPerWorkspace = parsePositiveInteger(
+    env.DEVSPACE_PROCESS_MAX_CONCURRENT_PER_WORKSPACE,
+    Math.min(2, processMaxConcurrent),
+    "DEVSPACE_PROCESS_MAX_CONCURRENT_PER_WORKSPACE",
+  );
+  if (processMaxConcurrentPerWorkspace > processMaxConcurrent) {
+    throw new Error(
+      "DEVSPACE_PROCESS_MAX_CONCURRENT_PER_WORKSPACE must not exceed DEVSPACE_PROCESS_MAX_CONCURRENT.",
+    );
+  }
   const processMaxSessions = parsePositiveInteger(
     env.DEVSPACE_PROCESS_MAX_SESSIONS,
     64,
@@ -274,6 +285,7 @@ function parseResourceLimits(env: NodeJS.ProcessEnv): ResourceLimitsConfig {
     mcpHeapSoftLimitRatio,
     mcpHeapHardLimitRatio,
     processMaxConcurrent,
+    processMaxConcurrentPerWorkspace,
     processMaxSessions,
     processBufferCharacters: parsePositiveInteger(
       env.DEVSPACE_PROCESS_BUFFER_CHARACTERS,

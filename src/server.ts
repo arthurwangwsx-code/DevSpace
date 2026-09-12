@@ -1688,6 +1688,7 @@ export function createServer(config = loadConfig()): RunningServer {
   const reviewCheckpoints = createReviewCheckpointManager();
   const processSessions = new ProcessSessionManager({
     maxConcurrentProcesses: config.resources.processMaxConcurrent,
+    maxConcurrentProcessesPerWorkspace: config.resources.processMaxConcurrentPerWorkspace,
     maxSessions: config.resources.processMaxSessions,
     maxBufferCharacters: config.resources.processBufferCharacters,
   });
@@ -2063,7 +2064,7 @@ export function createServer(config = loadConfig()): RunningServer {
         logSessionCloseResults("server_shutdown", results);
         processSessions.shutdown();
         oauthProvider.close();
-        workspaceStore.close?.();
+        await workspaceStore.close?.();
       })();
       return closePromise;
     },
@@ -2094,7 +2095,7 @@ if (await isMainModule()) {
       `mcp resources: sessions=${config.resources.mcpMaxSessions} idle=${config.resources.mcpMaxIdleSessions} requests=${config.resources.mcpMaxConcurrentRequests}+${config.resources.mcpMaxQueuedRequests}`,
     );
     console.log(
-      `process resources: active=${config.resources.processMaxConcurrent} retained=${config.resources.processMaxSessions} buffer=${config.resources.processBufferCharacters}`,
+      `process resources: active=${config.resources.processMaxConcurrent} per-workspace=${config.resources.processMaxConcurrentPerWorkspace} retained=${config.resources.processMaxSessions} buffer=${config.resources.processBufferCharacters}`,
     );
     if (config.subagents) {
       console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);

@@ -9,6 +9,7 @@ const MAX_POLL_YIELD_MS = 110_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 10_000;
 const DEFAULT_BUFFER_CHARACTERS = 512 * 1_024;
 const DEFAULT_MAX_CONCURRENT_PROCESSES = 16;
+const DEFAULT_MAX_CONCURRENT_PROCESSES_PER_WORKSPACE = 2;
 const DEFAULT_MAX_PROCESS_SESSIONS = 64;
 const COMPLETED_SESSION_TTL_MS = 5 * 60 * 1_000;
 const DEFAULT_COLUMNS = 80;
@@ -72,6 +73,7 @@ export interface ProcessSessionManagerOptions {
   maxBufferCharacters?: number;
   completedSessionTtlMs?: number;
   maxConcurrentProcesses?: number;
+  maxConcurrentProcessesPerWorkspace?: number;
   maxSessions?: number;
 }
 
@@ -245,6 +247,7 @@ export class ProcessSessionManager {
   private readonly maxBufferCharacters: number;
   private readonly completedSessionTtlMs: number;
   private readonly maxConcurrentProcesses: number;
+  private readonly maxConcurrentProcessesPerWorkspace: number;
   private readonly maxSessions: number;
   private nextSessionId = 1;
 
@@ -252,16 +255,33 @@ export class ProcessSessionManager {
     this.maxBufferCharacters = options.maxBufferCharacters ?? DEFAULT_BUFFER_CHARACTERS;
     this.completedSessionTtlMs = options.completedSessionTtlMs ?? COMPLETED_SESSION_TTL_MS;
     this.maxConcurrentProcesses = options.maxConcurrentProcesses ?? DEFAULT_MAX_CONCURRENT_PROCESSES;
+    this.maxConcurrentProcessesPerWorkspace = options.maxConcurrentProcessesPerWorkspace
+      ?? Math.min(DEFAULT_MAX_CONCURRENT_PROCESSES_PER_WORKSPACE, this.maxConcurrentProcesses);
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_PROCESS_SESSIONS;
     if (!Number.isInteger(this.maxConcurrentProcesses) || this.maxConcurrentProcesses < 1) {
       throw new Error("maxConcurrentProcesses must be a positive integer.");
+    }
+    if (
+      !Number.isInteger(this.maxConcurrentProcessesPerWorkspace)
+      || this.maxConcurrentProcessesPerWorkspace < 1
+      || this.maxConcurrentProcessesPerWorkspace > this.maxConcurrentProcesses
+    ) {
+      throw new Error(
+        "maxConcurrentProcessesPerWorkspace must be a positive integer no greater than maxConcurrentProcesses.",
+      );
     }
     if (!Number.isInteger(this.maxSessions) || this.maxSessions < this.maxConcurrentProcesses) {
       throw new Error("maxSessions must be an integer no smaller than maxConcurrentProcesses.");
     }
   }
 
-  get stats(): { total: number; active: number; maxConcurrent: number; maxSessions: number } {
+  get stats(): {
+    total: number;
+    active: number;
+    maxConcurrent: number;
+    maxConcurrentPerWorkspace: number;
+    maxSessions: number;
+  } {
     let active = 0;
     for (const session of this.sessions.values()) {
       if (session.running) active += 1;
@@ -270,6 +290,7 @@ export class ProcessSessionManager {
       total: this.sessions.size,
       active,
       maxConcurrent: this.maxConcurrentProcesses,
+      maxConcurrentPerWorkspace: this.maxConcurrentProcessesPerWorkspace,
       maxSessions: this.maxSessions,
     };
   }
@@ -284,6 +305,12 @@ export class ProcessSessionManager {
     if (this.stats.active >= this.maxConcurrentProcesses) {
       throw new Error(
         `Concurrent process limit reached (${this.maxConcurrentProcesses}); wait for a running command to finish.`,
+      );
+    }
+    const workspaceActive = this.activeCountForWorkspace(input.workspaceId);
+    if (workspaceActive >= this.maxConcurrentProcessesPerWorkspace) {
+      throw new Error(
+        `Concurrent process limit reached for workspace ${input.workspaceId} (${this.maxConcurrentProcessesPerWorkspace}); wait for a running command to finish.`,
       );
     }
     const session = this.createSession(input);
@@ -504,5 +531,13 @@ export class ProcessSessionManager {
       if (this.sessions.size < this.maxSessions) break;
       this.removeSession(session.id);
     }
+  }
+
+  private activeCountForWorkspace(workspaceId: string): number {
+    let active = 0;
+    for (const session of this.sessions.values()) {
+      if (session.running && session.workspaceId === workspaceId) active += 1;
+    }
+    return active;
   }
 }

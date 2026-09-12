@@ -119,6 +119,7 @@ assert.deepEqual(loadConfig(baseEnv).resources, {
   mcpHeapSoftLimitRatio: 0.65,
   mcpHeapHardLimitRatio: 0.8,
   processMaxConcurrent: 16,
+  processMaxConcurrentPerWorkspace: 2,
   processMaxSessions: 64,
   processBufferCharacters: 524_288,
 });
@@ -137,6 +138,7 @@ assert.deepEqual(
     DEVSPACE_MCP_HEAP_SOFT_LIMIT_PERCENT: "50",
     DEVSPACE_MCP_HEAP_HARD_LIMIT_PERCENT: "70",
     DEVSPACE_PROCESS_MAX_CONCURRENT: "4",
+    DEVSPACE_PROCESS_MAX_CONCURRENT_PER_WORKSPACE: "1",
     DEVSPACE_PROCESS_MAX_SESSIONS: "12",
     DEVSPACE_PROCESS_BUFFER_CHARACTERS: "4096",
   }).resources,
@@ -153,6 +155,7 @@ assert.deepEqual(
     mcpHeapSoftLimitRatio: 0.5,
     mcpHeapHardLimitRatio: 0.7,
     processMaxConcurrent: 4,
+    processMaxConcurrentPerWorkspace: 1,
     processMaxSessions: 12,
     processBufferCharacters: 4_096,
   },
@@ -165,6 +168,14 @@ assert.throws(
 assert.throws(
   () => loadConfig({ ...baseEnv, DEVSPACE_MCP_MAX_SESSIONS: "0" }),
   /Invalid DEVSPACE_MCP_MAX_SESSIONS: 0/,
+);
+assert.throws(
+  () => loadConfig({
+    ...baseEnv,
+    DEVSPACE_PROCESS_MAX_CONCURRENT: "4",
+    DEVSPACE_PROCESS_MAX_CONCURRENT_PER_WORKSPACE: "5",
+  }),
+  /must not exceed DEVSPACE_PROCESS_MAX_CONCURRENT/,
 );
 assert.throws(
   () => loadConfig({
