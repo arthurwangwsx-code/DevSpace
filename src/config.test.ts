@@ -110,7 +110,7 @@ assert.deepEqual(loadConfig(baseEnv).resources, {
   mcpMaxRequestBytes: 16 * 1024 * 1024,
   workspaceMemoryIdleTimeoutMs: 14_400_000,
   mcpMaxSessions: 512,
-  mcpMaxIdleSessions: 384,
+  mcpMaxIdleSessions: 128,
   mcpSessionIdleTimeoutMs: 43_200_000,
   mcpSessionCleanupIntervalMs: 30_000,
   mcpMaxConcurrentRequests: 64,

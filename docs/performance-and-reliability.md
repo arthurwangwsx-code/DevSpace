@@ -95,18 +95,24 @@ AiBox launcher intentionally applies a tighter latency profile:
 | Resource | Launcher value |
 | --- | ---: |
 | V8 old-space | 4096 MiB, configurable 1024-8192 MiB |
-| MCP executing requests | 16 |
-| MCP queued requests | 32 |
-| tunnel requests dispatched to MCP | 8 per profile |
-| tunnel control-plane buffered commands | 16 per profile |
+| MCP executing requests | 32 |
+| MCP queued requests | 64 |
+| tunnel requests dispatched to MCP | 16 per profile |
+| tunnel control-plane buffered commands | 32 per profile |
 | command processes | 4 global / 1 per workspace |
 | retained process sessions | 32 |
-| MCP sessions | 512 total / 384 idle |
+| MCP sessions | 512 total / 128 idle |
 | workspace sleep / MCP abandoned TTL | 4 h / 12 h |
 
 These values favor interactive latency on a workstation that may also be running
 Xcode or Gradle. Increase concurrency only after a soak test shows spare CPU and a
 stable event-loop-lag distribution.
+
+These are admission and memory-reservation controls, not billable request
+counters. The queue absorbs short bursts; it does not deliberately slow requests
+when an execution slot is available. Setting both controls arbitrarily high is
+not a performance mode: once CPU, memory bandwidth, or downstream build tools are
+saturated, a deeper queue only increases tail latency and memory retention.
 
 ### 2026-09-12 live baseline
 
@@ -143,6 +149,32 @@ and the same write p95 34 ms. Forty clients remained below the 50 ms objective
 while 64 reached 52/65 ms. The workstation-specific high-performance operating
 point is consequently 32 executing, 64 queued, and at most about 40 simultaneously
 busy interactive clients rather than unbounded execution.
+
+A subsequent ten-minute accelerated soak ran 86,259 mixed reads and writes plus
+5,000 initialize/list/terminate cycles across eight workspaces. It completed with
+zero unexpected errors at 13 ms read p95 and 17 ms write p95. RSS peaked at
+581.98 MiB and returned to 175.33 MiB after cooldown; heap returned to 62.10 MiB,
+all pressure samples were normal, and the final resource snapshot contained zero
+sessions, requests, and processes. The regression gates found no monotonic RSS or
+heap growth. This is accelerated evidence rather than a substitute for the
+24-hour release soak.
+
+A one-minute local-tunnel soak exposed a separate lifecycle boundary: 1,016
+clients requested session termination, but tunnel metrics showed only one
+upstream `DELETE /mcp`. The backend therefore accumulated the configured 384
+idle transports and briefly reached 1.21 GiB RSS even though the tunnel queue,
+workers, Go heap, requests, and latency were healthy. The default and deployed
+idle-session LRU were reduced to 128 while retaining a 512-session total ceiling.
+This bounds abandoned tunnel sessions without reducing the measured interactive
+request concurrency or invalidating persistent workspace IDs.
+
+Repeating the identical tunnel workload with the 128-idle setting passed every
+gate: read/write p95 were 25/37 ms, the 128-request burst and all 1,000 reconnects
+completed without errors, peak RSS stayed at 1005.08 MiB and returned to
+331.23 MiB after cooldown. Tunnel state also returned to an empty queue, zero
+active workers, a 4.91 MiB Go heap, and no goroutine growth. The reported
+upstream DELETE count remained zero, confirming that the LRU protection—not
+client teardown—bounded the server.
 
 ## Framework and protocol decisions
 

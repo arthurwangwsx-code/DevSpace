@@ -158,7 +158,7 @@ try {
     transport: cliOptions.transport,
     artifactDir,
     durationMs: workload.durationMs,
-    checks: workload.checks,
+    checks: report.workload.checks,
   }));
   if (!report.ok) process.exitCode = 1;
 } catch (error) {
@@ -374,6 +374,8 @@ function startDevSpace(
       DEVSPACE_WIDGETS: "off",
       DEVSPACE_SKILLS: "0",
       DEVSPACE_SUBAGENTS: "0",
+      DEVSPACE_MCP_MAX_SESSIONS: "512",
+      DEVSPACE_MCP_MAX_IDLE_SESSIONS: "128",
       DEVSPACE_MCP_MAX_CONCURRENT_REQUESTS: String(maxConcurrentRequests),
       DEVSPACE_MCP_MAX_QUEUED_REQUESTS: String(maxQueuedRequests),
       DEVSPACE_PROCESS_MAX_CONCURRENT: "4",
@@ -608,7 +610,7 @@ function renderMarkdown(report: Awaited<ReturnType<typeof buildReport>>): string
     .map((check) => `| ${check.passed ? "PASS" : "FAIL"} | ${check.name} | ${check.actual} | ${check.expected} |`)
     .join("\n");
   const tunnel = report.tunnelMetrics
-    ? `\n## Tunnel\n\n- Commands enqueued: ${report.tunnelMetrics.commandsEnqueued}\n- Tool calls: ${report.tunnelMetrics.toolCalls}\n- Mean end-to-end tool latency: ${report.tunnelMetrics.toolCallMeanEndToEndMs} ms\n- Mean upstream HTTP latency: ${report.tunnelMetrics.httpClientMeanMs} ms\n- Final queue: ${report.tunnelMetrics.finalQueueLength}/${report.tunnelMetrics.queueCapacity}\n- Workers: ${report.tunnelMetrics.workerOccupancy}/${report.tunnelMetrics.workerCapacity}\n- Go heap: ${report.tunnelMetrics.finalHeapAllocMb} MiB (${report.tunnelMetrics.heapAllocGrowthMb} MiB growth)\n- Goroutines: ${report.tunnelMetrics.finalGoroutines} (${report.tunnelMetrics.goroutineGrowth} growth)\n`
+    ? `\n## Tunnel\n\n- Commands enqueued: ${report.tunnelMetrics.commandsEnqueued}\n- Tool calls: ${report.tunnelMetrics.toolCalls}\n- Mean end-to-end tool latency: ${report.tunnelMetrics.toolCallMeanEndToEndMs} ms\n- Mean upstream HTTP latency: ${report.tunnelMetrics.httpClientMeanMs} ms\n- Session DELETE requests forwarded upstream: ${report.tunnelMetrics.sessionDeleteRequests}\n- Final queue: ${report.tunnelMetrics.finalQueueLength}/${report.tunnelMetrics.queueCapacity}\n- Workers: ${report.tunnelMetrics.workerOccupancy}/${report.tunnelMetrics.workerCapacity}\n- Go heap: ${report.tunnelMetrics.finalHeapAllocMb} MiB (${report.tunnelMetrics.heapAllocGrowthMb} MiB growth)\n- Goroutines: ${report.tunnelMetrics.finalGoroutines} (${report.tunnelMetrics.goroutineGrowth} growth)\n`
     : "";
   return `# DevSpace stress report\n\n- Result: ${report.ok ? "PASS" : "FAIL"}\n- Profile: ${report.run.profile}\n- Transport: ${report.run.transport}\n- Duration: ${report.workload.durationMs} ms\n- Concurrency: ${report.workload.options.concurrency}\n- Workspaces: ${report.workload.options.workspaceCount}\n- Max RSS: ${report.memory.maxRssMb} MiB\n- RSS slope: ${report.memory.rssSlopeMbPerHour} MiB/hour\n\n## Checks\n\n| Result | Check | Actual | Expected |\n| --- | --- | ---: | --- |\n${checkRows}\n\n## Latency\n\n| Operation | Count | Errors | Mean ms | p95 ms | p99 ms |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${operationRows}\n${tunnel}`;
 }

@@ -90,6 +90,22 @@ Short-run RSS slopes are reported but not used as leak gates. Startup, JIT
 compilation, native buffers, and delayed garbage collection make an hourly
 extrapolation from a few seconds meaningless.
 
+### 2026-09-12 accelerated soak baseline
+
+A ten-minute direct soak completed 86,259 mixed business operations across eight
+workspaces and 5,000 reconnect cycles without an unexpected error. Read p95 was
+13 ms and write p95 was 17 ms. The 128-request capacity burst admitted 96 and
+explicitly rejected 32 as retryable overload, then the recovery read succeeded.
+Long-command streaming, multi-page UTF-8 reads, and same-ID workspace restoration
+also passed.
+
+RSS peaked at 581.98 MiB and fell from 251.80 MiB at startup to 175.33 MiB after
+the 60-second cooldown. V8 heap fell from 223.60 MiB to 62.10 MiB. Post-warm-up
+RSS growth and both fitted slopes were negative, all sampled pressure states were
+normal, and the final snapshot had zero sessions, requests, or processes. This is
+strong accelerated regression evidence, but it does not replace the 24-hour
+release gate.
+
 ## Tunnel layers
 
 `--transport tunnel-local` uses `tunnel-client dev proxy`. It exercises queueing,
@@ -117,3 +133,22 @@ are not mistaken for DevSpace tool latency.
 The OpenAI [Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 documents the health, readiness, metrics, and admin UI surfaces used by this
 layered validation approach.
+
+The queue and request-body reservation figures in these reports are local
+resource accounting, not API usage or monetary billing. Raising them without a
+measured latency benefit can increase contention. On the current workstation,
+32 executing plus 64 queued server requests is the measured high-performance
+point; larger settings made p95 latency worse.
+
+The tunnel report also counts upstream `DELETE /mcp` requests. In a 1,016-session
+local-tunnel run, only the tunnel runtime's final DELETE reached DevSpace; the
+1,016 client-side session terminations were not forwarded individually. This
+matches hosted-client behavior where a disconnected client cannot be assumed to
+clean up its server session. DevSpace therefore keeps the total session ceiling
+at 512 but caps abandoned idle transports at 128 with LRU eviction. Persistent
+workspace IDs are stored separately and remain recoverable after that eviction.
+With the 128-idle profile, the same one-minute tunnel soak passed: 1,000 reconnect
+cycles, 8,585 mixed operations, and a 128-request burst completed without errors;
+read/write p95 were 25/37 ms, peak RSS was 1005.08 MiB, cooldown RSS was
+331.23 MiB, and the tunnel ended with an empty queue, zero active workers, a
+4.91 MiB Go heap, and no goroutine growth.

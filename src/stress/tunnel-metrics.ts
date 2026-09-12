@@ -10,6 +10,7 @@ export interface TunnelMetricsSummary {
   toolCallMeanEndToEndMs: number;
   httpClientRequests: number;
   httpClientMeanMs: number;
+  sessionDeleteRequests: number;
   finalQueueLength: number;
   queueCapacity: number;
   workerOccupancy: number;
@@ -29,6 +30,12 @@ export function summarizeTunnelMetrics(before: string, after: string): TunnelMet
   const toolLatencySum = delta(initial, final, "command_end_to_end_latency_milliseconds_sum", selector);
   const httpRequests = delta(initial, final, "http_client_request_duration_seconds_count");
   const httpLatencySeconds = delta(initial, final, "http_client_request_duration_seconds_sum");
+  const sessionDeleteRequests = delta(
+    initial,
+    final,
+    "http_client_request_duration_seconds_count",
+    (labels) => labels.http_request_method === "DELETE" && labels.http_route === "/mcp",
+  );
   const initialHeap = total(initial, "go_memstats_heap_alloc_bytes");
   const finalHeap = total(final, "go_memstats_heap_alloc_bytes");
   const initialGoroutines = total(initial, "go_goroutines");
@@ -39,6 +46,7 @@ export function summarizeTunnelMetrics(before: string, after: string): TunnelMet
     toolCallMeanEndToEndMs: rounded(toolCalls > 0 ? toolLatencySum / toolCalls : 0),
     httpClientRequests: rounded(httpRequests),
     httpClientMeanMs: rounded(httpRequests > 0 ? httpLatencySeconds / httpRequests * 1_000 : 0),
+    sessionDeleteRequests: rounded(sessionDeleteRequests),
     finalQueueLength: rounded(total(final, "commands_queue_length")),
     queueCapacity: rounded(total(final, "commands_queue_capacity")),
     workerOccupancy: rounded(total(final, "dispatcher_worker_pool_occupancy")),

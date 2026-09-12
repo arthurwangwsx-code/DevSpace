@@ -52,7 +52,7 @@ Node heap is exhausted.
 | `DEVSPACE_MCP_MAX_REQUEST_BYTES` | `16777216` | MCP JSON body limit: 16 MiB, configurable up to 64 MiB. Oversized calls receive JSON-RPC HTTP 413 before execution. |
 | `DEVSPACE_WORKSPACE_MEMORY_IDLE_TIMEOUT_SECONDS` | `14400` | Evict workspace metadata after four idle hours while keeping its persistent `workspaceId` recoverable. |
 | `DEVSPACE_MCP_MAX_SESSIONS` | `512` | Hard limit including active sessions and concurrent initialize reservations. |
-| `DEVSPACE_MCP_MAX_IDLE_SESSIONS` | `384` | LRU bound for sessions without in-flight requests. |
+| `DEVSPACE_MCP_MAX_IDLE_SESSIONS` | `128` | LRU bound for sessions without in-flight requests. |
 | `DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_SECONDS` | `43200` | Twelve-hour safety TTL for abandoned transports. Capacity and memory pressure can evict older idle sessions sooner. |
 | `DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_SECONDS` | `30` | TTL and memory-pressure cleanup interval. |
 | `DEVSPACE_MCP_MAX_CONCURRENT_REQUESTS` | `64` | Maximum `/mcp` requests executing at once. |

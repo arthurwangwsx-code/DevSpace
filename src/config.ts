@@ -201,7 +201,7 @@ function parseResourceLimits(env: NodeJS.ProcessEnv): ResourceLimitsConfig {
   );
   const mcpMaxIdleSessions = parsePositiveInteger(
     env.DEVSPACE_MCP_MAX_IDLE_SESSIONS,
-    384,
+    128,
     "DEVSPACE_MCP_MAX_IDLE_SESSIONS",
   );
   if (mcpMaxIdleSessions > mcpMaxSessions) {
