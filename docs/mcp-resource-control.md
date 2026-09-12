@@ -96,22 +96,31 @@ DevSpace 使用 V8 `heap_size_limit` 和 `process.memoryUsage()` 计算堆比例
 字符串，避免大输出产生字符数组级瞬时内存放大。默认 64 个 process session、每个 512 Ki
 字符，使保留输出的理论预算保持有界。
 
+全局并发之外还有 `DEVSPACE_PROCESS_MAX_CONCURRENT_PER_WORKSPACE`。单个 Xcode/Gradle
+工程即使持续发起命令，也不能占满其他工作区的所有执行槽。命令内部自行创建的编译线程不受
+该计数直接限制，因此长期运行配置仍应保守。
+
+工作区 `lastUsedAt` 不再在每次工具调用中同步写 SQLite。调用线程只把最新时间戳合并到
+内存 Map，每秒由专用 Worker 以一个事务批量落盘；关闭服务前显式 flush。这样保持可恢复性，
+同时把同步 SQLite IO 从 HTTP 事件循环移出。
+
 ## 默认配置
 
-| 配置 | 默认值 |
-| --- | ---: |
-| 工作区内存空闲休眠 | 14400 秒（4 小时） |
-| MCP session 总上限 | 512 |
-| idle session 上限 | 384 |
-| idle TTL | 43200 秒（12 小时兜底） |
-| 清理周期 | 30 秒 |
-| MCP 并发请求 | 64 |
-| MCP 等待队列 | 128 |
-| 排队超时 | 30000 ms |
-| 堆软/硬水位 | 65% / 80% |
-| 并发子进程 | 16 |
-| process session 总上限 | 64 |
-| 单进程输出缓冲 | 524288 字符 |
+| 配置 | 包默认值 | AiBox 长期运行配置 |
+| --- | ---: | ---: |
+| 工作区内存空闲休眠 | 14400 秒（4 小时） | 14400 秒 |
+| MCP session 总上限 | 512 | 512 |
+| idle session 上限 | 384 | 384 |
+| idle TTL | 43200 秒（12 小时兜底） | 43200 秒 |
+| 清理周期 | 30 秒 | 30 秒 |
+| MCP 并发请求 | 64 | 16 |
+| MCP 等待队列 | 128 | 32 |
+| 排队超时 | 30000 ms | 30000 ms |
+| 堆软/硬水位 | 65% / 80% | 65% / 80%，V8 old-space 4 GiB |
+| 并发子进程 | 16 | 4 |
+| 单工作区并发子进程 | 2 | 1 |
+| process session 总上限 | 64 | 32 |
+| 单进程输出缓冲 | 524288 字符 | 524288 字符 |
 
 环境变量的完整名称和调整方法见 [Configuration Reference](configuration.md)。
 
@@ -129,6 +138,10 @@ DevSpace 使用 V8 `heap_size_limit` 和 `process.memoryUsage()` 计算堆比例
 `memory_pressure` 或 `session_capacity`。session 关闭日志包含 `capacity`、`idle_limit`、
 `idle_timeout`、`memory_pressure`、`transport_close` 或 `server_shutdown`。
 工作区自动休眠记录为 `workspace_memory_released`；它不是工作区删除事件。
+
+长期运行启动器关闭常规成功请求和成功工具调用日志，但仍记录慢调用、失败、过载、资源快照
+和事件循环延迟。工作区活跃时间的持久化由 Worker 异步批量处理。完整的架构取舍和后续
+SDK v2/stateless 基准计划见 [Performance and reliability plan](performance-and-reliability.md)。
 
 超过阈值的 HTTP 请求和工具调用分别记录 `http_request_slow`、`tool_call_slow`；
 两者可通过 `requestId` 关联。事件循环在 10 秒窗口内达到阈值时记录

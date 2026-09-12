@@ -184,6 +184,7 @@ devspace doctor
 - [Troubleshooting Gotchas](https://github.com/Waishnav/devspace/blob/main/docs/gotchas.md)
 - [Running DevSpace in Lima (Chinese)](docs/lima-devspace.md)
 - [MCP Resource Control and High-Concurrency Stability (Chinese)](docs/mcp-resource-control.md)
+- [Performance and Reliability Plan](docs/performance-and-reliability.md)
 
 Workspace handles are persistent. Keep them available across later turns;
 call `release_workspace` only when the user requests resource release or a
