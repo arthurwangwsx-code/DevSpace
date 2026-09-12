@@ -23,6 +23,7 @@ OOM 的结果，不是原因。
 4. MCP 请求执行数和等待队列都有硬上限；无容量时返回可重试的 503，而不是继续分配。
 5. 达到堆硬水位时停止接受新 initialize，但允许已有 session 的请求收尾。
 6. 子进程数量、保留的 process session 数量和单进程输出缓冲都有硬上限。
+7. 工作区内存对象可以休眠，但 SQLite 中的 `workspaceId` 保持有效并可透明恢复。
 
 ## 请求与 session 生命周期
 
@@ -36,6 +37,28 @@ lease；失败则释放预留。
 当 session 容量已满时，registry 先关闭最老的 idle session。如果所有 session 都在活跃，
 initialize 返回 HTTP 503 和 JSON-RPC `-32002`，并附带 `Retry-After: 1`。
 
+## 对话结束、连接关闭与工作区恢复
+
+服务端不能可靠判断用户是否“结束对话”：用户可能在同一对话中稍后继续，也可能让客户端
+重连。因此生命周期分成三层，避免把共享服务一刀切地关闭：
+
+1. MCP transport 由客户端断开或 `DELETE /mcp` 正常关闭。为了方便跨多轮对话复用，服务端
+   默认保留空闲 transport，只有达到 session 容量、内存水位时才优先按 LRU 回收；另外以
+   12 小时空闲 TTL 兜底清理已经失联且客户端没有正常关闭的 transport。
+2. AI 不应仅因为一轮任务结束就调用 `release_workspace`。只有用户明确要求释放资源，或已知
+   工作区会长期不用时才调用。它只卸载工作区的内存元数据，不停止 DevSpace、Tunnel 或
+   仍在运行的命令，也不删除 checkout/worktree。
+3. 即使 AI 没有显式释放，工作区元数据默认空闲 4 小时后自动休眠。原 `workspaceId` 保存在
+   SQLite 中；对话继续时，下一次 `read`、`apply_patch`、`exec_command` 等调用会用同一个
+   ID 自动恢复，不需要重新执行 `open_workspace`。
+
+如果客户端丢失了 `workspaceId`，checkout 模式对同一路径再次调用 `open_workspace` 会默认
+恢复最近的 active session，并返回 `resumed: true`。只有确实需要另一份独立 checkout 句柄
+时才使用 `forceNew: true`；worktree 模式仍总是创建新的隔离 worktree。
+
+这意味着“对话结束时关闭 MCP”的正确实现是关闭当前 transport 并让工作区休眠，而不是
+停止共享 DevSpace/Tunnel。多个账号或多个对话可以继续复用同一后台服务。
+
 ## 内存水位
 
 DevSpace 使用 V8 `heap_size_limit` 和 `process.memoryUsage()` 计算堆比例：
@@ -48,6 +71,17 @@ DevSpace 使用 V8 `heap_size_limit` 和 `process.memoryUsage()` 计算堆比例
 `--max-old-space-size` 也只能延后崩溃。
 
 ## 请求背压
+
+2026-09-10 增加了解析前的请求体预算：MCP JSON 默认从 Express 的 100 KB 提高至
+16 MiB，最多可配 64 MiB；同时以 128 MiB 预留预算限制在途 POST，默认最多 8 个。
+拒绝超大请求返回明确的 413；容量满返回可重试的 503。流式文本读取最多保留 1 MiB 页，
+使用返回的 `byteOffset` 续读，不因单行或整个文件很大而整文件载入内存。
+
+`open_workspace` 的嵌套规范索引优先用有 3 秒/512 KiB 输出预算的 `rg`，缺少 `rg` 时
+回退到 2 秒/20000 条目预算的扫描；最多返回 512 个候选，排除 `.build`、`.swiftpm`、
+`.gradle`、DerivedData、Pods 等构建依赖目录。不扫描目录符号链接。索引是提示性列表，
+可能不完整，不能据此断言子目录没有规范；编辑前仍检查目标路径上的规范文件。
+同一目录并发打开合并为一个 pending 操作，避免重复扫描和创建重复句柄。
 
 `BoundedRequestGate` 对 `/mcp` 请求使用 FIFO 并发闸门。执行槽已满时，请求进入有界队列；
 队列满或等待超时都会返回 503。释放槽位会直接移交给队首请求，避免并发计数短暂降为负数或
@@ -66,14 +100,15 @@ DevSpace 使用 V8 `heap_size_limit` 和 `process.memoryUsage()` 计算堆比例
 
 | 配置 | 默认值 |
 | --- | ---: |
-| MCP session 总上限 | 256 |
-| idle session 上限 | 128 |
-| idle TTL | 600 秒 |
+| 工作区内存空闲休眠 | 14400 秒（4 小时） |
+| MCP session 总上限 | 512 |
+| idle session 上限 | 384 |
+| idle TTL | 43200 秒（12 小时兜底） |
 | 清理周期 | 30 秒 |
 | MCP 并发请求 | 64 |
 | MCP 等待队列 | 128 |
 | 排队超时 | 30000 ms |
-| 堆软/硬水位 | 60% / 75% |
+| 堆软/硬水位 | 65% / 80% |
 | 并发子进程 | 16 |
 | process session 总上限 | 64 |
 | 单进程输出缓冲 | 524288 字符 |
@@ -88,10 +123,12 @@ DevSpace 使用 V8 `heap_size_limit` 和 `process.memoryUsage()` 计算堆比例
 - session 的 total/active/idle/reserved
 - 请求的 active/queued
 - process session 的 total/active
+- 当前驻留内存的 workspace 数量
 
 发生降载时记录 `mcp_overloaded`，原因可能是 `queue_full`、`queue_timeout`、
 `memory_pressure` 或 `session_capacity`。session 关闭日志包含 `capacity`、`idle_limit`、
 `idle_timeout`、`memory_pressure`、`transport_close` 或 `server_shutdown`。
+工作区自动休眠记录为 `workspace_memory_released`；它不是工作区删除事件。
 
 ## 验证要求
 

@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { Stats } from "node:fs";
 import type { WorkspaceMode, WorkspaceStore } from "./workspace-store.js";
-import { mkdir, opendir, readFile, realpath, stat } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { mkdir, readFile, realpath, stat } from "node:fs/promises";
+import { dirname, relative, resolve, sep } from "node:path";
+import { discoverContextFiles } from "./context-discovery.js";
 import { loadProjectContextFiles } from "@earendil-works/pi-coding-agent";
 import type { ServerConfig } from "./config.js";
 import { createManagedWorktree } from "./git-worktrees.js";
@@ -18,6 +19,7 @@ import {
   loadLocalAgentProfiles,
   type LocalAgentProfile,
 } from "./local-agent-profiles.js";
+import { resolveWorkspaceControlPlaneRoot } from "./workspace-control-plane.js";
 
 export interface LoadedAgentsFile {
   path: string;
@@ -53,6 +55,7 @@ export interface WorkspaceContext {
   workspace: Workspace;
   agentsFiles: LoadedAgentsFile[];
   availableAgentsFiles: AvailableAgentsFile[];
+  resumed: boolean;
 }
 
 export interface WorkspaceReadPath {
@@ -65,6 +68,7 @@ export interface OpenWorkspaceInput {
   path: string;
   mode?: WorkspaceMode;
   baseRef?: string;
+  forceNew?: boolean;
 }
 
 type PathStats = Stats;
@@ -75,6 +79,8 @@ type DirectoryOps = {
 
 export class WorkspaceRegistry {
   private readonly workspaces = new Map<string, Workspace>();
+  private readonly lastActivityAt = new Map<string, number>();
+  private readonly opening = new Map<string, Promise<WorkspaceContext>>();
 
   constructor(
     private readonly config: ServerConfig,
@@ -89,13 +95,20 @@ export class WorkspaceRegistry {
       return this.openWorktreeWorkspace(options.path, options.baseRef);
     }
 
-    return this.openCheckoutWorkspace(options.path);
+    if (options.forceNew) return this.openCheckoutWorkspace(options.path, true);
+    const key = resolve(options.path);
+    const pending = this.opening.get(key);
+    if (pending) return pending;
+    const opening = this.openCheckoutWorkspace(options.path, false).finally(() => this.opening.delete(key));
+    this.opening.set(key, opening);
+    return opening;
   }
 
   getWorkspace(workspaceId: string): Workspace {
     const workspace = this.workspaces.get(workspaceId);
     if (workspace) {
       this.store?.touchSession(workspaceId);
+      this.lastActivityAt.set(workspaceId, Date.now());
       return workspace;
     }
 
@@ -127,8 +140,37 @@ export class WorkspaceRegistry {
     };
     this.store?.touchSession(workspaceId);
     this.workspaces.set(restoredWorkspace.id, restoredWorkspace);
+    this.lastActivityAt.set(restoredWorkspace.id, Date.now());
 
     return restoredWorkspace;
+  }
+
+  releaseWorkspace(workspaceId: string): { released: boolean; recoverable: boolean } {
+    const recoverable = this.store?.getSession(workspaceId) !== undefined;
+    const released = this.workspaces.delete(workspaceId);
+    this.lastActivityAt.delete(workspaceId);
+
+    if (!released && !recoverable) {
+      throw new Error(`Unknown workspaceId: ${workspaceId}. Call open_workspace first.`);
+    }
+
+    return { released, recoverable };
+  }
+
+  releaseIdle(idleTimeoutMs: number, now = Date.now()): string[] {
+    const cutoff = now - idleTimeoutMs;
+    const released: string[] = [];
+    for (const [workspaceId, lastActivityAt] of this.lastActivityAt) {
+      if (lastActivityAt > cutoff) continue;
+      this.workspaces.delete(workspaceId);
+      this.lastActivityAt.delete(workspaceId);
+      released.push(workspaceId);
+    }
+    return released;
+  }
+
+  get stats(): { loaded: number } {
+    return { loaded: this.workspaces.size };
   }
 
   resolvePath(workspace: Workspace, inputPath: string): string {
@@ -173,11 +215,26 @@ export class WorkspaceRegistry {
     return assertAllowedPath(directory, [workspace.root]);
   }
 
-  private async openCheckoutWorkspace(path: string): Promise<WorkspaceContext> {
-    const root = assertAllowedPath(path, this.config.allowedRoots);
-    const rootStats = await ensureCheckoutWorkspaceRoot(root);
+  private async openCheckoutWorkspace(path: string, forceNew: boolean): Promise<WorkspaceContext> {
+    const requestedRoot = assertAllowedPath(path, this.config.allowedRoots);
+    const rootStats = await ensureCheckoutWorkspaceRoot(requestedRoot);
     if (!rootStats.isDirectory()) {
       throw new Error(`Workspace root must be a directory: ${path}`);
+    }
+    const root = await resolveWorkspaceControlPlaneRoot(requestedRoot);
+
+    if (!forceNew) {
+      const existing = Array.from(this.workspaces.values()).find(
+        (workspace) => workspace.root === root && workspace.mode === "checkout",
+      );
+      const workspaceId = existing?.id ?? this.store?.findLatestSession(root, "checkout")?.id;
+      if (workspaceId) {
+        const workspace = this.getWorkspace(workspaceId);
+        workspace.agentProfiles = await loadLocalAgentProfiles(this.config, workspace.root);
+        const agentsFiles = await this.loadInitialAgentsFiles(workspace.root);
+        const availableAgentsFiles = await this.findAvailableAgentsFiles(workspace.root, agentsFiles);
+        return { workspace, agentsFiles, availableAgentsFiles, resumed: true };
+      }
     }
 
     return this.createWorkspaceContext({ root, mode: "checkout" });
@@ -225,10 +282,11 @@ export class WorkspaceRegistry {
       managed: workspace.worktree?.managed,
     });
     this.workspaces.set(workspace.id, workspace);
+    this.lastActivityAt.set(workspace.id, Date.now());
     const agentsFiles = await this.loadInitialAgentsFiles(workspace.root);
     const availableAgentsFiles = await this.findAvailableAgentsFiles(workspace.root, agentsFiles);
 
-    return { workspace, agentsFiles, availableAgentsFiles };
+    return { workspace, agentsFiles, availableAgentsFiles, resumed: false };
   }
 
   private loadSkillsForWorkspace(root: string): Pick<Workspace, "skills" | "skillDiagnostics"> {
@@ -288,16 +346,15 @@ export class WorkspaceRegistry {
       if (realPath) loadedRealPaths.add(realPath);
     }
     const discovered: AvailableAgentsFile[] = [];
+    const resolvedRoot = (await tryRealpath(root)) ?? root;
 
-    await walkWorkspace(root, async (path, entry) => {
-      if (!entry.isFile()) return;
-      if (!CONTEXT_FILE_NAMES.has(entry.name)) return;
-      if (loadedPaths.has(path)) return;
+    for (const path of await discoverContextFiles(root)) {
+      if (loadedPaths.has(path)) continue;
       const realPath = await tryRealpath(path);
-      if (realPath && loadedRealPaths.has(realPath)) return;
+      if (!realPath || !isPathInsideRoot(realPath, resolvedRoot) || loadedRealPaths.has(realPath)) continue;
 
       discovered.push({ path });
-    });
+    }
 
     return discovered.sort((a, b) => a.path.localeCompare(b.path));
   }
@@ -318,20 +375,6 @@ export async function ensureCheckoutWorkspaceRoot(
   await ops.mkdir(path, { recursive: true });
   return await ops.stat(path);
 }
-
-const CONTEXT_FILE_NAMES = new Set(["AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"]);
-const SKIPPED_CONTEXT_DIRS = new Set([
-  ".git",
-  ".hg",
-  ".svn",
-  ".devspace",
-  "node_modules",
-  "dist",
-  "build",
-  ".next",
-  ".turbo",
-  ".cache",
-]);
 
 export function formatAgentsPath(path: string, workspaceRoot: string | undefined): string {
   if (!workspaceRoot) return path.split(sep).join("/");
@@ -374,30 +417,6 @@ async function tryRealpath(path: string): Promise<string | undefined> {
     return await realpath(path);
   } catch {
     return undefined;
-  }
-}
-
-async function walkWorkspace(
-  directory: string,
-  visit: (path: string, entry: { name: string; isFile(): boolean; isDirectory(): boolean }) => Promise<void> | void,
-): Promise<void> {
-  let entries;
-  try {
-    entries = await opendir(directory);
-  } catch {
-    return;
-  }
-
-  for await (const entry of entries) {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) {
-      if (!SKIPPED_CONTEXT_DIRS.has(entry.name)) {
-        await walkWorkspace(path, visit);
-      }
-      continue;
-    }
-
-    await visit(path, entry);
   }
 }
 

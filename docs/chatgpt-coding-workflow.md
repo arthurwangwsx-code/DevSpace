@@ -123,6 +123,7 @@ existing subagent sessions for that workspace.
 DevSpace exposes these tool names:
 
 - `open_workspace`
+- `release_workspace`
 - `read`
 - `write`
 - `edit`
@@ -138,6 +139,7 @@ The experimental Codex-style surface is enabled with
 `DEVSPACE_TOOL_MODE=codex`. It exposes:
 
 - `open_workspace`
+- `release_workspace`
 - `read`
 - `apply_patch`
 - `exec_command`

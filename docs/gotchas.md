@@ -132,12 +132,13 @@ npx @waishnav/devspace init --force
 
 ## Unknown `workspaceId`
 
-`workspaceId` values are session identifiers. If the server restarts and the
-client receives an unknown workspace error, call `open_workspace` again for that
-project.
+`workspaceId` values are persistent session identifiers. Server restart,
+`release_workspace`, and idle workspace-memory eviction do not normally
+invalidate them; pass the same ID to the next workspace tool to restore it.
 
-Workspace session metadata is persisted, but clients should still treat
-`open_workspace` as the way to begin a fresh working session.
+If a client loses the ID, call `open_workspace` for the same checkout path. It
+resumes the latest active session by default. Use `forceNew: true` only when a
+distinct checkout handle is explicitly required.
 
 ## Workspace Path Rejected
 

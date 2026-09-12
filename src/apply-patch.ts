@@ -341,6 +341,8 @@ export async function isSamePatchFile(
 }
 
 export async function applyPatch(root: string, patch: string): Promise<ApplyPatchResult> {
+  let remainingReadBytes = 64 * 1024 * 1024 - Buffer.byteLength(patch);
+  if (remainingReadBytes < 0) throw patchError("patch exceeds 64 MiB; split it into smaller calls");
   const actions = parsePatch(patch);
   const results: AppliedPatchFile[] = [];
   const patches: string[] = [];
@@ -348,7 +350,8 @@ export async function applyPatch(root: string, patch: string): Promise<ApplyPatc
 
   const readStagedOptional = async (absolute: string, displayPath: string): Promise<StagedTextFile> => {
     if (staged.has(absolute)) return staged.get(absolute) ?? null;
-    const file = await readOptionalTextFile(absolute, displayPath);
+    const file = await readOptionalTextFile(absolute, displayPath, Math.min(32 * 1024 * 1024, remainingReadBytes));
+    if (file) remainingReadBytes -= Buffer.byteLength(file.content);
     staged.set(absolute, file);
     return file;
   };
@@ -409,10 +412,11 @@ export async function applyPatch(root: string, patch: string): Promise<ApplyPatc
   return { files: results, patch: unifiedPatch, ...stats };
 }
 
-async function readOptionalTextFile(absolute: string, displayPath: string): Promise<TextFile | null> {
+async function readOptionalTextFile(absolute: string, displayPath: string, maxBytes: number): Promise<TextFile | null> {
   if (!(await fileExists(absolute))) return null;
   const metadata = await stat(absolute);
   if (!metadata.isFile()) throw patchError(`path is not a regular file: ${displayPath}`);
+  if (metadata.size > maxBytes) throw patchError(`file exceeds in-memory patch budget: ${displayPath}; split the patch or use a streaming script via exec_command`);
   return { content: await readUtf8Text(absolute, displayPath), mode: metadata.mode };
 }
 

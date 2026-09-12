@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { access, realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
+import { createHttpApp } from "./http-app.js";
 import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -84,7 +84,7 @@ const SHELL_TOOL_ANNOTATIONS = {
 };
 
 interface RunningServer {
-  app: ReturnType<typeof createMcpExpressApp>;
+  app: ReturnType<typeof createHttpApp>;
   config: ServerConfig;
   localAgentProviders: LocalAgentProviderAvailability[];
   close(): Promise<void>;
@@ -161,6 +161,7 @@ function toolWidgetDescriptorMeta(
 
 const toolNames = {
   openWorkspace: "open_workspace",
+  releaseWorkspace: "release_workspace",
   read: "read",
   write: "write",
   edit: "edit",
@@ -189,7 +190,7 @@ function serverInstructions(config: ServerConfig): string {
       : "";
 
   if (config.toolMode === "codex") {
-    return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree and reuse its workspaceId. Use ${toolNames.read} for direct file reads, apply_patch for all file modifications, exec_command for inspection, tests, builds, and other commands, and write_stdin to poll or interact with running processes. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.${showChangesInstruction}`;
+    return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree and reuse its workspaceId. Use ${toolNames.read} for direct file reads, apply_patch for all file modifications, exec_command for inspection, tests, builds, and other commands, and write_stdin to poll or interact with running processes. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope. Keep workspaces available for later turns; call ${toolNames.releaseWorkspace} only when the user explicitly asks to release resources or the workspace is known to be unused for a long time. The same workspaceId remains recoverable after release. Never stop the shared DevSpace server merely because a conversation appears finished.${showChangesInstruction}`;
   }
 
   const inspection = config.toolMode !== "full"
@@ -202,7 +203,7 @@ function serverInstructions(config: ServerConfig): string {
 
   const agentsMd = `Follow instructions returned by ${toolNames.openWorkspace}. Before working under a path listed in availableAgentsFiles, use ${toolNames.read} to inspect that instruction file and follow it. `;
 
-  return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files.${showChangesInstruction}`;
+  return `Use DevSpace as a local coding workspace. Call ${toolNames.openWorkspace} once per project folder or worktree to obtain a workspaceId. Reuse that same workspaceId for all later file, search, edit, write, show-changes, and shell tools in that folder; do not call ${toolNames.openWorkspace} again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files. Keep workspaces available for later turns; call ${toolNames.releaseWorkspace} only when the user explicitly requests resource release or the workspace is known to be unused for a long time. It releases only in-memory metadata and the same workspaceId transparently recovers. Never stop the shared DevSpace server merely because a conversation appears finished.${showChangesInstruction}`;
 }
 
 function formatVisibleAgent(agent: {
@@ -747,7 +748,7 @@ function createMcpServer(
     {
       title: "Open workspace",
       description:
-        "Open a local project directory as a coding workspace. Call this once per project folder or worktree before reading, editing, searching, writing, showing changes, or running commands. Reuse the returned workspaceId for later calls in the same folder; do not call open_workspace again unless switching folders/worktrees, changing checkout/worktree mode, the workspaceId is rejected as unknown, or the user explicitly asks to reopen. By default this opens the actual checkout; set mode=\"worktree\" when the user asks for an isolated or parallel coding session. Returns a workspaceId, loaded root project instructions, and nested instruction file paths the model should read before working in those directories.",
+        "Open or resume a local project directory as a coding workspace. Checkout mode reuses the most recently active workspace for the same path by default, including after its in-memory metadata was released. Set forceNew only when a distinct checkout session is explicitly required. Worktree mode always creates an isolated managed Git worktree. Returns a persistent workspaceId, loaded root project instructions, and nested instruction file paths.",
       inputSchema: {
         path: z
           .string()
@@ -764,9 +765,14 @@ function createMcpServer(
           .string()
           .optional()
           .describe("Git ref to base a worktree on. Only used with mode=\"worktree\". Defaults to HEAD."),
+        forceNew: z
+          .boolean()
+          .optional()
+          .describe("Checkout mode only. Defaults to false so the latest workspace for the same path is resumed. Set true only when a distinct workspaceId is explicitly needed."),
       },
       outputSchema: {
         workspaceId: z.string(),
+        resumed: z.boolean(),
         root: z.string(),
         mode: z.enum(["checkout", "worktree"]),
         sourceRoot: z.string().optional(),
@@ -791,9 +797,10 @@ function createMcpServer(
       ...toolWidgetDescriptorMeta(config, "workspace"),
       annotations: { readOnlyHint: true },
     },
-    async ({ path, mode, baseRef }) => {
+    async ({ path, mode, baseRef, forceNew }) => {
       const startedAt = performance.now();
-      const { workspace, agentsFiles, availableAgentsFiles } = await workspaces.openWorkspace({ path, mode, baseRef });
+      logEvent(config.logging, "info", "workspace_open_started", { path, mode: mode ?? "checkout" });
+      const { workspace, agentsFiles, availableAgentsFiles, resumed } = await workspaces.openWorkspace({ path, mode, baseRef, forceNew });
       if (config.widgets === "changes") {
         void reviewCheckpoints.initializeWorkspace({
           workspaceId: workspace.id,
@@ -824,14 +831,14 @@ function createMcpServer(
       const availableAgentsFileOutputs = availableAgentsFiles.map((file) => ({
         path: formatAgentsPath(file.path, workspace.root),
       }));
-      const instruction = config.skillsEnabled
+      const instruction = "The nested instruction index is bounded and skips build/dependency directories; it may be incomplete. Check AGENTS.md/CLAUDE.md along the target path before editing. " + (config.skillsEnabled
         ? "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, the user asks to reopen, or you switch to a different folder/worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file. When a task matches an available skill in skills, read its path before proceeding."
-        : "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, the user asks to reopen, or you switch to a different folder/worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file.";
+        : "Use this workspaceId in all subsequent tool calls for this project. Do not call open_workspace again for this same folder unless this workspaceId stops working, the user asks to reopen, or you switch to a different folder/worktree. Follow loaded agentsFiles instructions. Before working under a path listed in availableAgentsFiles, read that instruction file.");
       const resultContent: ToolContent[] = [
         {
           type: "text" as const,
           text: [
-            `Opened workspace ${workspace.id}`,
+            `${resumed ? "Resumed" : "Opened"} workspace ${workspace.id}`,
             `Root: ${workspace.root}`,
             `Mode: ${workspace.mode}`,
             loadedAgentsFiles.length > 0
@@ -885,6 +892,7 @@ function createMcpServer(
         },
         structuredContent: {
           workspaceId: workspace.id,
+          resumed,
           root: workspace.root,
           mode: workspace.mode,
           sourceRoot: workspace.sourceRoot,
@@ -903,12 +911,45 @@ function createMcpServer(
 
   registerAppTool(
     server,
+    toolNames.releaseWorkspace,
+    {
+      title: "Release workspace memory",
+      description:
+        "Release this workspace's in-memory metadata only when the user explicitly requests resource release or the workspace is known to be unused for a long time. The workspace session remains persisted and recoverable: if the conversation continues, pass the same workspaceId to any workspace tool and DevSpace will restore it automatically. This does not delete files or worktrees, stop commands, revoke the workspaceId, close the MCP transport, or stop the shared server.",
+      inputSchema: {
+        workspaceId: z.string().describe("Persistent workspace identifier returned by open_workspace."),
+      },
+      outputSchema: {
+        workspaceId: z.string(),
+        released: z.boolean(),
+        recoverable: z.boolean(),
+        instruction: z.string(),
+      },
+      ...toolWidgetDescriptorMeta(config, "workspace"),
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
+    async ({ workspaceId }) => {
+      const { released, recoverable } = workspaces.releaseWorkspace(workspaceId);
+      const instruction = "Keep this workspaceId in conversation context. If work continues later, pass it directly to the next workspace tool; DevSpace will restore the workspace without another open_workspace call.";
+      return {
+        content: [{
+          type: "text" as const,
+          text: `${released ? "Released" : "Workspace was already released"}: ${workspaceId}\nRecoverable: ${recoverable}\n${instruction}`,
+        }],
+        structuredContent: { workspaceId, released, recoverable, instruction },
+      };
+    },
+  );
+
+  registerAppTool(
+    server,
     toolNames.read,
     {
       title: "Read file",
       description:
         [
           "Read a file inside an open workspace. Use this for file inspection instead of shell commands like cat or sed. Call open_workspace first and pass workspaceId.",
+          "UTF-8 text is streamed in pages up to 1 MiB (default 20,000 lines). Follow the returned byteOffset to continue; do not combine byteOffset with offset. Images up to 16 MiB use the image reader.",
           "Use this tool to inspect relevant AGENTS.md or CLAUDE.md files listed by open_workspace before working in nested directories.",
           config.skillsEnabled
             ? "If available skills were returned and a task matches one, read that skill's path before proceeding. Skill paths may be outside the workspace; only advertised SKILL.md files and files under already-loaded skill directories are readable."
@@ -933,6 +974,8 @@ function createMcpServer(
           .positive()
           .optional()
           .describe("1-indexed line number to start reading from."),
+        byteOffset: z.number().int().nonnegative().optional()
+          .describe("Zero-based byte cursor returned by the previous page; omit offset when using this."),
         limit: z
           .number()
           .int()
@@ -1606,13 +1649,7 @@ function createMcpServer(
 }
 
 export function createServer(config = loadConfig()): RunningServer {
-  const allowedHosts = config.allowedHosts.includes("*")
-    ? undefined
-    : Array.from(new Set([config.host, ...config.allowedHosts]));
-  const app = createMcpExpressApp({
-    host: config.host,
-    ...(allowedHosts ? { allowedHosts } : {}),
-  });
+  const app = createHttpApp(config);
   const transports = new McpSessionRegistry<Transport>({
     maxSessions: config.resources.mcpMaxSessions,
     maxIdleSessions: config.resources.mcpMaxIdleSessions,
@@ -1682,6 +1719,7 @@ export function createServer(config = loadConfig()): RunningServer {
     sessions: transports.stats,
     requests: requestGate.stats,
     processes: processSessions.stats,
+    workspaces: workspaces.stats,
   });
 
   let cleanupRunning = false;
@@ -1692,6 +1730,17 @@ export function createServer(config = loadConfig()): RunningServer {
     void (async () => {
       const idleResults = await transports.closeIdle(config.resources.mcpSessionIdleTimeoutMs);
       logSessionCloseResults("idle_timeout", idleResults);
+
+      const releasedWorkspaceIds = workspaces.releaseIdle(
+        config.resources.workspaceMemoryIdleTimeoutMs,
+      );
+      if (releasedWorkspaceIds.length > 0) {
+        logEvent(config.logging, "info", "workspace_memory_released", {
+          reason: "idle_timeout",
+          count: releasedWorkspaceIds.length,
+          ...workspaces.stats,
+        });
+      }
 
       const memory = memoryGuard.snapshot();
       if (memory.level !== "normal") {

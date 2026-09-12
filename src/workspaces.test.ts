@@ -52,6 +52,8 @@ try {
     PORT: "1",
   });
   const registry = new WorkspaceRegistry(config);
+  const concurrent = await Promise.all(Array.from({ length: 8 }, () => registry.openWorkspace(root)));
+  assert.equal(new Set(concurrent.map((context) => context.workspace.id)).size, 1);
   const { workspace, agentsFiles, availableAgentsFiles } = await registry.openWorkspace(root);
 
   assert.equal(workspace.mode, "checkout");
@@ -164,6 +166,20 @@ try {
     path: gitRoot,
     mode: "worktree",
   });
+  assert.deepEqual(persistentRegistry.stats, { loaded: 2 });
+  assert.deepEqual(persistentRegistry.releaseWorkspace(persistentWorkspace.workspace.id), {
+    released: true,
+    recoverable: true,
+  });
+  assert.deepEqual(persistentRegistry.stats, { loaded: 1 });
+  assert.equal(
+    persistentRegistry.getWorkspace(persistentWorkspace.workspace.id).root,
+    persistentWorkspace.workspace.root,
+  );
+  const idleReleased = persistentRegistry.releaseIdle(1, Date.now() + 1_000);
+  assert.equal(idleReleased.includes(persistentWorkspace.workspace.id), true);
+  assert.equal(idleReleased.includes(persistentWorktree.workspace.id), true);
+  assert.deepEqual(persistentRegistry.stats, { loaded: 0 });
   firstStore.close();
 
   const secondStore = new SqliteWorkspaceStore(stateDir);
@@ -171,6 +187,14 @@ try {
   const restoredWorkspace = restoredRegistry.getWorkspace(persistentWorkspace.workspace.id);
   assert.equal(restoredWorkspace.root, root);
   assert.equal(restoredWorkspace.mode, "checkout");
+
+  const resumedWorkspace = await restoredRegistry.openWorkspace(root);
+  assert.equal(resumedWorkspace.resumed, true);
+  assert.equal(resumedWorkspace.workspace.id, persistentWorkspace.workspace.id);
+
+  const forcedWorkspace = await restoredRegistry.openWorkspace({ path: root, forceNew: true });
+  assert.equal(forcedWorkspace.resumed, false);
+  assert.notEqual(forcedWorkspace.workspace.id, persistentWorkspace.workspace.id);
 
   const restoredWorktree = restoredRegistry.getWorkspace(persistentWorktree.workspace.id);
   assert.equal(restoredWorktree.mode, "worktree");

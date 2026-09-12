@@ -20,6 +20,7 @@ const config = loadConfig({
   DEVSPACE_MCP_MAX_IDLE_SESSIONS: "32",
   DEVSPACE_MCP_MAX_CONCURRENT_REQUESTS: "32",
   DEVSPACE_MCP_MAX_QUEUED_REQUESTS: "64",
+  DEVSPACE_MCP_MAX_REQUEST_BYTES: String(8 * 1024 * 1024),
 });
 
 const running = createServer(config);

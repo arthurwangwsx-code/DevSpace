@@ -97,15 +97,17 @@ assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_SHELL_COMMANDS: "1" }).loggin
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TRUST_PROXY: "1" }).logging.trustProxy, true);
 
 assert.deepEqual(loadConfig(baseEnv).resources, {
-  mcpMaxSessions: 256,
-  mcpMaxIdleSessions: 128,
-  mcpSessionIdleTimeoutMs: 600_000,
+  mcpMaxRequestBytes: 16 * 1024 * 1024,
+  workspaceMemoryIdleTimeoutMs: 14_400_000,
+  mcpMaxSessions: 512,
+  mcpMaxIdleSessions: 384,
+  mcpSessionIdleTimeoutMs: 43_200_000,
   mcpSessionCleanupIntervalMs: 30_000,
   mcpMaxConcurrentRequests: 64,
   mcpMaxQueuedRequests: 128,
   mcpRequestQueueTimeoutMs: 30_000,
-  mcpHeapSoftLimitRatio: 0.6,
-  mcpHeapHardLimitRatio: 0.75,
+  mcpHeapSoftLimitRatio: 0.65,
+  mcpHeapHardLimitRatio: 0.8,
   processMaxConcurrent: 16,
   processMaxSessions: 64,
   processBufferCharacters: 524_288,
@@ -115,6 +117,7 @@ assert.deepEqual(
   loadConfig({
     ...baseEnv,
     DEVSPACE_MCP_MAX_SESSIONS: "32",
+    DEVSPACE_WORKSPACE_MEMORY_IDLE_TIMEOUT_SECONDS: "120",
     DEVSPACE_MCP_MAX_IDLE_SESSIONS: "16",
     DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_SECONDS: "45",
     DEVSPACE_MCP_SESSION_CLEANUP_INTERVAL_SECONDS: "5",
@@ -128,6 +131,8 @@ assert.deepEqual(
     DEVSPACE_PROCESS_BUFFER_CHARACTERS: "4096",
   }).resources,
   {
+    mcpMaxRequestBytes: 16 * 1024 * 1024,
+    workspaceMemoryIdleTimeoutMs: 120_000,
     mcpMaxSessions: 32,
     mcpMaxIdleSessions: 16,
     mcpSessionIdleTimeoutMs: 45_000,
@@ -143,6 +148,10 @@ assert.deepEqual(
   },
 );
 
+assert.throws(
+  () => loadConfig({ ...baseEnv, DEVSPACE_WORKSPACE_MEMORY_IDLE_TIMEOUT_SECONDS: "0" }),
+  /Invalid DEVSPACE_WORKSPACE_MEMORY_IDLE_TIMEOUT_SECONDS: 0/,
+);
 assert.throws(
   () => loadConfig({ ...baseEnv, DEVSPACE_MCP_MAX_SESSIONS: "0" }),
   /Invalid DEVSPACE_MCP_MAX_SESSIONS: 0/,

@@ -23,6 +23,13 @@ automatically by `open_workspace` and by later tool calls when the requested pat
 enters a directory with instructions that have not been loaded for that
 workspace.
 
+Keep workspaces available for later turns. Call `release_workspace` only when
+the user explicitly asks to release resources or a workspace is known to be
+unused for a long time. It evicts only reconstructable in-memory metadata; the
+persistent `workspaceId` remains valid and later tool calls restore it
+automatically. Do not stop the shared DevSpace server merely because one
+conversation appears finished.
+
 Core constraints:
 
 - Treat this as remote access to the local machine; security is part of the

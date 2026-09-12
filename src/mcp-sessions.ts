@@ -55,8 +55,8 @@ export class McpSessionRegistry<TTransport extends ClosableMcpTransport> {
 
   constructor(options: McpSessionRegistryOptions = {}) {
     this.now = options.now ?? Date.now;
-    this.maxSessions = options.maxSessions ?? 256;
-    this.maxIdleSessions = options.maxIdleSessions ?? 128;
+    this.maxSessions = options.maxSessions ?? 512;
+    this.maxIdleSessions = options.maxIdleSessions ?? 384;
     this.closeConcurrency = options.closeConcurrency ?? 16;
 
     if (!Number.isInteger(this.maxSessions) || this.maxSessions < 1) {

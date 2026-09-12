@@ -17,6 +17,9 @@ import {
   type AgentToolResult,
 } from "@earendil-works/pi-coding-agent";
 import { resolveAllowedPath } from "./roots.js";
+import { open, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { readTextPage } from "./file-reader.js";
 
 type McpContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 export type ToolResponse<TDetails = unknown> = {
@@ -66,8 +69,27 @@ async function runTool<TInput, TDetails = unknown>(
   }
 }
 
-export async function readFileTool(input: ReadToolInput, context: ToolContext): Promise<ToolResponse> {
+export async function readFileTool(input: ReadToolInput & { byteOffset?: number }, context: ToolContext): Promise<ToolResponse> {
   const path = resolveAllowedPath(input.path, context.cwd, context.readRoots ?? [context.root]);
+  try {
+    const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    let image = false;
+    try {
+      const info = await file.stat();
+      if (!info.isFile()) throw new Error("Only regular files are readable.");
+      const signature = Buffer.alloc(12);
+      await file.read(signature, 0, 12, 0);
+      image = signature.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])) ||
+        signature.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])) ||
+        signature.toString("ascii", 0, 3) === "GIF" || signature.toString("ascii", 8, 12) === "WEBP" ||
+        signature.toString("ascii", 0, 2) === "BM";
+      if (image && info.size > 16 * 1024 * 1024) throw new Error("Image exceeds 16 MiB; resize or crop it locally before reading.");
+    } finally { await file.close(); }
+    if (!image) {
+      const page = await readTextPage(path, input);
+      return { content: [{ type: "text", text: page.text }], details: page.details };
+    }
+  } catch (error) { return { content: formatToolError(error), isError: true }; }
   const tool = createReadTool(context.cwd);
 
   return runTool((params) => tool.execute("read_file", params), {
@@ -89,6 +111,9 @@ export async function writeFileTool(input: WriteToolInput, context: ToolContext)
 
 export async function editFileTool(input: EditToolInput, context: ToolContext): Promise<ToolResponse<EditToolDetails>> {
   const path = resolveAllowedPath(input.path, context.cwd, [context.root]);
+  try {
+    if ((await stat(path)).size > 32 * 1024 * 1024) throw new Error("File exceeds 32 MiB in-memory edit budget; use a streaming script via exec_command.");
+  } catch (error) { return { content: formatToolError(error), isError: true }; }
   const tool = createEditTool(context.cwd);
 
   return runTool((params) => tool.execute("edit_file", params), {

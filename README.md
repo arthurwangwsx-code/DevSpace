@@ -185,6 +185,13 @@ devspace doctor
 - [Running DevSpace in Lima (Chinese)](docs/lima-devspace.md)
 - [MCP Resource Control and High-Concurrency Stability (Chinese)](docs/mcp-resource-control.md)
 
+Workspace handles are persistent. Keep them available across later turns;
+call `release_workspace` only when the user requests resource release or a
+workspace is known to be unused for a long time. It evicts only reconstructable
+in-memory metadata, and later calls with the same `workspaceId` restore it
+automatically. Checkout-mode `open_workspace` also resumes the latest handle
+for the same path by default.
+
 ## Philosophy
 
 Every piece of software is becoming conversational. Natural language is

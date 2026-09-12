@@ -12,6 +12,8 @@ const DEFAULT_OAUTH_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const DEFAULT_OAUTH_REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 export interface ResourceLimitsConfig {
+  mcpMaxRequestBytes: number;
+  workspaceMemoryIdleTimeoutMs: number;
   mcpMaxSessions: number;
   mcpMaxIdleSessions: number;
   mcpSessionIdleTimeoutMs: number;
@@ -189,14 +191,16 @@ function parsePercentage(value: string | undefined, fallback: number, name: stri
 }
 
 function parseResourceLimits(env: NodeJS.ProcessEnv): ResourceLimitsConfig {
+  const mcpMaxRequestBytes = parsePositiveInteger(env.DEVSPACE_MCP_MAX_REQUEST_BYTES, 16 * 1024 * 1024, "DEVSPACE_MCP_MAX_REQUEST_BYTES");
+  if (mcpMaxRequestBytes > 64 * 1024 * 1024) throw new Error("DEVSPACE_MCP_MAX_REQUEST_BYTES must not exceed 67108864 (64 MiB).");
   const mcpMaxSessions = parsePositiveInteger(
     env.DEVSPACE_MCP_MAX_SESSIONS,
-    256,
+    512,
     "DEVSPACE_MCP_MAX_SESSIONS",
   );
   const mcpMaxIdleSessions = parsePositiveInteger(
     env.DEVSPACE_MCP_MAX_IDLE_SESSIONS,
-    128,
+    384,
     "DEVSPACE_MCP_MAX_IDLE_SESSIONS",
   );
   if (mcpMaxIdleSessions > mcpMaxSessions) {
@@ -205,12 +209,12 @@ function parseResourceLimits(env: NodeJS.ProcessEnv): ResourceLimitsConfig {
 
   const mcpHeapSoftLimitRatio = parsePercentage(
     env.DEVSPACE_MCP_HEAP_SOFT_LIMIT_PERCENT,
-    0.6,
+    0.65,
     "DEVSPACE_MCP_HEAP_SOFT_LIMIT_PERCENT",
   );
   const mcpHeapHardLimitRatio = parsePercentage(
     env.DEVSPACE_MCP_HEAP_HARD_LIMIT_PERCENT,
-    0.75,
+    0.8,
     "DEVSPACE_MCP_HEAP_HARD_LIMIT_PERCENT",
   );
   if (mcpHeapSoftLimitRatio >= mcpHeapHardLimitRatio) {
@@ -234,11 +238,17 @@ function parseResourceLimits(env: NodeJS.ProcessEnv): ResourceLimitsConfig {
   }
 
   return {
+    mcpMaxRequestBytes,
+    workspaceMemoryIdleTimeoutMs: parsePositiveInteger(
+      env.DEVSPACE_WORKSPACE_MEMORY_IDLE_TIMEOUT_SECONDS,
+      4 * 60 * 60,
+      "DEVSPACE_WORKSPACE_MEMORY_IDLE_TIMEOUT_SECONDS",
+    ) * 1_000,
     mcpMaxSessions,
     mcpMaxIdleSessions,
     mcpSessionIdleTimeoutMs: parsePositiveInteger(
       env.DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_SECONDS,
-      10 * 60,
+      12 * 60 * 60,
       "DEVSPACE_MCP_SESSION_IDLE_TIMEOUT_SECONDS",
     ) * 1_000,
     mcpSessionCleanupIntervalMs: parsePositiveInteger(
