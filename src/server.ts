@@ -27,6 +27,7 @@ import {
   requestIp,
   requestPath,
   commandPreview,
+  closeLogEvents,
   sessionIdPrefix,
 } from "./logger.js";
 import {
@@ -2065,6 +2066,7 @@ export function createServer(config = loadConfig()): RunningServer {
         processSessions.shutdown();
         oauthProvider.close();
         await workspaceStore.close?.();
+        await closeLogEvents();
       })();
       return closePromise;
     },

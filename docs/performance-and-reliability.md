@@ -79,8 +79,10 @@ remain child processes.
 - Routine successful HTTP and tool-call logs are disabled in the production
   launcher. Slow requests, slow tools, failures, overload events, event-loop lag,
   resource snapshots, supervisor transitions, and tunnel poll failures remain.
-- Workspace touch persistence is asynchronous. Log volume is bounded further by
-  retaining only 1,000 tunnel admin-UI events.
+- DevSpace event lines are appended and rotated in a dedicated Worker: 64 MiB per
+  file, three backups, and at most 8,192 queued lines. Queue pressure discards
+  low-priority events first; warn/error falls back to stderr. Workspace touch
+  persistence is also asynchronous. Tunnel admin-UI retention is 1,000 events.
 - Diagnostics never need request bodies, file contents, shell command bodies, or
   credentials. Correlate DevSpace `requestId`, timestamps, supervisor events, and
   tunnel status instead.
@@ -131,14 +133,12 @@ improvement, not requests-per-second marketing data.
 
 1. Add a local MCP canary that runs initialize, `tools/list`, `open_workspace`,
    `read`, and `exec_command`; export one concise result event.
-2. Add a bounded asynchronous rotating file-log sink. Keep stderr as a fallback
-   and verify that queue overflow drops low-priority success events before errors.
-3. Run a 24-hour two-profile soak with reconnect churn and concurrent Xcode/Gradle
+2. Run a 24-hour two-profile soak with reconnect churn and concurrent Xcode/Gradle
    load. Acceptance: no linear session/heap growth, no restart loop, stable p95,
    and no lost slow/error events.
-4. Evaluate SDK v2 stateless mode behind a flag, then remove legacy state only after
+3. Evaluate SDK v2 stateless mode behind a flag, then remove legacy state only after
    client compatibility is demonstrated.
-5. Add histograms/counters suitable for local Prometheus scraping if the current
+4. Add histograms/counters suitable for local Prometheus scraping if the current
    structured logs prove insufficient. Do not expose diagnostics on a public bind.
 
 ## Verification

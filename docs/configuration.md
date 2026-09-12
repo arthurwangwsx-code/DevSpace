@@ -65,6 +65,12 @@ Node heap is exhausted.
 | `DEVSPACE_PROCESS_MAX_SESSIONS` | `64` | Maximum retained running and completed process sessions. |
 | `DEVSPACE_PROCESS_BUFFER_CHARACTERS` | `524288` | Head/tail output buffer retained per process session. |
 
+Long-lived launchers may set `DEVSPACE_ASYNC_LOG_FILE` to move structured event
+writes to a worker thread. `DEVSPACE_ASYNC_LOG_MAX_BYTES` defaults to 64 MiB,
+`DEVSPACE_ASYNC_LOG_BACKUPS` to 3, and `DEVSPACE_ASYNC_LOG_MAX_QUEUED_LINES` to
+8192. Rotation and append IO run in the worker. When the queue is full, low-priority
+events are dropped; warn/error events fall back to stderr.
+
 The idle session limit must not exceed the total session limit. The heap soft
 percentage must be lower than the hard percentage, and the process session
 limit must be at least the concurrent process limit. Overloaded MCP requests
