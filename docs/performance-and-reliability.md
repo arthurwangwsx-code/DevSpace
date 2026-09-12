@@ -145,14 +145,12 @@ improvement, not requests-per-second marketing data.
 
 ## Remaining experiments
 
-1. Add a local MCP canary that runs initialize, `tools/list`, `open_workspace`,
-   `read`, and `exec_command`; export one concise result event.
-2. Run a 24-hour two-profile soak with reconnect churn and concurrent Xcode/Gradle
+1. Run a 24-hour two-profile soak with reconnect churn and concurrent Xcode/Gradle
    load. Acceptance: no linear session/heap growth, no restart loop, stable p95,
    and no lost slow/error events.
-3. Evaluate SDK v2 stateless mode behind a flag, then remove legacy state only after
+2. Evaluate SDK v2 stateless mode behind a flag, then remove legacy state only after
    client compatibility is demonstrated.
-4. Add histograms/counters suitable for local Prometheus scraping if the current
+3. Add histograms/counters suitable for local Prometheus scraping if the current
    structured logs prove insufficient. Do not expose diagnostics on a public bind.
 
 ## Verification
@@ -168,3 +166,13 @@ npm run build
 Deployment validation additionally requires the built-in tunnel health command and
 a real MCP tool sequence. A successful process launch or raw HTTP probe alone is not
 release evidence.
+
+Run the read-only local canary against an existing workspace with:
+
+```bash
+devspace verify /path/to/workspace --url http://127.0.0.1:7676/mcp
+```
+
+It executes initialize, `tools/list`, `open_workspace`, a five-line `read`, and
+`exec_command pwd`, then emits one JSON result with per-stage latency. It preserves
+the workspace handle and closes only its own short-lived diagnostic transport.

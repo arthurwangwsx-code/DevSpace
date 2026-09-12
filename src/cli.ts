@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { stdin as input, stdout as output } from "node:process";
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,8 +39,9 @@ import {
 } from "./user-config.js";
 import { expandHomePath } from "./roots.js";
 import { shutdownHttpServer } from "./server-shutdown.js";
+import { runMcpCanary } from "./mcp-canary.js";
 
-type Command = "serve" | "init" | "doctor" | "config" | "agents" | "help" | "version";
+type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "help" | "version";
 const require = createRequire(import.meta.url);
 const SUPPORTED_NODE_RANGE = ">=20.12 <27";
 
@@ -61,6 +62,9 @@ async function main(argv: string[]): Promise<void> {
     case "doctor":
       await runDoctor();
       return;
+    case "verify":
+      await runVerify(args);
+      return;
     case "config":
       runConfigCommand(args);
       return;
@@ -78,7 +82,7 @@ async function main(argv: string[]): Promise<void> {
 
 function normalizeCommand(command: string | undefined): Command {
   if (!command || command === "serve" || command === "start") return "serve";
-  if (command === "init" || command === "doctor" || command === "config" || command === "agents") return command;
+  if (command === "init" || command === "doctor" || command === "verify" || command === "config" || command === "agents") return command;
   if (command === "help" || command === "--help" || command === "-h") return "help";
   if (command === "version" || command === "--version" || command === "-v") return "version";
   throw new Error(`Unknown command: ${command}`);
@@ -275,6 +279,48 @@ async function runDoctor(): Promise<void> {
   }
 }
 
+async function runVerify(args: string[]): Promise<void> {
+  let url = "http://127.0.0.1:7676/mcp";
+  let readPath: string | undefined;
+  let timeoutMs = 15_000;
+  let workspacePath: string | undefined;
+
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index];
+    if (argument === "--url" || argument === "--file" || argument === "--timeout-ms") {
+      const value = args[++index];
+      if (!value) throw new Error(`${argument} requires a value`);
+      if (argument === "--url") url = value;
+      else if (argument === "--file") readPath = value;
+      else timeoutMs = Number(value);
+      continue;
+    }
+    if (argument.startsWith("-")) throw new Error(`Unknown verify option: ${argument}`);
+    if (workspacePath) throw new Error("verify accepts at most one workspace path");
+    workspacePath = argument;
+  }
+
+  const resolvedWorkspacePath = resolve(workspacePath ?? process.cwd());
+  readPath ??= await findCanaryReadPath(resolvedWorkspacePath);
+  const result = await runMcpCanary({
+    url,
+    workspacePath: resolvedWorkspacePath,
+    readPath,
+    timeoutMs,
+  });
+  console.log(JSON.stringify(result));
+}
+
+async function findCanaryReadPath(workspacePath: string): Promise<string> {
+  for (const candidate of ["AGENTS.md", "README.md", "package.json", ".gitignore"]) {
+    try {
+      await access(join(workspacePath, candidate));
+      return candidate;
+    } catch {}
+  }
+  throw new Error("No small canary file found; pass --file <workspace-relative-path>.");
+}
+
 function runConfigCommand(args: string[]): void {
   const [subcommand, key, ...rest] = args;
   const files = loadDevspaceFiles();
@@ -313,6 +359,7 @@ function printHelp(): void {
       "  devspace serve           Start the server",
       "  devspace init            Create or update ~/.devspace/config.json and auth.json",
       "  devspace doctor          Show config, runtime, and native dependency status",
+      "  devspace verify [path]   Run a real local MCP tool canary (use --url/--file to override)",
       "  devspace config get      Print persisted config",
       "  devspace config set publicBaseUrl <url|null>",
       "  devspace agents ls       List subagent sessions",
