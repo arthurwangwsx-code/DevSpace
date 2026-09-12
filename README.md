@@ -185,6 +185,7 @@ devspace doctor
 - [Running DevSpace in Lima (Chinese)](docs/lima-devspace.md)
 - [MCP Resource Control and High-Concurrency Stability (Chinese)](docs/mcp-resource-control.md)
 - [Performance and Reliability Plan](docs/performance-and-reliability.md)
+- [Stress and Soak Testing](docs/stress-testing.md)
 
 Workspace handles are persistent. Keep them available across later turns;
 call `release_workspace` only when the user requests resource release or a

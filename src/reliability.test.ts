@@ -50,7 +50,13 @@ try {
   assert.equal((await readTextPage(path, { byteOffset: 8 * 1024 ** 3 - 4 })).text, "tail");
   await assert.rejects(applyPatch(root, "*** Begin Patch\n*** Delete File: large.txt\n*** End Patch"), /patch budget/);
 
-  const config = loadConfig({ DEVSPACE_CONFIG_DIR: join(root, "config"), DEVSPACE_OAUTH_OWNER_TOKEN: "reliability-test-owner-token", DEVSPACE_AUTH_MODE: "trusted-local" });
+  const config = loadConfig({
+    DEVSPACE_CONFIG_DIR: join(root, "config"),
+    DEVSPACE_OAUTH_OWNER_TOKEN: "reliability-test-owner-token",
+    DEVSPACE_AUTH_MODE: "trusted-local",
+    DEVSPACE_MCP_MAX_CONCURRENT_REQUESTS: "16",
+    DEVSPACE_MCP_MAX_QUEUED_REQUESTS: "32",
+  });
   assert.equal(config.resources.mcpMaxRequestBytes, 16 * 1024 * 1024);
   assert.throws(() => loadConfig({ DEVSPACE_MCP_MAX_REQUEST_BYTES: String(65 * 1024 * 1024), DEVSPACE_OAUTH_OWNER_TOKEN: "reliability-test-owner-token" }), /64 MiB/);
   const app = createHttpApp(config);
@@ -79,8 +85,8 @@ try {
       get(url, { headers: { host: "evil.example" } }, (res) => { res.resume(); res.on("end", () => resolve(res.statusCode)); }).on("error", reject);
     });
     assert.equal(hostileStatus, 403);
-    const reservations = await Promise.all(Array.from({ length: 8 }, () => post("hold")));
-    const busy = await post("ninth");
+    const reservations = await Promise.all(Array.from({ length: 48 }, () => post("hold")));
+    const busy = await post("forty-ninth");
     assert.equal(busy.status, 503);
     assert.equal(busy.headers.get("retry-after"), "2");
     await busy.text();

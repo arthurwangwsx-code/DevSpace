@@ -75,11 +75,18 @@ The idle session limit must not exceed the total session limit. The heap soft
 percentage must be lower than the hard percentage, and the process session
 limit must be at least the concurrent process limit. Overloaded MCP requests
 return HTTP 503, JSON-RPC error `-32002`, and `Retry-After: 1`.
-Before JSON parsing, a separate 128 MiB body-reservation budget admits at most
-`min(MCP concurrency, floor(128 MiB / body limit))` simultaneous POSTs (8 by
-default). It holds reservations until responses end and returns HTTP 503 with
-`Retry-After: 2` when busy. This prevents large decoded requests accumulating
-outside the existing execution gate. Compression is not accepted.
+Before JSON parsing, a separate 128 MiB aggregate body-reservation budget admits
+at most `MCP concurrency + MCP queued requests` simultaneous POSTs. Requests with
+a valid `Content-Length` reserve their declared size; unknown-length or chunked
+bodies reserve the full per-request limit. Reservations remain until the response
+ends and return HTTP 503 with `Retry-After: 2` when busy. This lets small MCP calls
+use the configured queue while preventing large decoded requests from accumulating
+outside the execution gate. Compression is not accepted.
+
+The execution request gate applies to POST work. Long-lived Streamable HTTP
+GET/SSE channels do not consume execution slots; MCP session limits bound those
+streams instead. This prevents reusable client streams from starving tool calls
+or session cleanup.
 
 Text reads use bounded UTF-8 streaming: at most 1 MiB per page, default 20,000
 lines. Continue using the returned `byteOffset`, omitting line `offset`; this
@@ -100,6 +107,8 @@ same path unless `forceNew: true` is explicitly requested.
 
 See [MCP Resource Control](mcp-resource-control.md) for lifecycle, memory-pressure,
 and load-test details.
+The repeatable isolated workload and tunnel-emulation profiles are documented in
+[Stress and soak testing](stress-testing.md).
 
 ## OAuth
 

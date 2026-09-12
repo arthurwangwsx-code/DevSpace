@@ -1927,7 +1927,11 @@ export function createServer(config = loadConfig()): RunningServer {
     let reservation: McpSessionReservation<Transport> | undefined;
     let initializingTransport: Transport | undefined;
     try {
-      releaseRequest = await requestGate.acquire();
+      // Streamable HTTP clients keep GET/SSE connections open for server
+      // messages. Counting those long-lived streams as execution slots makes
+      // ordinary POST tool calls starve once enough clients are connected.
+      // Session limits bound GET streams; the work gate applies only to POST.
+      if (req.method === "POST") releaseRequest = await requestGate.acquire();
       let transport: Transport | undefined;
 
       if (sessionId) {

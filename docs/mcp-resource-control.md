@@ -139,6 +139,11 @@ DevSpace 使用 V8 `heap_size_limit` 和 `process.memoryUsage()` 计算堆比例
 `idle_timeout`、`memory_pressure`、`transport_close` 或 `server_shutdown`。
 工作区自动休眠记录为 `workspace_memory_released`；它不是工作区删除事件。
 
+请求执行门只统计会执行 MCP 工作的 POST。Streamable HTTP 客户端长期保留的 GET/SSE
+通道由 session 上限控制，不占 POST 执行槽，否则足够多的在线会话会让正常工具调用排队。
+请求体的 128 MiB 总预算只是内存占用核算，不是任何形式的费用或外部 API 计费；已知
+`Content-Length` 按声明大小预留，响应结束立即归还，未知长度才按单请求上限预留。
+
 长期运行启动器关闭常规成功请求和成功工具调用日志，但仍记录慢调用、失败、过载、资源快照
 和事件循环延迟。工作区活跃时间的持久化由 Worker 异步批量处理。完整的架构取舍和后续
 SDK v2/stateless 基准计划见 [Performance and reliability plan](performance-and-reliability.md)。
@@ -166,3 +171,4 @@ process session 总上限和大 Unicode 输出截断。
 
 真实隧道回归应再确认：长命令在清理期间不中断、过载时客户端收到可重试错误、连续运行期间
 `resource_snapshot` 中的 session 和堆占用形成平台而不是线性增长。
+隔离压力与本地 Tunnel 模拟命令见 [Stress and soak testing](stress-testing.md)。

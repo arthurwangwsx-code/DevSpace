@@ -122,6 +122,28 @@ burst. DevSpace used a small fraction of one CPU. This is why the production pol
 uses per-workspace admission control and suppresses health-only restarts under host
 pressure; increasing the heap or replacing Express would not remove that contention.
 
+### 2026-09-12 isolated stress baseline
+
+The repeatable harness in [Stress and soak testing](stress-testing.md) found and
+fixed two admission-control bottlenecks. Persistent GET/SSE streams had consumed
+POST execution slots, so enough connected clients could make later tool calls and
+even cleanup wait for 30 seconds. The request-body guard also reserved the full
+16 MiB limit for every small request, reducing the configured 16 + 32 profile to
+eight effective calls. GET streams are now bounded by session capacity, the work
+gate applies to POST, and known-length bodies reserve their declared size within
+the 128 MiB aggregate budget.
+
+After those fixes, the isolated direct profile completed 32 clients across eight
+workspaces, 3,200 mixed read/write operations, 512 initialize/list/terminate
+cycles, multi-page reads, workspace restore, streaming commands, and a capacity
+burst with no unexpected failures. Read p95 was 28 ms and write p95 was 34 ms.
+A 32-executing/64-queued profile improved the same 32-client run to read p95 25 ms
+and the same write p95 34 ms. Forty clients remained below the 50 ms objective
+(29/43 ms); 48 reached 38/50 ms and therefore failed the strict write objective,
+while 64 reached 52/65 ms. The workstation-specific high-performance operating
+point is consequently 32 executing, 64 queued, and at most about 40 simultaneously
+busy interactive clients rather than unbounded execution.
+
 ## Framework and protocol decisions
 
 Do not replace Express based only on framework microbenchmarks. The observed stalls
@@ -145,7 +167,7 @@ improvement, not requests-per-second marketing data.
 
 ## Remaining experiments
 
-1. Run a 24-hour two-profile soak with reconnect churn and concurrent Xcode/Gradle
+1. Run the new 24-hour direct and local-tunnel soak profiles with reconnect churn and concurrent Xcode/Gradle
    load. Acceptance: no linear session/heap growth, no restart loop, stable p95,
    and no lost slow/error events.
 2. Evaluate SDK v2 stateless mode behind a flag, then remove legacy state only after

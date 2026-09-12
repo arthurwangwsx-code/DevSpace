@@ -1,5 +1,6 @@
 node_modules/
 dist/
 releases/
+artifacts/stress/
 .env
 *.log
