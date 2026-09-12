@@ -200,11 +200,21 @@ npx @waishnav/devspace serve
 | `DEVSPACE_LOG_TOOL_CALLS` | `1` |
 | `DEVSPACE_LOG_SHELL_COMMANDS` | `0` |
 | `DEVSPACE_TRUST_PROXY` | `0` |
+| `DEVSPACE_LOG_SLOW_REQUEST_MS` | `3000` |
+| `DEVSPACE_LOG_SLOW_TOOL_CALL_MS` | `5000` |
+| `DEVSPACE_LOG_EVENT_LOOP_LAG_MS` | `1000` |
 
 Set `DEVSPACE_LOG_FORMAT=pretty` for local debugging.
 
 Set `DEVSPACE_LOG_SHELL_COMMANDS=1` only when you intentionally want command
 previews in logs.
+
+Slow requests and tool calls are emitted as `http_request_slow` and
+`tool_call_slow` warnings even when full request/tool logging is disabled. Tool
+events carry the enclosing HTTP `requestId` when available, so one remote call
+can be followed across the log. A 10-second event-loop monitor records
+`event_loop_lag` and `event_loop_recovered`; sustained lag is reported at most
+once per minute after the first warning.
 
 ## Env-Only Example
 

@@ -79,6 +79,9 @@ assert.deepEqual(loadConfig(baseEnv).logging, {
   toolCalls: true,
   shellCommands: false,
   trustProxy: false,
+  slowRequestMs: 3_000,
+  slowToolCallMs: 5_000,
+  eventLoopLagMs: 1_000,
 });
 
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_LEVEL: "silent" }).logging.level, "silent");
@@ -95,6 +98,13 @@ assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_ASSETS: "1" }).logging.assets
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_TOOL_CALLS: "0" }).logging.toolCalls, false);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_SHELL_COMMANDS: "1" }).logging.shellCommands, true);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TRUST_PROXY: "1" }).logging.trustProxy, true);
+assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_SLOW_REQUEST_MS: "750" }).logging.slowRequestMs, 750);
+assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_SLOW_TOOL_CALL_MS: "1250" }).logging.slowToolCallMs, 1_250);
+assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_EVENT_LOOP_LAG_MS: "400" }).logging.eventLoopLagMs, 400);
+assert.throws(
+  () => loadConfig({ ...baseEnv, DEVSPACE_LOG_SLOW_REQUEST_MS: "0" }),
+  /Invalid DEVSPACE_LOG_SLOW_REQUEST_MS: 0/,
+);
 
 assert.deepEqual(loadConfig(baseEnv).resources, {
   mcpMaxRequestBytes: 16 * 1024 * 1024,

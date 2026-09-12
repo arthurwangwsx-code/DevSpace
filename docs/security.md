@@ -97,4 +97,8 @@ sessions.
 By default, DevSpace logs requests and tool calls. Shell command previews are
 disabled unless `DEVSPACE_LOG_SHELL_COMMANDS=1`.
 
+Latency anomaly events contain timing, status, tool/path metadata, and a
+correlation request ID. They do not include request bodies, file contents, or
+shell command text unless shell command previews are explicitly enabled.
+
 Do not enable shell command logging if commands may contain secrets.

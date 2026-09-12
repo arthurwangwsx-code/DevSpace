@@ -11,6 +11,9 @@ export interface LoggingConfig {
   toolCalls: boolean;
   shellCommands: boolean;
   trustProxy: boolean;
+  slowRequestMs: number;
+  slowToolCallMs: number;
+  eventLoopLagMs: number;
 }
 
 type LogFields = Record<string, unknown>;

@@ -292,6 +292,21 @@ function parseLoggingConfig(env: NodeJS.ProcessEnv): LoggingConfig {
     toolCalls: env.DEVSPACE_LOG_TOOL_CALLS === undefined ? true : parseBoolean(env.DEVSPACE_LOG_TOOL_CALLS),
     shellCommands: parseBoolean(env.DEVSPACE_LOG_SHELL_COMMANDS),
     trustProxy: parseBoolean(env.DEVSPACE_TRUST_PROXY),
+    slowRequestMs: parsePositiveInteger(
+      env.DEVSPACE_LOG_SLOW_REQUEST_MS,
+      3_000,
+      "DEVSPACE_LOG_SLOW_REQUEST_MS",
+    ),
+    slowToolCallMs: parsePositiveInteger(
+      env.DEVSPACE_LOG_SLOW_TOOL_CALL_MS,
+      5_000,
+      "DEVSPACE_LOG_SLOW_TOOL_CALL_MS",
+    ),
+    eventLoopLagMs: parsePositiveInteger(
+      env.DEVSPACE_LOG_EVENT_LOOP_LAG_MS,
+      1_000,
+      "DEVSPACE_LOG_EVENT_LOOP_LAG_MS",
+    ),
   };
 }
 

@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import { access, realpath } from "node:fs/promises";
+import { loadavg } from "node:os";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createHttpApp } from "./http-app.js";
@@ -62,6 +65,7 @@ import {
 } from "./local-agent-availability.js";
 
 type Transport = StreamableHTTPServerTransport;
+const requestContext = new AsyncLocalStorage<{ requestId: string }>();
 const WORKSPACE_APP_URI = "ui://devspace/workspace-app.html";
 const WORKSPACE_APP_MANIFEST_ENTRY = "workspace-app.html";
 const WRITE_TOOL_ANNOTATIONS = {
@@ -311,13 +315,21 @@ function requestLogFields(req: Request, config: ServerConfig): Record<string, un
 }
 
 function logToolCall(config: ServerConfig, fields: ToolLogFields): void {
-  if (!config.logging.toolCalls) return;
-
   const { command, ...safeFields } = fields;
-  logEvent(config.logging, fields.success ? "info" : "warn", "tool_call", {
+  const diagnosticFields = {
+    requestId: requestContext.getStore()?.requestId,
     ...safeFields,
     commandPreview: config.logging.shellCommands && command ? commandPreview(command) : undefined,
-  });
+  };
+  if (config.logging.toolCalls) {
+    logEvent(config.logging, fields.success ? "info" : "warn", "tool_call", diagnosticFields);
+  }
+  if (fields.durationMs >= config.logging.slowToolCallMs) {
+    logEvent(config.logging, "warn", "tool_call_slow", {
+      ...diagnosticFields,
+      thresholdMs: config.logging.slowToolCallMs,
+    });
+  }
 }
 
 function contentText(content: ToolContent[]): string {
@@ -1679,6 +1691,45 @@ export function createServer(config = loadConfig()): RunningServer {
     maxSessions: config.resources.processMaxSessions,
     maxBufferCharacters: config.resources.processBufferCharacters,
   });
+
+  const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+  eventLoopDelay.enable();
+  let consecutiveLagWindows = 0;
+  const eventLoopTimer = setInterval(() => {
+    const maxDelayMs = Math.round(eventLoopDelay.max / 1_000_000);
+    const p99DelayMs = Math.round(eventLoopDelay.percentile(99) / 1_000_000);
+    const meanDelayMs = Number.isFinite(eventLoopDelay.mean)
+      ? Math.round(eventLoopDelay.mean / 1_000_000)
+      : 0;
+    eventLoopDelay.reset();
+    if (maxDelayMs >= config.logging.eventLoopLagMs) {
+      consecutiveLagWindows++;
+      if (consecutiveLagWindows === 1 || consecutiveLagWindows % 6 === 0) {
+        logEvent(config.logging, "warn", "event_loop_lag", {
+          maxDelayMs,
+          p99DelayMs,
+          meanDelayMs,
+          thresholdMs: config.logging.eventLoopLagMs,
+          consecutiveWindows: consecutiveLagWindows,
+          loadAverage1m: Number(loadavg()[0].toFixed(2)),
+        });
+      }
+    } else if (consecutiveLagWindows > 0) {
+      logEvent(config.logging, "info", "event_loop_recovered", {
+        maxDelayMs,
+        thresholdMs: config.logging.eventLoopLagMs,
+        previousConsecutiveWindows: consecutiveLagWindows,
+      });
+      consecutiveLagWindows = 0;
+    }
+  }, 10_000);
+  eventLoopTimer.unref();
+  logEvent(config.logging, "info", "observability_started", {
+    slowRequestMs: config.logging.slowRequestMs,
+    slowToolCallMs: config.logging.slowToolCallMs,
+    eventLoopLagMs: config.logging.eventLoopLagMs,
+    eventLoopWindowMs: 10_000,
+  });
   const localAgentProviders = config.subagents
     ? getLocalAgentProviderAvailabilitySnapshot()
     : [];
@@ -1777,17 +1828,25 @@ export function createServer(config = loadConfig()): RunningServer {
 
     res.on("finish", () => {
       const path = requestPath(req);
-      if (!config.logging.requests) return;
-      if (!config.logging.assets && path.startsWith("/mcp-app-assets")) return;
-
-      logEvent(config.logging, "info", "http_request", {
+      const durationMs = Math.round(performance.now() - startedAt);
+      const fields = {
         requestId,
         method: req.method,
         path,
         status: res.statusCode,
-        durationMs: Math.round(performance.now() - startedAt),
+        durationMs,
         ...requestLogFields(req, config),
-      });
+      };
+      const assetExcluded = !config.logging.assets && path.startsWith("/mcp-app-assets");
+      if (config.logging.requests && !assetExcluded) {
+        logEvent(config.logging, "info", "http_request", fields);
+      }
+      if (durationMs >= config.logging.slowRequestMs && !assetExcluded) {
+        logEvent(config.logging, "warn", "http_request_slow", {
+          ...fields,
+          thresholdMs: config.logging.slowRequestMs,
+        });
+      }
     });
 
     next();
@@ -1827,6 +1886,7 @@ export function createServer(config = loadConfig()): RunningServer {
 
   app.all("/mcp", async (req, res) => {
     const requestId = res.locals.requestId as string | undefined;
+    await requestContext.run({ requestId: requestId ?? "unknown" }, async () => {
     const sessionId = req.header("mcp-session-id");
     const initializeRequest = req.method === "POST" && isInitializeRequest(req.body);
 
@@ -1985,6 +2045,7 @@ export function createServer(config = loadConfig()): RunningServer {
       }
       releaseRequest?.();
     }
+    });
   });
 
   let closePromise: Promise<void> | undefined;
@@ -1995,6 +2056,8 @@ export function createServer(config = loadConfig()): RunningServer {
     close: () => {
       closePromise ??= (async () => {
         clearInterval(sessionCleanupTimer);
+        clearInterval(eventLoopTimer);
+        eventLoopDelay.disable();
         requestGate.close();
         const results = await transports.closeAll();
         logSessionCloseResults("server_shutdown", results);

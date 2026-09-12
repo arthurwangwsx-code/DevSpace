@@ -130,6 +130,12 @@ DevSpace 使用 V8 `heap_size_limit` 和 `process.memoryUsage()` 计算堆比例
 `idle_timeout`、`memory_pressure`、`transport_close` 或 `server_shutdown`。
 工作区自动休眠记录为 `workspace_memory_released`；它不是工作区删除事件。
 
+超过阈值的 HTTP 请求和工具调用分别记录 `http_request_slow`、`tool_call_slow`；
+两者可通过 `requestId` 关联。事件循环在 10 秒窗口内达到阈值时记录
+`event_loop_lag`，恢复时记录 `event_loop_recovered`。默认阈值分别为 3 秒、
+5 秒和 1 秒，可通过 `DEVSPACE_LOG_SLOW_REQUEST_MS`、
+`DEVSPACE_LOG_SLOW_TOOL_CALL_MS`、`DEVSPACE_LOG_EVENT_LOOP_LAG_MS` 调整。
+
 ## 验证要求
 
 修改资源控制后至少执行：
