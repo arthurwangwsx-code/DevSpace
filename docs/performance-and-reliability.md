@@ -108,6 +108,20 @@ These values favor interactive latency on a workstation that may also be running
 Xcode or Gradle. Increase concurrency only after a soak test shows spare CPU and a
 stable event-loop-lag distribution.
 
+### 2026-09-12 live baseline
+
+The deployed profile completed 32 initialize plus `tools/list` sequences at eight-way
+concurrency with no failures: p50 46 ms, p95 143 ms, p99/max 147 ms. A full 2.2 MiB
+write, three-page UTF-8 read with SHA-256 verification, command execution, metadata
+release, and same-ID restore completed in 0.45 seconds locally. A pre-migration
+superseded AiBox ID also restored successfully.
+
+The host still showed load averages around 36 on 10 CPUs during an unrelated Xcode
+build, macOS media analysis, spindump, audio analysis, and a sampled 127 MiB/s disk
+burst. DevSpace used a small fraction of one CPU. This is why the production policy
+uses per-workspace admission control and suppresses health-only restarts under host
+pressure; increasing the heap or replacing Express would not remove that contention.
+
 ## Framework and protocol decisions
 
 Do not replace Express based only on framework microbenchmarks. The observed stalls
