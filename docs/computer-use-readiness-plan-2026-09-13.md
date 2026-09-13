@@ -1,7 +1,14 @@
 # DevSpace Computer Use 完整性、权限、稳定性与性能评估方案
 
 日期：2026-09-13，Asia/Kuala_Lumpur（UTC+8）
-状态：方案已实施；macOS 系统 TCC 授权仍需用户在系统界面确认后完成最终真实桌面写操作验收。
+状态：方案已实施；生产服务已迁移到 DevSpace 自有 LaunchAgent；macOS 系统 TCC 授权仍需用户在系统界面确认后完成最终真实桌面写操作验收。
+
+2026-09-13 最新生产验证：`com.devspace.502.7676` 已接管 7676 服务并复用既有状态库，health
+报告 release `1.0.4+7532e108c50e`。Chrome Extension 在切换后自动恢复同一 Profile。Desktop
+Host 0.4.0 发布 14 项 canonical capability。权限 doctor 已改为通过 LaunchServices 探测固定 App；
+该路径准确返回 Accessibility/Screen Recording 均为 false，并已发起一次集中授权请求。Terminal
+直接执行 Mach-O 时出现的两项 true 属父进程 TCC 假阳性，不再作为产品就绪证据。
+
 工程：`/Users/ai/project/ai-tools/devspace`
 核查基线：`bp/master`，核查时 HEAD 为 `4d37650`；工作区存在其他任务正在修改的未提交内容。
 

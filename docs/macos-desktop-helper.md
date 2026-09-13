@@ -38,6 +38,10 @@ only project-provided path that intentionally asks macOS to present the Accessib
 authorization UI. Normal service start, Provider restart and health checks never request permissions.
 Compatible upgrades must use the same team and identifier.
 
+Permission doctor probes always launch the installed bundle through LaunchServices. Executing the Mach-O
+directly from an already-authorized Terminal can inherit the terminal's TCC responsibility and produce a
+false positive; that result is not accepted as evidence that the background App identity is authorized.
+
 After updating the installed executable path, use `devspace.providers.control` through the fixed Capability
 MCP or the REST admin action to reload the Provider without restarting DevSpace. Runtime permission truth is
 reported separately by `devspace capabilities doctor --provider desktop.macos.accessibility --json`; a live

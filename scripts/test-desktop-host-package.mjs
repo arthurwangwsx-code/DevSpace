@@ -32,6 +32,7 @@ try {
   assert.equal(result.signatureValid, true);
   assert.equal(result.adHoc, true);
   assert.equal(result.stableSigningIdentity, false);
+  assert.equal(result.permissionProbeTransport, "launch-services");
   const executable = join(bundle, "Contents", "MacOS", "devspace-desktop-helper");
   const client = new Client({ name: "desktop-host-package-test", version: "1.0.0" });
   const transport = new StdioClientTransport({ command: executable, args: [], stderr: "pipe" });
