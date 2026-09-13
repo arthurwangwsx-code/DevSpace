@@ -130,10 +130,11 @@ try {
   fixturePids.add(secondPid);
   assert.notEqual(secondPid, firstPid, "fixture restart reused the same process ID");
   await timed("old_lease_rejected_after_restart", async () => {
-    const invocation = await invokeRaw("desktop.macos.snapshot_app", {}, firstLease);
-    assert.equal(invocation.status, "failed");
-    assert.equal(invocation.errorCode, "lease_expired");
-    return { oldProcessId: firstPid, newProcessId: secondPid, errorCode: invocation.errorCode };
+    await assert.rejects(
+      invokeRaw("desktop.macos.snapshot_app", {}, firstLease),
+      /HTTP 410: lease_expired/,
+    );
+    return { oldProcessId: firstPid, newProcessId: secondPid, errorCode: "lease_expired" };
   });
 
   const secondLease = await timed("open_recovery_lease", () => openLease(secondPid));
