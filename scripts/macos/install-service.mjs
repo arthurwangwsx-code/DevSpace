@@ -16,13 +16,14 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const packageJson = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"));
 const node = resolve(args.node ?? process.execPath);
 const devspaceBin = resolve(args["devspace-bin"] ?? findExecutable("devspace") ?? join(packageRoot, "dist", "cli.js"));
-const host = args.host ?? "127.0.0.1";
-const port = integer(args.port ?? "7676", "port", 1, 65535);
+const configDir = resolve(args["config-dir"] ?? join(homedir(), ".devspace"));
+const persistedConfig = readPersistedConfig(configDir);
+const host = args.host ?? persistedConfig.host ?? "127.0.0.1";
+const port = integer(String(args.port ?? persistedConfig.port ?? "7676"), "port", 1, 65535);
 const toolMode = choice(args["tool-mode"] ?? "codex", "tool-mode", ["minimal", "full", "codex"]);
 const roots = args.root ?? join(homedir(), "project");
-const configDir = resolve(args["config-dir"] ?? join(homedir(), ".devspace"));
-const stateDir = resolve(args["state-dir"] ?? join(homedir(), ".local", "share", "devspace"));
-const worktreeRoot = resolve(args["worktree-root"] ?? join(homedir(), ".devspace", "worktrees"));
+const stateDir = resolve(args["state-dir"] ?? persistedConfig.stateDir ?? join(homedir(), ".local", "share", "devspace"));
+const worktreeRoot = resolve(args["worktree-root"] ?? persistedConfig.worktreeRoot ?? join(homedir(), ".devspace", "worktrees"));
 const runtimeRoot = resolve(args["runtime-root"] ?? join(homedir(), "Library", "Application Support", "DevSpace", "runtime"));
 const label = args.label ?? `com.devspace.${uid}.${port}`;
 const logDir = resolve(args["log-dir"] ?? join(homedir(), ".local", "state", "devspace-service"));
@@ -36,7 +37,6 @@ const pidFile = join(logDir, "devspace.pid");
 const logFile = join(logDir, "devspace.log");
 const activationLogFile = join(logDir, "activation.log");
 const activationStatusPath = join(logDir, "activation-status.json");
-const persistedConfig = readPersistedConfig(configDir);
 const configuredRoots = Array.isArray(persistedConfig.allowedRoots) && persistedConfig.allowedRoots.length > 0
   ? persistedConfig.allowedRoots.join(",")
   : roots;

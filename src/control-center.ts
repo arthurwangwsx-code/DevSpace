@@ -29,6 +29,11 @@ export interface RunningControlCenter {
   close(): Promise<void>;
 }
 
+export const __test = {
+  normalizeControlCenterConfig,
+  runCommand,
+};
+
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export async function startControlCenter(options: ControlCenterOptions = {}): Promise<RunningControlCenter> {
@@ -44,13 +49,14 @@ export async function startControlCenter(options: ControlCenterOptions = {}): Pr
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/", (_request, response) => {
+    applyControlCenterHeaders(response);
     response.type("html").send(controlCenterHtml());
   });
 
   app.use("/api", (request, response, next) => {
+    applyControlCenterHeaders(response);
     const auth = request.header("authorization");
-    const queryToken = typeof request.query.token === "string" ? request.query.token : undefined;
-    if (auth === `Bearer ${token}` || queryToken === token) return next();
+    if (auth === `Bearer ${token}`) return next();
     response.status(401).json({ ok: false, error: "unauthorized" });
   });
 
@@ -102,7 +108,12 @@ export async function startControlCenter(options: ControlCenterOptions = {}): Pr
       const result = await runControlAction(request.params.action, request.body ?? {});
       response.json({ ok: true, result });
     } catch (error) {
-      response.status(500).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+      const typed = error as Error & { statusCode?: number; result?: unknown };
+      response.status(typed.statusCode ?? 500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+        ...(typed.result === undefined ? {} : { result: typed.result }),
+      });
     }
   });
 
@@ -137,6 +148,7 @@ function normalizeControlCenterConfig(value: unknown): DevspaceUserConfig {
   const roots = Array.isArray(input.allowedRoots)
     ? input.allowedRoots.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => resolve(entry.trim()))
     : current.allowedRoots;
+  if (!roots || roots.length === 0) throw new Error("At least one allowed workspace root is required.");
   const port = input.port === undefined ? current.port : Number(input.port);
   if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) throw new Error("Port must be between 1 and 65535.");
   const publicBaseUrl = normalizeOptionalUrl(input.publicBaseUrl, "publicBaseUrl");
@@ -168,9 +180,9 @@ function normalizeTunnelConfig(value: unknown, current: DevspaceTunnelConfig | u
   return {
     enabled: bool(input.enabled, current?.enabled ?? false),
     autoStart: bool(input.autoStart, current?.autoStart ?? true),
-    command: stringOrUndefined(input.command, current?.command),
+    command: nullableString(input.command, current?.command),
     args,
-    cwd: stringOrUndefined(input.cwd, current?.cwd),
+    cwd: nullableString(input.cwd, current?.cwd),
     publicBaseUrl: normalizeOptionalUrl(input.publicBaseUrl, "tunnel.publicBaseUrl") ?? current?.publicBaseUrl ?? null,
     restartOnExit: bool(input.restartOnExit, current?.restartOnExit ?? true),
     environment,
@@ -188,10 +200,10 @@ function bool(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function stringOrUndefined(value: unknown, fallback: string | undefined): string | undefined {
+function nullableString(value: unknown, fallback: string | undefined): string | undefined {
   if (value === undefined) return fallback;
   if (value === null || value === "") return undefined;
-  if (typeof value !== "string") throw new Error("Expected a string value.");
+  if (typeof value !== "string") throw new Error("Expected a string value or null.");
   return value.trim() || undefined;
 }
 
@@ -233,10 +245,13 @@ async function runControlAction(action: string, body: Record<string, unknown>): 
     case "desktop.doctor":
       return runCommand(node, [join(packageRoot, "scripts", "doctor-desktop-host.mjs")]);
     case "service.install": {
+      const files = loadDevspaceFiles();
       const args = [
         join(packageRoot, "scripts", "macos", "install-service.mjs"),
         "--node", process.execPath,
         "--devspace-bin", join(packageRoot, "dist", "cli.js"),
+        "--host", files.config.host ?? "127.0.0.1",
+        "--port", String(files.config.port ?? 7676),
       ];
       if (body.activate === true) args.push("--activate");
       return runCommand(node, args);
@@ -244,10 +259,13 @@ async function runControlAction(action: string, body: Record<string, unknown>): 
     case "service.start":
     case "service.restart": {
       if (process.platform !== "darwin") throw new Error("DevSpace login service requires macOS.");
+      const files = loadDevspaceFiles();
       return runCommand(node, [
         join(packageRoot, "scripts", "macos", "install-service.mjs"),
         "--node", process.execPath,
         "--devspace-bin", join(packageRoot, "dist", "cli.js"),
+        "--host", files.config.host ?? "127.0.0.1",
+        "--port", String(files.config.port ?? 7676),
         "--activate",
       ]);
     }
@@ -295,9 +313,23 @@ async function runCommand(command: string, args: string[], env?: Record<string, 
   return new Promise((resolveCommand, reject) => {
     execFile(command, args, { cwd: packageRoot, env: { ...process.env, ...env }, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error && typeof (error as NodeJS.ErrnoException & { code?: unknown }).code !== "number") return reject(error);
-      resolveCommand({ command: [command, ...args].join(" "), code: typeof (error as { code?: unknown } | null)?.code === "number" ? Number((error as { code: number }).code) : 0, stdout, stderr });
+      const code = typeof (error as { code?: unknown } | null)?.code === "number" ? Number((error as { code: number }).code) : 0;
+      const result = { command: [command, ...args].join(" "), code, stdout: stdout.slice(-64_000), stderr: stderr.slice(-64_000) };
+      if (code !== 0) {
+        const failure = new Error(`Command failed with exit code ${code}: ${result.command}`) as Error & { statusCode?: number; result?: typeof result };
+        failure.statusCode = 422;
+        failure.result = result;
+        return reject(failure);
+      }
+      resolveCommand(result);
     });
   });
+}
+
+function applyControlCenterHeaders(response: express.Response): void {
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
 }
 
 async function probeJson(url: string): Promise<{ ok: boolean; status?: number; body?: unknown; error?: string }> {
@@ -323,15 +355,15 @@ function controlCenterHtml(): string {
   <section id="updates" class="page"><h1>Updates</h1><div class="sub">Install verified GitHub releases transactionally. The previous App is kept for rollback.</div><div class="grid"><div class="card"><h2>Release channel</h2><p class="help">Stable is the default channel. Update downloads are SHA-256 verified before installation.</p><div id="updateStatus"><div class="row"><span>Status</span><span>Not checked</span></div></div><div class="actions"><button class="action" data-action="update.check">Check for Updates</button><button class="action primary" data-action="update.install">Update Now</button><button class="action danger" data-action="update.rollback">Rollback Previous Version</button></div><div class="result hidden"></div></div></div></section>
   </main></div><script>
   const token=new URLSearchParams(location.search).get('token')||''; const headers={'content-type':'application/json','authorization':'Bearer '+token};
-  async function api(path,opts={}){const r=await fetch('/api'+path,{...opts,headers:{...headers,...(opts.headers||{})}});const j=await r.json();if(!r.ok||j.ok===false)throw new Error(j.error||('HTTP '+r.status));return j}
-  function showResult(el,value){el.classList.remove('hidden');el.textContent=typeof value==='string'?value:JSON.stringify(value,null,2)}
+  history.replaceState(null,'',location.pathname); async function api(path,opts={}){const r=await fetch('/api'+path,{...opts,headers:{...headers,...(opts.headers||{})}});const j=await r.json();if(!r.ok||j.ok===false)throw new Error(j.error||('HTTP '+r.status));return j}
+  function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))} function showResult(el,value){el.classList.remove('hidden');el.textContent=typeof value==='string'?value:JSON.stringify(value,null,2)}
   function page(id){document.querySelectorAll('.page').forEach(x=>x.classList.toggle('active',x.id===id));document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===id))}
   document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>page(b.dataset.page));document.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>page(b.dataset.goto));
-  async function load(){const [s,c]=await Promise.all([api('/status'),api('/config')]);const running=!!s.health.ok;coreStatus.innerHTML='<div class="row"><span>Service</span><span class="pill '+(running?'ok':'bad')+'"><span class="statusdot '+(running?'on':'')+'"></span>'+(running?'Running':'Stopped')+'</span></div><div class="row"><span>Node</span><span>'+s.node+'</span></div><div class="row"><span>Architecture</span><span>'+s.arch+'</span></div>';sideStatus.innerHTML='<span class="statusdot '+(running?'on':'')+'"></span>'+(running?'Core service running':'Core service stopped');tunnelStatus.innerHTML='<div class="row"><span>Configured</span><span>'+(s.tunnel.configured?'Yes':'No')+'</span></div><div class="row"><span>Enabled</span><span class="pill '+(s.tunnel.enabled?'ok':'warn')+'">'+(s.tunnel.enabled?'Enabled':'Disabled')+'</span></div><div class="row"><span>Public URL</span><span>'+(s.tunnel.publicBaseUrl||'—')+'</span></div>';loginStatus.innerHTML='<div class="row"><span>Start at login</span><span class="pill '+(s.service.startAtLogin?'ok':'warn')+'">'+(s.service.startAtLogin?'Enabled':'Disabled')+'</span></div><div class="row"><span>LaunchAgent</span><span title="'+s.service.plistPath+'">'+s.service.label+'</span></div>';const x=c.config||{};allowedRoots.value=(x.allowedRoots||[]).join('\n');port.value=x.port||7676;publicBaseUrl.value=x.publicBaseUrl||'';const t=x.tunnel||{};tunnelEnabled.checked=!!t.enabled;tunnelAutoStart.checked=t.autoStart!==false;tunnelCommand.value=t.command||'';tunnelArgs.value=(t.args||[]).join('\n');tunnelCwd.value=t.cwd||'';tunnelPublicBaseUrl.value=t.publicBaseUrl||'';tunnelRestart.checked=t.restartOnExit!==false}
-  function currentConfig(){return{allowedRoots:allowedRoots.value.split(/\n+/).map(x=>x.trim()).filter(Boolean),port:Number(port.value),publicBaseUrl:publicBaseUrl.value||null,tunnel:{enabled:tunnelEnabled.checked,autoStart:tunnelAutoStart.checked,command:tunnelCommand.value||undefined,args:tunnelArgs.value.split(/\n+/).map(x=>x.trim()).filter(Boolean),cwd:tunnelCwd.value||undefined,publicBaseUrl:tunnelPublicBaseUrl.value||null,restartOnExit:tunnelRestart.checked}}}
+  async function load(){const [s,c]=await Promise.all([api('/status'),api('/config')]);const running=!!s.health.ok;coreStatus.innerHTML='<div class="row"><span>Service</span><span class="pill '+(running?'ok':'bad')+'"><span class="statusdot '+(running?'on':'')+'"></span>'+(running?'Running':'Stopped')+'</span></div><div class="row"><span>Node</span><span>'+esc(s.node)+'</span></div><div class="row"><span>Architecture</span><span>'+esc(s.arch)+'</span></div>';sideStatus.innerHTML='<span class="statusdot '+(running?'on':'')+'"></span>'+(running?'Core service running':'Core service stopped');tunnelStatus.innerHTML='<div class="row"><span>Configured</span><span>'+(s.tunnel.configured?'Yes':'No')+'</span></div><div class="row"><span>Enabled</span><span class="pill '+(s.tunnel.enabled?'ok':'warn')+'">'+(s.tunnel.enabled?'Enabled':'Disabled')+'</span></div><div class="row"><span>Public URL</span><span>'+esc(s.tunnel.publicBaseUrl||'—')+'</span></div>';loginStatus.innerHTML='<div class="row"><span>Start at login</span><span class="pill '+(s.service.startAtLogin?'ok':'warn')+'">'+(s.service.startAtLogin?'Enabled':'Disabled')+'</span></div><div class="row"><span>LaunchAgent</span><span title="'+esc(s.service.plistPath)+'">'+esc(s.service.label)+'</span></div>';const x=c.config||{};allowedRoots.value=(x.allowedRoots||[]).join('\n');port.value=x.port||7676;publicBaseUrl.value=x.publicBaseUrl||'';const t=x.tunnel||{};tunnelEnabled.checked=!!t.enabled;tunnelAutoStart.checked=t.autoStart!==false;tunnelCommand.value=t.command||'';tunnelArgs.value=(t.args||[]).join('\n');tunnelCwd.value=t.cwd||'';tunnelPublicBaseUrl.value=t.publicBaseUrl||'';tunnelRestart.checked=t.restartOnExit!==false}
+  function currentConfig(){return{allowedRoots:allowedRoots.value.split(/\n+/).map(x=>x.trim()).filter(Boolean),port:Number(port.value),publicBaseUrl:publicBaseUrl.value||null,tunnel:{enabled:tunnelEnabled.checked,autoStart:tunnelAutoStart.checked,command:tunnelCommand.value||null,args:tunnelArgs.value.split(/\n+/).map(x=>x.trim()).filter(Boolean),cwd:tunnelCwd.value||null,publicBaseUrl:tunnelPublicBaseUrl.value||null,restartOnExit:tunnelRestart.checked}}}
   async function saveConfig(restart){try{showResult(saveResult,'Saving…');const saved=await api('/config',{method:'PUT',body:JSON.stringify(currentConfig())});if(restart){showResult(saveResult,'Configuration saved. Restarting service…');const restarted=await api('/actions/service.restart',{method:'POST',body:'{}'});showResult(saveResult,{saved,restarted})}else showResult(saveResult,saved);await load()}catch(e){showResult(saveResult,String(e))}}
   save.onclick=()=>saveConfig(false);saveRestart.onclick=()=>saveConfig(true);
-  document.querySelectorAll('[data-action]').forEach(b=>b.onclick=async()=>{const box=b.closest('.card')?.querySelector('.result')||globalResult;try{b.disabled=true;showResult(box,'Running…');const body=b.dataset.activate==='true'?{activate:true}:{};const response=await api('/actions/'+encodeURIComponent(b.dataset.action),{method:'POST',body:JSON.stringify(body)});showResult(box,response);if(b.dataset.action==='update.check'){const u=response.result;updateStatus.innerHTML='<div class="row"><span>Current</span><span>'+u.currentVersion+'</span></div><div class="row"><span>Latest</span><span>'+u.latestVersion+'</span></div><div class="row"><span>Update</span><span class="pill '+(u.updateAvailable?'warn':'ok')+'">'+(u.updateAvailable?'Available':'Up to date')+'</span></div>'}await load()}catch(e){showResult(box,String(e))}finally{b.disabled=false}});
+  document.querySelectorAll('[data-action]').forEach(b=>b.onclick=async()=>{const box=b.closest('.card')?.querySelector('.result')||globalResult;try{b.disabled=true;showResult(box,'Running…');const body=b.dataset.activate==='true'?{activate:true}:{};const response=await api('/actions/'+encodeURIComponent(b.dataset.action),{method:'POST',body:JSON.stringify(body)});showResult(box,response);if(b.dataset.action==='update.check'){const u=response.result;updateStatus.innerHTML='<div class="row"><span>Current</span><span>'+esc(u.currentVersion)+'</span></div><div class="row"><span>Latest</span><span>'+esc(u.latestVersion)+'</span></div><div class="row"><span>Update</span><span class="pill '+(u.updateAvailable?'warn':'ok')+'">'+(u.updateAvailable?'Available':'Up to date')+'</span></div>'}await load()}catch(e){showResult(box,String(e))}finally{b.disabled=false}});
   load().catch(e=>showResult(globalResult,String(e))); setInterval(()=>load().catch(()=>{}),10000);
   </script></body></html>`;
 }

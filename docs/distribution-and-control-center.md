@@ -174,6 +174,11 @@ download/clone DevSpace
 - Desktop permissions remain attached to the stable signed Host.
 - Tunnel credentials should be referenced from protected local files or environment sources.
 - Service installation stages config before activation so an update cannot casually strand the remote connection.
+- Control Center bootstrap tokens are removed from the address bar immediately after page load; API calls use
+  `Authorization: Bearer` only. Control responses are `no-store` / `no-referrer` with a restrictive CSP.
+- Persisted config and auth files are re-chmodded to `0600` on every write, including pre-existing files.
+- Empty workspace allowlists are rejected by the Control Center rather than falling back to an implicit root.
+- Child-process actions treat any non-zero exit as an operation failure and return bounded diagnostics.
 
 ## 9. Current implementation status
 

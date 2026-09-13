@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -47,6 +47,35 @@ try {
   assert.match(plist, /service-supervisor\.mjs/);
   assert.doesNotMatch(plist, /api-key|owner-token|password/i);
 
+  // Persisted config must be used when host/port/state/worktree are not passed explicitly.
+  const persistedPlistPath = join(root, "com.devspace.persisted.plist");
+  const persistedStateDir = join(root, "persisted-state");
+  const persistedWorktreeRoot = join(root, "persisted-worktrees");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "config.json"), JSON.stringify({
+    host: "127.0.0.2",
+    port: 17677,
+    allowedRoots: [root],
+    stateDir: persistedStateDir,
+    worktreeRoot: persistedWorktreeRoot,
+  }));
+  execFileSync(process.execPath, [
+    resolve("scripts/macos/install-service.mjs"),
+    "--label", "com.devspace.persisted",
+    "--config-dir", configDir,
+    "--runtime-root", runtimeRoot,
+    "--log-dir", logDir,
+    "--plist-path", persistedPlistPath,
+    "--node", process.execPath,
+    "--devspace-bin", resolve("package.json"),
+    "--release-id", "test-persisted-release",
+  ], { encoding: "utf8" });
+  const persistedPlist = readFileSync(persistedPlistPath, "utf8");
+  assert.match(persistedPlist, /<key>HOST<\/key>\s*<string>127\.0\.0\.2<\/string>/);
+  assert.match(persistedPlist, /<key>PORT<\/key>\s*<string>17677<\/string>/);
+  assert.ok(persistedPlist.includes(persistedStateDir));
+  assert.ok(persistedPlist.includes(persistedWorktreeRoot));
+
   const fakeLaunchctl = join(root, "fake-launchctl.mjs");
   const launchctlCalls = join(root, "launchctl-calls.ndjson");
   writeFileSync(fakeLaunchctl, `#!/usr/bin/env node\nimport { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(launchctlCalls)}, JSON.stringify(process.argv.slice(2)) + "\\n");\n`, { mode: 0o700 });
@@ -64,6 +93,7 @@ try {
     const activatedOutput = execFileSync(process.execPath, [
       resolve("scripts/macos/install-service.mjs"),
       "--label", "com.devspace.test",
+      "--host", "127.0.0.1",
       "--port", String(healthPort),
       "--root", root,
       "--config-dir", configDir,

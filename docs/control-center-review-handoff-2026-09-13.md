@@ -53,7 +53,7 @@ App 以及未来能力只能注册为第二层 Capability，不能新增领域�
 - [`distribution-and-control-center.md`](distribution-and-control-center.md)
 - [`product-capability-map.md`](product-capability-map.md)
 
-## 4. Control Center 待处理问题
+## 4. Control Center 待处理问题（本轮关闭中）
 
 ### P0-1：自定义端口没有传入服务安装器
 
@@ -149,6 +149,23 @@ Control Center 的 `runCommand` 会把非零退出码作为普通结果返回，
 6. 在隔离配置目录构建并启动 `DevSpace.app`，不得先覆盖当前生产服务。
 7. 最后再进行签名、公证、干净账户、升级/回滚和卸载发布矩阵。
 
+## 5.1 本轮整改执行口径（2026-09-13）
+
+本轮将本文第 4 节的 P0/P1 作为必须清零的 Control Center 发布门，而不是继续保留为后续建议。
+整改完成的判定标准如下：
+
+1. Service 安装器严格采用“显式 CLI 参数 > `~/.devspace/config.json` > 默认值”的配置优先级，
+   Control Center 的安装/启动/重启动作与状态探测必须指向同一个 host/port。
+2. `src/control-center.test.ts` 覆盖 loopback/token/config/status/action 安全和失败语义，并与
+   `tunnel-supervisor.test.ts` 一同进入默认测试链。
+3. Control Center URL 中的启动 Token 仅用于首次页面 bootstrap；页面加载后立即从地址栏移除，
+   `/api/*` 只接受 `Authorization: Bearer`。响应必须包含 `Cache-Control: no-store`、
+   `Referrer-Policy: no-referrer` 和 CSP；来自配置/运行状态的数据不得未经转义拼接到 HTML。
+4. `config.json` 与 `auth.json` 每次写入后显式收紧至 `0600`。
+5. Tunnel `command`/`cwd` 使用 `null` 表达显式清空；空 `allowedRoots` 必须拒绝保存。
+6. Control Center 执行的子进程只要非零退出即视为 action 失败，HTTP 返回 422，并保留有界诊断。
+7. 完成后本文必须更新为 Closure 记录，逐项写明修复状态和测试证据；不能继续把已解决问题留作 P0/P1。
+
 ## 6. 必须保留的运行边界
 
 - 不要为了 GUI 改动新增任何第一层领域 MCP 工具。
@@ -173,3 +190,28 @@ npm run package:macos-release
 
 正式发布还必须在干净 Mac 用户账户完成 App 启动、登录重启、Tunnel、Browser、Desktop、升级、
 回滚和卸载验收；本机源码构建成功不能替代这些证据。
+
+## 8. Closure 状态（2026-09-13）
+
+本轮已完成第 4 节 P0/P1 的代码整改，问题状态如下：
+
+- **P0-1 已解决**：`install-service.mjs` 现在按“显式 CLI 参数 > 持久配置 > 默认值”解析
+  host、port、stateDir、worktreeRoot；Control Center 安装/启动/重启服务时也显式传递当前 host/port。
+  `service-install.test.mjs` 新增仅依赖临时 `config.json` 的自定义 host/port/state/worktree 契约测试。
+- **P0-2 已解决**：新增 `src/control-center.test.ts`，并把 Control Center、TunnelSupervisor 测试纳入
+  默认 `npm test`。覆盖 loopback bootstrap、Bearer 鉴权、query token 拒绝、安全响应头、配置保存、
+  空 roots、Tunnel 显式清空、0600 权限和命令失败语义。
+- **P0-3 已解决**：页面 bootstrap 后立即 `history.replaceState` 清除地址栏 Token；`/api/*` 仅接受
+  Authorization Bearer；HTML/API 返回 `no-store`、`no-referrer` 和 CSP；动态运行状态进入 HTML 前统一转义。
+- **P0-4 已解决**：`config.json` / `auth.json` 每次写入后显式 `chmod(0600)`，包括原本为 0644 的旧文件。
+- **P1-1 已解决**：GUI 用 `null` 表达清空 tunnel command/cwd，服务端把 `null` 解释为显式删除。
+- **P1-2 已解决**：Control Center 拒绝空 `allowedRoots`，不再允许保存后触发隐式根目录回退。
+- **P1-3 已解决**：子进程非零退出统一变成 Control Center action 失败，错误携带有界 stdout/stderr，
+  HTTP 使用 422 而不是 `{ok:true, code:!=0}`。
+- **P2 已重新定义**：App、DMG/ZIP、GitHub Release、安装、更新、回滚、卸载和配置保留已经实现；
+  根据当前产品决策，Developer ID/notarization 不是发布阻塞项，开发签名版本通过用户首次显式允许打开即可使用。
+
+本轮完整 `npm test`、`npm run build` 和 `git diff --check` 均通过。Capability core release 首次执行时
+唯一失败项为 `runtime_source_provenance`，原因是 release gate 明确拒绝脏工作树；所有功能、性能、
+容量、恢复和资源检查均通过。整改提交后应在干净 source 上重跑 core release，并以新的 `summary.json`
+作为最终 release evidence。

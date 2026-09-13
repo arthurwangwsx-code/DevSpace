@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -138,4 +139,5 @@ function readJsonFile<T>(filePath: string): T {
 
 function writeJsonFile(filePath: string, value: unknown, mode: number): void {
   writeFileSync(filePath, JSON.stringify(value, null, 2) + "\n", { mode });
+  chmodSync(filePath, mode);
 }
