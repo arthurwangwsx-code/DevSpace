@@ -10,6 +10,8 @@ const socketPath = join(root, "bridge.sock");
 const bridge = new BrowserExtensionBridge(socketPath, 512);
 await bridge.start();
 assert.equal(bridge.connected, false);
+const competingBridge = new BrowserExtensionBridge(socketPath, 512);
+await assert.rejects(competingBridge.start(), /already in use/);
 
 const extension = net.createConnection(socketPath);
 await new Promise<void>((resolve, reject) => { extension.once("connect", resolve); extension.once("error", reject); });
@@ -95,4 +97,4 @@ profileB.destroy();
 
 await bridge.stop();
 await rm(root, { recursive: true, force: true });
-console.log("browser extension bridge tests passed: fragmented reply, abort, disconnect, size limit, multi-profile routing");
+console.log("browser extension bridge tests passed: singleton socket, fragmented reply, abort, disconnect, size limit, multi-profile routing");

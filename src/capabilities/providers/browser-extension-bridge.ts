@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, chmod, rm } from "node:fs/promises";
+import { mkdir, chmod, rm, stat } from "node:fs/promises";
 import net from "node:net";
 import { dirname } from "node:path";
 import type { JsonObject, JsonValue } from "../types.js";
@@ -23,6 +23,7 @@ interface ExtensionConnection {
 
 export class BrowserExtensionBridge {
   private server?: net.Server;
+  private socketIdentity?: { dev: number; ino: number };
   private readonly connections = new Set<ExtensionConnection>();
   private readonly profiles = new Map<string, ExtensionConnection>();
   private pending = new Map<string, PendingCall>();
@@ -34,6 +35,9 @@ export class BrowserExtensionBridge {
 
   async start(): Promise<void> {
     await mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 });
+    if (await socketAcceptsConnections(this.socketPath)) {
+      throw new Error(`browser extension socket is already in use: ${this.socketPath}`);
+    }
     await rm(this.socketPath, { force: true });
     this.server = net.createServer((socket) => this.accept(socket));
     await new Promise<void>((resolve, reject) => {
@@ -41,6 +45,8 @@ export class BrowserExtensionBridge {
       this.server!.listen(this.socketPath, () => { this.server!.off("error", reject); resolve(); });
     });
     await chmod(this.socketPath, 0o600);
+    const socketInfo = await stat(this.socketPath);
+    this.socketIdentity = { dev: socketInfo.dev, ino: socketInfo.ino };
   }
 
   async stop(): Promise<void> {
@@ -49,7 +55,19 @@ export class BrowserExtensionBridge {
     this.connections.clear();
     this.profiles.clear();
     if (this.server) await new Promise<void>((resolve) => this.server!.close(() => resolve()));
-    this.server = undefined; await rm(this.socketPath, { force: true });
+    this.server = undefined;
+    const identity = this.socketIdentity;
+    this.socketIdentity = undefined;
+    if (identity) {
+      try {
+        const current = await stat(this.socketPath);
+        if (current.dev === identity.dev && current.ino === identity.ino) {
+          await rm(this.socketPath, { force: true });
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+    }
   }
 
   get connected(): boolean { return [...this.connections].some(({ socket }) => !socket.destroyed); }
@@ -176,4 +194,28 @@ export class BrowserExtensionBridge {
       pending.reject(error);
     }
   }
+}
+
+function socketAcceptsConnections(socketPath: string): Promise<boolean> {
+  return new Promise<boolean>((resolve, reject) => {
+    const socket = net.createConnection(socketPath);
+    let settled = false;
+    const finish = (error: Error | undefined, active: boolean) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      if (error) reject(error); else resolve(active);
+    };
+    const timer = setTimeout(() => finish(new Error(`timed out probing browser extension socket: ${socketPath}`), false), 1_000);
+    timer.unref();
+    socket.once("connect", () => {
+      clearTimeout(timer);
+      finish(undefined, true);
+    });
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      clearTimeout(timer);
+      if (error.code === "ENOENT" || error.code === "ECONNREFUSED") finish(undefined, false);
+      else finish(error, false);
+    });
+  });
 }

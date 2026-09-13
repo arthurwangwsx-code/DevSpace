@@ -80,7 +80,7 @@ try {
   assert.equal(capabilities.length, 25, "extension provider must expose the complete v0.2 capability surface");
 
   const opened = await timed("unlocked-baseline", "open_background_fixture", () =>
-    invoke("browser.extension.open_page", { url: fixtureUrl! }), {
+    invoke("browser.tab.open", { url: fixtureUrl! }), {
       summarize: (value) => ({ ownership: objectValue(value).ownership ?? null }),
     });
   const tabId = objectValue(opened).tabId;
@@ -97,6 +97,9 @@ try {
 
   process.stdout.write("Locked continuation passed. Unlock the Mac now; waiting for recovery...\n");
   await timed("setup", "wait_for_unlock", () => waitForLockState(false, options.transitionTimeoutMs));
+  await timed("unlocked-recovery", "wait_for_extension_reconnect", () => options.baseUrl
+    ? waitForRemoteExtension(options.baseUrl, options.connectTimeoutMs)
+    : waitForExtension(provider, options.connectTimeoutMs));
   await exerciseUnlocked("unlocked-recovery", "recovery");
   assert.deepEqual(failures, [], "Provider reported a runtime failure");
 } catch (error) {
@@ -129,7 +132,7 @@ async function exerciseUnlocked(
   marker: string,
 ): Promise<void> {
   if (phase === "unlocked-recovery") {
-    await timed(phase, "navigate_fixture", () => invoke("browser.extension.navigate", { url: fixtureUrl! }));
+    await timed(phase, "navigate_fixture", () => invoke("browser.page.navigate", { url: fixtureUrl! }));
   }
   const before = await waitForSnapshot(phase, "snapshot_ready");
   const elements = snapshotElements(before);
@@ -137,19 +140,19 @@ async function exerciseUnlocked(
   const button = elements.find((entry) => entry.label === "Increment 0");
   assert.ok(input && Number.isInteger(input.index), "fixture input is missing from snapshot");
   assert.ok(button && Number.isInteger(button.index), "fixture button is missing from snapshot");
-  await timed(phase, "focus_input", () => invoke("browser.extension.click", { index: input.index }));
-  await timed(phase, "type_text", () => invoke("browser.extension.type_text", { text: marker }));
-  const typed = await timed(phase, "snapshot_after_type", () => invoke("browser.extension.snapshot", {}), {
+  await timed(phase, "focus_input", () => invoke("browser.page.click", { index: input.index }));
+  await timed(phase, "type_text", () => invoke("browser.page.type", { text: marker }));
+  const typed = await timed(phase, "snapshot_after_type", () => invoke("browser.page.snapshot", {}), {
     summarize: summarizeSnapshot,
   });
   assert.equal(objectValue(typed).title, `typed:${marker}`);
-  await timed(phase, "press_enter", () => invoke("browser.extension.press_key", { key: "Enter" }));
-  const entered = await timed(phase, "snapshot_after_key", () => invoke("browser.extension.snapshot", {}), {
+  await timed(phase, "press_enter", () => invoke("browser.page.press", { key: "Enter" }));
+  const entered = await timed(phase, "snapshot_after_key", () => invoke("browser.page.snapshot", {}), {
     summarize: summarizeSnapshot,
   });
   assert.equal(objectValue(entered).title, `entered:${marker}`);
-  await timed(phase, "click_button", () => invoke("browser.extension.click", { index: button.index }));
-  const clicked = await timed(phase, "snapshot_after_click", () => invoke("browser.extension.snapshot", {}), {
+  await timed(phase, "click_button", () => invoke("browser.page.click", { index: button.index }));
+  const clicked = await timed(phase, "snapshot_after_click", () => invoke("browser.page.snapshot", {}), {
     summarize: summarizeSnapshot,
   });
   assert.equal(objectValue(clicked).title, "clicked:1");
@@ -159,14 +162,14 @@ async function exerciseUnlocked(
 async function exerciseLocked(): Promise<void> {
   const session = await probe.probe(lifetime.signal);
   assert.equal(session.locked, true, "session unlocked before locked continuation began");
-  await timed("locked-continuation", "snapshot", () => invoke("browser.extension.snapshot", {}), {
+  await timed("locked-continuation", "snapshot", () => invoke("browser.page.snapshot", {}), {
     summarize: summarizeSnapshot,
   });
   await screenshot("locked-continuation");
 }
 
 async function screenshot(phase: StepResult["phase"]): Promise<void> {
-  const value = await timed(phase, "screenshot", () => invoke("browser.extension.screenshot", {}), {
+  const value = await timed(phase, "screenshot", () => invoke("browser.page.screenshot", {}), {
     summarize: (result) => ({ outputBytes: jsonBytes(result), hasPng: hasPng(result) }),
   });
   assert.equal(hasPng(value), true, "extension screenshot is not a PNG payload");
@@ -178,7 +181,7 @@ async function waitForSnapshot(phase: StepResult["phase"], name: string): Promis
     let lastError: unknown;
     while (Date.now() < deadline) {
       try {
-        const value = await invoke("browser.extension.snapshot", {});
+        const value = await invoke("browser.page.snapshot", {});
         if (objectValue(value).title === "DevSpace Browser Fixture") return value;
       } catch (error) {
         lastError = error;
@@ -294,9 +297,19 @@ async function timed<T>(
 }
 
 async function waitForExtension(target: BrowserExtensionProvider, timeoutMs: number): Promise<void> {
+  const profileCapability = (await target.discover(lifetime.signal))
+    .find((entry) => entry.descriptor.id === "browser.profile.list");
+  assert.ok(profileCapability, "browser extension profile discovery capability is missing");
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if ((await target.health(lifetime.signal)).state === "ready") return;
+    const result = await target.invoke({
+      capabilityId: profileCapability.descriptor.id,
+      descriptor: profileCapability.descriptor,
+      binding: profileCapability.binding,
+      arguments: {},
+    }, { signal: lifetime.signal });
+    const profiles = objectValue(result).profiles;
+    if (Array.isArray(profiles) && profiles.length > 0) return;
     await sleep(500);
   }
   throw new Error("browser extension did not connect; reload it or verify the native host installation");
@@ -308,7 +321,7 @@ async function waitForRemoteExtension(baseUrl: string, timeoutMs: number): Promi
   while (Date.now() < deadline) {
     try {
       const result = await requestJson("POST", `${baseUrl}/invocations`, {
-        capabilityId: "browser.extension.list_pages",
+        capabilityId: "browser.tab.list",
         arguments: { all: true },
         mode: "sync",
       });

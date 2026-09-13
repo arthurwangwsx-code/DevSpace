@@ -11,11 +11,14 @@ const sessionStorage = {};
 const localStorage = {};
 let tabRemovedListener;
 let debuggerEventListener;
+let nativeDisconnectListener;
+let reconnectCallback;
+let nativeConnectCount = 0;
 const downloads = [];
 const debuggerCommands = [];
 const port = {
   onMessage: { addListener(listener) { nativeMessageListener = listener; } },
-  onDisconnect: { addListener() {} },
+  onDisconnect: { addListener(listener) { nativeDisconnectListener = listener; } },
   postMessage(message) {
     const resolve = responseWaiters.get(message.id);
     if (resolve) {
@@ -26,7 +29,7 @@ const port = {
 };
 const chrome = {
   runtime: {
-    connectNative() { return port; },
+    connectNative() { nativeConnectCount += 1; return port; },
     getManifest() { return { version: "0.2.0" }; },
     lastError: undefined,
   },
@@ -85,7 +88,14 @@ const chrome = {
 };
 
 const source = await readFile(new URL("./background.js", import.meta.url), "utf8");
-vm.runInNewContext(source, { chrome, console, Map, Set, Number, String, Error }, { filename: "background.js" });
+function createRuntimeGlobals() {
+  return {
+    chrome, console, Map, Set, Number, String, Error,
+    setTimeout(callback) { reconnectCallback = callback; return 1; },
+    clearTimeout() {},
+  };
+}
+vm.runInNewContext(source, createRuntimeGlobals(), { filename: "background.js" });
 assert.equal(typeof nativeMessageListener, "function");
 
 const listed = await request("list_tabs", { clientId: "devspace", all: true });
@@ -129,7 +139,7 @@ assert.deepEqual(sessionStorage.devspaceOwnedTabs.devspace.tabs, [8]);
 
 // A Manifest V3 service-worker restart must retain the distinction between an
 // Agent-created tab and an adopted user tab.
-vm.runInNewContext(source, { chrome, console, Map, Set, Number, String, Error }, { filename: "background-restarted.js" });
+vm.runInNewContext(source, createRuntimeGlobals(), { filename: "background-restarted.js" });
 const reacquired = await request("use_tab", { clientId: "devspace", tabId: 8 });
 assert.equal(reacquired.result.ownership, "agent");
 await request("close_tab", { clientId: "devspace", tabId: 8 });
@@ -138,8 +148,13 @@ assert.equal(tabs.has(8), false);
 
 assert.deepEqual(sessionStorage.devspaceOwnedTabs.devspace.tabs, []);
 assert.equal(typeof tabRemovedListener, "function");
+assert.equal(nativeConnectCount, 2);
+nativeDisconnectListener();
+assert.equal(typeof reconnectCallback, "function");
+reconnectCallback();
+assert.equal(nativeConnectCount, 3);
 
-console.log("browser extension tests passed: adoption safety, persisted ownership, agent-tab cleanup");
+console.log("browser extension tests passed: adoption safety, persisted ownership, agent-tab cleanup, reconnect");
 
 function request(command, params) {
   return new Promise((resolve) => {

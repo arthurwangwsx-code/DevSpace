@@ -7,6 +7,7 @@ const consoleEvents = new Map();
 const networkEvents = new Map();
 const MAX_EVENT_BUFFER = 500;
 let port = null;
+let reconnectTimer = null;
 let stateReady = null;
 let profileIdPromise = null;
 
@@ -366,7 +367,15 @@ async function handle(message, replyPort) {
 async function connect() {
   if (port) return; try { port = chrome.runtime.connectNative(HOST); } catch { port = null; return; }
   const current = port; current.onMessage.addListener((message) => void handle(message, current));
-  current.onDisconnect.addListener(() => { void chrome.runtime.lastError; if (port === current) port = null; });
+  current.onDisconnect.addListener(() => {
+    void chrome.runtime.lastError;
+    if (port === current) port = null;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void connect();
+    }, 1_000);
+  });
   try { current.postMessage({ protocol: PROTOCOL, event: "profile_hello", profile: await profileMetadata() }); } catch {}
 }
 chrome.tabs.onRemoved.addListener((tabId) => {
