@@ -3,6 +3,31 @@
 DevSpace can be configured through `devspace init`, persisted config files, or
 environment variables.
 
+On macOS, `devspace control-center` opens the same persisted configuration through the local Control Center.
+The native `DevSpace.app` uses this Control Center internally, so GUI and CLI settings do not diverge.
+
+## Managed tunnel
+
+`~/.devspace/config.json` may define a generic managed tunnel. DevSpace starts and supervises the command
+with the Core Service when `enabled` and `autoStart` are true:
+
+```json
+{
+  "tunnel": {
+    "enabled": true,
+    "autoStart": true,
+    "command": "/absolute/path/to/tunnel-client",
+    "args": ["run", "--server=${localMcpUrl}"],
+    "publicBaseUrl": "https://devspace.example.com",
+    "restartOnExit": true
+  }
+}
+```
+
+`${localMcpUrl}` and `${publicBaseUrl}` are expanded in arguments. The same values are injected as
+`DEVSPACE_LOCAL_MCP_URL` and `DEVSPACE_PUBLIC_BASE_URL`. Keep provider credentials in protected local
+files or environment references rather than committing secrets into the repository.
+
 The default files are:
 
 ```text

@@ -1,5 +1,9 @@
 # Setup Guide
 
+For macOS users who want a single graphical setup surface, run `devspace control-center` from a checkout or
+install the packaged `DevSpace.app`. The Control Center configures Core, Tunnel, Browser, Computer Use, and
+login startup from one UI. The command-line steps below remain the supported development/headless path.
+
 This guide is for users who want ChatGPT or another MCP host to work in local
 projects through DevSpace.
 

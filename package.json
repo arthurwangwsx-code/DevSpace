@@ -60,6 +60,8 @@
     "request:desktop-permissions": "node scripts/doctor-desktop-host.mjs --request-permissions",
     "install:macos-service": "node scripts/macos/install-service.mjs",
     "doctor:macos-service": "node scripts/macos/doctor-service.mjs",
+    "control-center": "node dist/cli.js control-center",
+    "build:control-center-app": "node scripts/macos/build-control-center-app.mjs",
     "test:macos-service-self-activation": "tsx scripts/test-macos-service-self-activation.ts",
     "test:current-chrome": "tsx scripts/test-current-chrome-provider.ts",
     "test:browser-extension": "tsx scripts/test-browser-extension-matrix.ts",
@@ -69,6 +71,7 @@
     "test:session-state": "tsx src/capabilities/session-state.test.ts",
     "test:mcp-contract": "tsx src/mcp-contract.test.ts",
     "capture:mcp-contract": "tsx scripts/capture-mcp-contract.ts",
+    "test:tunnel-supervisor": "tsx src/tunnel-supervisor.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "keywords": [],

@@ -59,6 +59,10 @@ DevSpace is a self-hosted MCP server that lets ChatGPT read, edit, search, and r
 
 DevSpace requires Node `>=22.19 <27`.
 
+For the productized macOS experience, DevSpace also provides a native Control Center that can bundle its
+own Node runtime, configure the MCP server and tunnel, install Browser/Computer Use components, and manage
+login startup. See [Distribution, Control Center, and Tunnel Architecture](docs/distribution-and-control-center.md).
+
 Install the DevSpace CLI:
 
 ```bash
@@ -188,6 +192,7 @@ devspace doctor
 ## Documentation
 
 - [Product Capability Map](docs/product-capability-map.md) — start here for the complete product design, feature inventory, architecture boundaries, and documentation map
+- [Distribution, Control Center, and Tunnel Architecture](docs/distribution-and-control-center.md)
 - [Setup Guide](docs/setup.md)
 - [ChatGPT Coding Workflow](docs/chatgpt-coding-workflow.md)
 - [Configuration Reference](docs/configuration.md)

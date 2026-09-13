@@ -19,6 +19,18 @@ export interface DevspaceUserConfig {
   worktreeRoot?: string;
   agentDir?: string;
   subagents?: boolean;
+  tunnel?: DevspaceTunnelConfig;
+}
+
+export interface DevspaceTunnelConfig {
+  enabled?: boolean;
+  autoStart?: boolean;
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  publicBaseUrl?: string | null;
+  restartOnExit?: boolean;
+  environment?: Record<string, string>;
 }
 
 export interface DevspaceAuthConfig {

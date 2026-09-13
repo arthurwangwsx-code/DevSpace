@@ -54,8 +54,9 @@ import {
   findChromeDevToolsMcpCommand,
 } from "./capabilities/providers/chrome-devtools-provider.js";
 import { createMacosDesktopManifest } from "./capabilities/providers/macos-desktop-provider.js";
+import { TunnelSupervisor } from "./tunnel-supervisor.js";
 
-type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "grants" | "browser" | "help" | "version";
+type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "grants" | "browser" | "control-center" | "help" | "version";
 const require = createRequire(import.meta.url);
 const SUPPORTED_NODE_RANGE = ">=20.12 <27";
 
@@ -97,6 +98,9 @@ async function main(argv: string[]): Promise<void> {
     case "browser":
       await runBrowserCommand(args);
       return;
+    case "control-center":
+      await runControlCenter(args);
+      return;
     case "help":
       printHelp();
       return;
@@ -108,7 +112,7 @@ async function main(argv: string[]): Promise<void> {
 
 function normalizeCommand(command: string | undefined): Command {
   if (!command || command === "serve" || command === "start") return "serve";
-  if (command === "init" || command === "doctor" || command === "verify" || command === "config" || command === "agents" || command === "capabilities" || command === "providers" || command === "grants" || command === "browser") return command;
+  if (command === "init" || command === "doctor" || command === "verify" || command === "config" || command === "agents" || command === "capabilities" || command === "providers" || command === "grants" || command === "browser" || command === "control-center") return command;
   if (command === "help" || command === "--help" || command === "-h") return "help";
   if (command === "version" || command === "--version" || command === "-v") return "version";
   throw new Error(`Unknown command: ${command}`);
@@ -274,10 +278,18 @@ async function serve(): Promise<void> {
     console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);
   }
 
+  const tunnel = new TunnelSupervisor(config.tunnel, `http://${config.host}:${config.port}/mcp`);
+  tunnel.start();
+  const tunnelStatus = tunnel.status();
+  if (tunnelStatus.configured) {
+    console.log(`tunnel: ${tunnelStatus.enabled ? "managed" : "configured but disabled"}${tunnelStatus.pid ? ` pid=${tunnelStatus.pid}` : ""}`);
+  }
+
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    await tunnel.stop();
     await shutdownHttpServer(httpServer, close);
     process.exit(0);
   };
@@ -315,6 +327,11 @@ async function runDoctor(): Promise<void> {
     }
     console.log(`Allowed roots: ${config.allowedRoots.join(", ")}`);
     console.log(`Allowed hosts: ${config.allowedHosts.join(", ")}`);
+    if (config.tunnel) {
+      console.log(`Managed tunnel: ${config.tunnel.enabled ? "enabled" : "disabled"}`);
+      console.log(`Tunnel command: ${config.tunnel.command ?? "not configured"}`);
+      console.log(`Tunnel public URL: ${config.tunnel.publicBaseUrl ?? "not configured"}`);
+    }
   } catch (error) {
     console.log(`Config status: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -390,6 +407,36 @@ function runConfigCommand(args: string[]): void {
   console.log(`Updated ${files.configPath}`);
 }
 
+async function runControlCenter(args: string[]): Promise<void> {
+  let host = "127.0.0.1";
+  let port = 7680;
+  let openBrowser = true;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--host" || argument === "--port") {
+      const value = args[++index];
+      if (!value) throw new Error(`${argument} requires a value`);
+      if (argument === "--host") host = value;
+      else port = Number(value);
+      continue;
+    }
+    if (argument === "--no-open") {
+      openBrowser = false;
+      continue;
+    }
+    throw new Error(`Unknown control-center option: ${argument}`);
+  }
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("control-center port must be 0-65535");
+  const { startControlCenter } = await import("./control-center.js");
+  const running = await startControlCenter({ host, port, openBrowser });
+  console.log(`DevSpace Control Center: ${running.url}`);
+  await new Promise<void>((resolveDone, reject) => {
+    const stop = () => void running.close().then(resolveDone, reject);
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+  });
+}
+
 function printHelp(): void {
   console.log(
     [
@@ -412,6 +459,7 @@ function printHelp(): void {
       "  devspace providers add-desktop --command <absolute-path>",
       "  devspace grants list|add|revoke [options]",
       "  devspace browser doctor|package|install-host|stage-upgrade",
+      "  devspace control-center [--port 7680] [--no-open]",
       "  devspace -v, --version   Print the installed version",
       "",
       "For temporary tunnels:",

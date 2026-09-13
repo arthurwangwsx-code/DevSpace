@@ -36,6 +36,10 @@ const pidFile = join(logDir, "devspace.pid");
 const logFile = join(logDir, "devspace.log");
 const activationLogFile = join(logDir, "activation.log");
 const activationStatusPath = join(logDir, "activation-status.json");
+const persistedConfig = readPersistedConfig(configDir);
+const configuredRoots = Array.isArray(persistedConfig.allowedRoots) && persistedConfig.allowedRoots.length > 0
+  ? persistedConfig.allowedRoots.join(",")
+  : roots;
 
 if (!existsSync(devspaceBin)) throw new Error(`DevSpace executable does not exist: ${devspaceBin}`);
 if (!existsSync(node)) throw new Error(`Node executable does not exist: ${node}`);
@@ -51,8 +55,7 @@ const environment = {
   PORT: String(port),
   DEVSPACE_CONFIG_DIR: configDir,
   DEVSPACE_AUTH_MODE: "trusted-local",
-  DEVSPACE_ALLOWED_ROOTS: roots,
-  DEVSPACE_PUBLIC_BASE_URL: `http://${host}:${port}`,
+  DEVSPACE_ALLOWED_ROOTS: configuredRoots,
   DEVSPACE_STATE_DIR: stateDir,
   DEVSPACE_WORKTREE_ROOT: worktreeRoot,
   DEVSPACE_TOOL_MODE: toolMode,
@@ -192,6 +195,14 @@ function parseArgs(values) {
 function findExecutable(name) {
   try { return execFileSync("/usr/bin/which", [name], { encoding: "utf8" }).trim() || undefined; }
   catch { return undefined; }
+}
+
+function readPersistedConfig(dir) {
+  try {
+    return JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+  } catch {
+    return {};
+  }
 }
 
 function sourceRevision(root) {

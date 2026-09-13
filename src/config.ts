@@ -4,7 +4,7 @@ import { browserControlShouldEnable } from "./browser-control-config.js";
 import { expandHomePath } from "./roots.js";
 import type { LoggingConfig, LogFormat, LogLevel } from "./logger.js";
 import type { OAuthConfig } from "./oauth-provider.js";
-import { devspaceAgentsDir, devspaceSkillsDir, loadDevspaceFiles } from "./user-config.js";
+import { devspaceAgentsDir, devspaceSkillsDir, loadDevspaceFiles, type DevspaceTunnelConfig } from "./user-config.js";
 
 export type ToolMode = "minimal" | "full" | "codex";
 export type WidgetMode = "off" | "changes" | "full";
@@ -64,6 +64,7 @@ export interface ServerConfig {
   devspaceAgentsDir: string;
   subagents: boolean;
   agentDir: string;
+  tunnel?: DevspaceTunnelConfig;
   resources: ResourceLimitsConfig;
   capabilities: CapabilityConfig;
   logging: LoggingConfig;
@@ -465,7 +466,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const host = env.HOST ?? files.config.host ?? "127.0.0.1";
   const port = parsePort(env.PORT ?? files.config.port);
   const publicBaseUrl = parsePublicBaseUrl(
-    env.DEVSPACE_PUBLIC_BASE_URL ?? files.config.publicBaseUrl ?? localPublicBaseUrl(host, port),
+    env.DEVSPACE_PUBLIC_BASE_URL ?? files.config.tunnel?.publicBaseUrl ?? files.config.publicBaseUrl ?? localPublicBaseUrl(host, port),
   );
   const derivedAllowedHosts = [
     "localhost",
@@ -497,6 +498,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
         ? files.config.subagents === true
         : parseBoolean(env.DEVSPACE_SUBAGENTS),
     agentDir: resolve(expandHomePath(env.DEVSPACE_AGENT_DIR ?? files.config.agentDir ?? defaultAgentDir())),
+    tunnel: files.config.tunnel,
     resources: parseResourceLimits(env),
     capabilities: parseCapabilityConfig(env),
     logging: parseLoggingConfig(env),
