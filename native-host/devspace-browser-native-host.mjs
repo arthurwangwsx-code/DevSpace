@@ -8,6 +8,7 @@ import path from "node:path";
 // the larger extension-to-host direction.
 const MAX_HOST_TO_CHROME_BYTES = 1024 * 1024;
 const MAX_CHROME_TO_HOST_BYTES = 64 * 1024 * 1024;
+const LOCAL_SHUTDOWN_EVENT = "native_host_shutdown";
 const socketPath = process.env.DEVSPACE_BROWSER_SOCKET
   || path.join(os.homedir(), ".devspace", "browser-extension.sock");
 let nativeBuffer = Buffer.alloc(0);
@@ -115,7 +116,22 @@ function consumeSocketData(chunk) {
     const newline = socketBuffer.indexOf("\n"); if (newline < 0) break;
     const line = socketBuffer.slice(0, newline); socketBuffer = socketBuffer.slice(newline + 1);
     if (!line.trim()) continue;
-    try { writeNative(JSON.parse(line)); } catch { writeNative({ protocol: 1, ok: false, error: "invalid DevSpace bridge response" }); }
+    try {
+      const value = JSON.parse(line);
+      // This control frame is local to the chmod-0600 Unix socket and must
+      // never be forwarded into Chrome. It lets DevSpace retire a superseded
+      // or unresponsive native host so the extension's onDisconnect handler
+      // establishes a fresh Native Messaging port.
+      if (value?.protocol === 1 && value?.event === LOCAL_SHUTDOWN_EVENT) {
+        stdinEnded = true;
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        socket?.end();
+        process.exit(0);
+      }
+      writeNative(value);
+    } catch {
+      writeNative({ protocol: 1, ok: false, error: "invalid DevSpace bridge response" });
+    }
   }
 }
 

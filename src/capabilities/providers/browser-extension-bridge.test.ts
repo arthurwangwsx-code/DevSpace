@@ -73,12 +73,59 @@ assert.deepEqual(bridge.listProfiles().map((profile) => profile.profileId).sort(
 
 let inputA = "";
 let inputB = "";
+const controlEvents: Array<{ event?: string; reason?: string }> = [];
 profileA.setEncoding("utf8");
 profileB.setEncoding("utf8");
 profileA.on("data", (chunk) => respond(profileA, "a", chunk));
 profileB.on("data", (chunk) => respond(profileB, "b", chunk));
 assert.deepEqual(await bridge.call("who", {}, controller.signal, 2_000, "profile-a"), { profile: "a" });
 assert.deepEqual(await bridge.call("who", {}, controller.signal, 2_000), { profile: "b" });
+
+const profileAEnded = new Promise<void>((resolve) => profileA.once("end", resolve));
+const replacementA = net.createConnection(socketPath);
+await new Promise<void>((resolve, reject) => {
+  replacementA.once("connect", resolve);
+  replacementA.once("error", reject);
+});
+let replacementInput = "";
+replacementA.setEncoding("utf8");
+replacementA.on("data", (chunk) => {
+  replacementInput += chunk;
+  const newline = replacementInput.indexOf("\n");
+  if (newline < 0) return;
+  const request = JSON.parse(replacementInput.slice(0, newline));
+  replacementInput = replacementInput.slice(newline + 1);
+  replacementA.write(JSON.stringify({ protocol: 1, id: request.id, ok: true, result: { profile: "replacement-a" } }) + "\n");
+});
+replacementA.write(JSON.stringify({
+  protocol: 1,
+  event: "profile_hello",
+  profile: { profileId: "profile-a", focused: false, extensionVersion: "0.3.1" },
+}) + "\n");
+await profileAEnded;
+assert.ok(controlEvents.some(({ event, reason }) => (
+  event === "native_host_shutdown" && reason === "profile_replaced"
+)));
+assert.deepEqual(await bridge.call("who", {}, controller.signal, 2_000, "profile-a"), { profile: "replacement-a" });
+
+const timeoutProfile = net.createConnection(socketPath);
+await new Promise<void>((resolve, reject) => {
+  timeoutProfile.once("connect", resolve);
+  timeoutProfile.once("error", reject);
+});
+let timeoutInput = "";
+timeoutProfile.setEncoding("utf8");
+timeoutProfile.on("data", (chunk) => { timeoutInput += chunk; });
+timeoutProfile.write(JSON.stringify({
+  protocol: 1,
+  event: "profile_hello",
+  profile: { profileId: "profile-timeout", focused: true, extensionVersion: "0.3.1" },
+}) + "\n");
+await new Promise((resolve) => setTimeout(resolve, 10));
+const timeoutProfileEnded = new Promise<void>((resolve) => timeoutProfile.once("end", resolve));
+await assert.rejects(bridge.call("never_replies", {}, controller.signal, 25, "profile-timeout"), /timed out/);
+await timeoutProfileEnded;
+assert.match(timeoutInput, /"event":"native_host_shutdown","reason":"request_timeout"/);
 
 function respond(socket: net.Socket, label: string, chunk: string | Buffer) {
   if (socket === profileA) inputA += chunk;
@@ -89,12 +136,18 @@ function respond(socket: net.Socket, label: string, chunk: string | Buffer) {
   const request = JSON.parse(value.slice(0, newline));
   if (socket === profileA) inputA = value.slice(newline + 1);
   else inputB = value.slice(newline + 1);
+  if (request.event) {
+    controlEvents.push(request);
+    return;
+  }
   socket.write(JSON.stringify({ protocol: 1, id: request.id, ok: true, result: { profile: label } }) + "\n");
 }
 
 profileA.destroy();
 profileB.destroy();
+replacementA.destroy();
+timeoutProfile.destroy();
 
 await bridge.stop();
 await rm(root, { recursive: true, force: true });
-console.log("browser extension bridge tests passed: singleton socket, fragmented reply, abort, disconnect, size limit, multi-profile routing");
+console.log("browser extension bridge tests passed: singleton socket, fragmented reply, abort, disconnect, size limit, routing, replacement, and timeout retirement");

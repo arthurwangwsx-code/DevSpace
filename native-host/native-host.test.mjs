@@ -96,12 +96,18 @@ child.stdin.write(afterRestartHeader);
 child.stdin.write(afterRestart);
 await waitFor(() => reconnectedInput.includes("extension-after-restart"));
 
-child.stdin.end();
+// DevSpace can explicitly retire a superseded or unresponsive native host.
+// The local control frame must not be forwarded to Chrome and the host must
+// exit so the extension's onDisconnect path can establish a fresh port.
+const stdoutBeforeShutdown = stdout.length;
+reconnected.write(JSON.stringify({ protocol: 1, event: "native_host_shutdown", reason: "profile_replaced" }) + "\n");
+const exitCode = await new Promise((resolve) => child.once("exit", resolve));
+assert.equal(exitCode, 0);
+assert.equal(stdout.length, stdoutBeforeShutdown);
 reconnected.destroy();
 server.close();
-await new Promise((resolve) => child.once("exit", resolve));
 await rm(root, { recursive: true, force: true });
-console.log("browser native host tests passed: framing, large relay, and profile-aware DevSpace restart reconnect");
+console.log("browser native host tests passed: framing, large relay, restart reconnect, and local retirement");
 
 function writeNativeFrame(target, value) {
   const payload = Buffer.from(JSON.stringify(value));

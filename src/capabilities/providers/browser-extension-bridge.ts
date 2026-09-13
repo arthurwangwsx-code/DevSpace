@@ -6,6 +6,7 @@ import type { JsonObject, JsonValue } from "../types.js";
 
 export const BROWSER_EXTENSION_PROTOCOL = 1;
 const DEFAULT_MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
+const NATIVE_HOST_SHUTDOWN_EVENT = "native_host_shutdown";
 
 interface PendingCall {
   socket: net.Socket;
@@ -101,7 +102,10 @@ export class BrowserExtensionBridge {
         if (error) reject(error); else resolve(value ?? null);
       };
       const aborted = () => finish(new Error("browser extension request aborted"));
-      const timer = setTimeout(() => finish(new Error(`browser extension request timed out: ${command}`)), timeoutMs);
+      const timer = setTimeout(() => {
+        this.retireSocket(socket, "request_timeout");
+        finish(new Error(`browser extension request timed out: ${command}`));
+      }, timeoutMs);
       this.pending.set(id, { socket, resolve: (value) => finish(undefined, value), reject: (error) => finish(error), timer });
       signal.addEventListener("abort", aborted, { once: true });
       socket.write(
@@ -156,7 +160,7 @@ export class BrowserExtensionBridge {
           const profileId = typeof message.profile.profileId === "string" ? message.profile.profileId : undefined;
           if (!profileId) continue;
           const replaced = this.profiles.get(profileId);
-          if (replaced && replaced !== connection) replaced.socket.destroy();
+          if (replaced && replaced !== connection) this.retireSocket(replaced.socket, "profile_replaced");
           connection.profileId = profileId;
           connection.profile = message.profile;
           this.profiles.set(profileId, connection);
@@ -177,6 +181,20 @@ export class BrowserExtensionBridge {
     if (this.profiles.size > 0) return this.profiles.values().next().value;
     if (this.connections.size === 1) return this.connections.values().next().value;
     return undefined;
+  }
+
+  private retireSocket(socket: net.Socket, reason: "profile_replaced" | "request_timeout"): void {
+    if (socket.destroyed) return;
+    const fallback = setTimeout(() => socket.destroy(), 250);
+    fallback.unref();
+    socket.end(`${JSON.stringify({
+      protocol: BROWSER_EXTENSION_PROTOCOL,
+      event: NATIVE_HOST_SHUTDOWN_EVENT,
+      reason,
+    })}\n`, () => {
+      clearTimeout(fallback);
+      socket.destroy();
+    });
   }
 
   private rejectPending(error: Error): void {
