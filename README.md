@@ -147,7 +147,9 @@ DevSpace can also mount explicitly mapped stdio or Streamable HTTP MCP servers a
 capabilities while keeping its public API fixed. Set `DEVSPACE_CAPABILITIES=1`, then connect an Agent
 to `/capabilities/mcp` or use `/api/capabilities/v1` from CI. See
 [Mount external MCP servers](docs/mcp-provider-mounts.md) for the manifest format and CLI, and
-[Dynamic Provider management](docs/dynamic-provider-management.md) for runtime install/load APIs.
+[Dynamic Provider management](docs/dynamic-provider-management.md) for runtime install/load APIs. The
+[current Chrome Provider](docs/chrome-current-profile-provider.md) reuses the official
+`chrome-devtools` daemon, so CLI, CI, and DevSpace share one current-profile debugging connection.
 
 ## Mental Model
 

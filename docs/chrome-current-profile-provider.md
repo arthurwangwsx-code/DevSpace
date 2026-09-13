@@ -15,29 +15,36 @@ devspace providers add-chrome
 
 ```bash
 devspace providers add-chrome \
-  --command /absolute/path/to/chrome-devtools-mcp
+  --command /absolute/path/to/chrome-devtools
 ```
 
 命令在 `DEVSPACE_CAPABILITY_CONFIG_DIR`（默认 `~/.devspace/capabilities`）写入权限为
 `0600` 的 Provider manifest，且不会覆盖同名文件。重启 DevSpace 并设置
 `DEVSPACE_CAPABILITIES=1` 后生效。
 
-预置的子进程参数为：
+预置通过官方 CLI 启动或复用默认用户级 daemon，参数为：
 
 ```text
+start
 --autoConnect
 --no-category-extensions
+--no-memory-debugging
 --no-performance-crux
 --no-usage-statistics
+--redactNetworkHeaders
 ```
 
 因此不会创建第二个 Chrome，也不会把 Extension、PWA、性能等额外工具隐式加入能力目录。
-DevSpace 直接持有一条 MCP stdio 长连接，正常情况下不会为每次工具调用重启子进程。
+DevSpace 通过当前用户拥有的 Unix socket/Windows named pipe 直接调用该 daemon；daemon 内部只持有
+一条 MCP stdio 长连接，并且在 DevSpace 重启、Provider reload 或一次请求结束后继续存活。CLI、CI
+和 DevSpace 因而复用同一个 Chrome 调试连接，不会因为每个调用或每个 DevSpace 进程再触发一次
+Chrome 确认。socket 会验证类型和当前用户 ownership，响应使用有界 NUL framing；页面调用按
+downstream completion 串行，避免调用者超时后立即叠加第二个不可取消的 daemon 请求。
 
 ## Chrome 一次性用户动作
 
 1. 在当前 Chrome 打开 `chrome://inspect/#remote-debugging` 并启用远程调试。
-2. 保持 macOS 登录、唤醒且解锁。
+2. 首次建立连接时保持 macOS 登录、唤醒且解锁。
 3. 首次调用页面能力时，Chrome 会显示“要允许远程调试吗？”。
 4. 用户确认后重试调用。
 
@@ -49,15 +56,15 @@ DevSpace 不会点击、绕过或持久化这个安全确认。Chrome/系统重�
 
 | Capability | 下游 tool | Lease | v1 运行条件 |
 | --- | --- | --- | --- |
-| `browser.chrome.list_pages` | `list_pages` | 无 | awake + logged-in + unlocked |
-| `browser.chrome.take_snapshot` | `take_snapshot` | `browser_page` | awake + logged-in + unlocked |
-| `browser.chrome.take_screenshot` | `take_screenshot` | `browser_page` | awake + logged-in + unlocked |
-| `browser.chrome.list_console_messages` | `list_console_messages` | `browser_page` | awake + logged-in + unlocked |
-| `browser.chrome.list_network_requests` | `list_network_requests` | `browser_page` | awake + logged-in + unlocked |
-| `browser.chrome.navigate` | `navigate_page` | `browser_page` | awake + logged-in + unlocked |
-| `browser.chrome.click` | `click` | `browser_page` | awake + logged-in + unlocked |
-| `browser.chrome.type_text` | `type_text` | `browser_page` | awake + logged-in + unlocked |
-| `browser.chrome.press_key` | `press_key` | `browser_page` | awake + logged-in + unlocked |
+| `browser.chrome.list_pages` | `list_pages` | 无 | awake + logged-in |
+| `browser.chrome.take_snapshot` | `take_snapshot` | `browser_page` | awake + logged-in |
+| `browser.chrome.take_screenshot` | `take_screenshot` | `browser_page` | awake + logged-in |
+| `browser.chrome.list_console_messages` | `list_console_messages` | `browser_page` | awake + logged-in |
+| `browser.chrome.list_network_requests` | `list_network_requests` | `browser_page` | awake + logged-in |
+| `browser.chrome.navigate` | `navigate_page` | `browser_page` | awake + logged-in |
+| `browser.chrome.click` | `click` | `browser_page` | awake + logged-in |
+| `browser.chrome.type_text` | `type_text` | `browser_page` | awake + logged-in |
+| `browser.chrome.press_key` | `press_key` | `browser_page` | awake + logged-in |
 
 `select_page` 仅供 Provider 在 lease 内部使用，不会出现在 Agent 可搜索/调用的目录里。所有页面
 调用串行执行，并在调用前重新选择 lease 中的 `pageId`，避免共享 MCP 的隐式 selected-page
@@ -107,8 +114,12 @@ Grant 持久化在 DevSpace state database 中；创建、拒绝和撤销都会�
   一致性，但二者不能降低下游进程本身对 Chrome 的权限。
 - 上游 `chrome-devtools-mcp` 会初始化可见页面。冻结/异常页面、很多标签页或其他调试客户端
   可能导致 `list_pages` 超时。不要用增加无限超时掩盖问题。
-- 当前所有 Chrome 能力仍声明 `requiresUnlocked=true`。只有完成“解锁建立连接 -> 锁屏持续
-  调用 -> 解锁后验证”的真实版本矩阵后，才允许对具体只读能力放宽。
+- Chrome 是后台协议能力，DevSpace 不再添加 `requiresUnlocked` 本地限制；锁屏时是否成功由已经
+  建立的 Chrome/CDP 连接决定。首次连接或重连仍可能需要解锁后确认。2026-09-13 的本机实测
+  观察到：Codex Chrome 扩展通道在锁屏时仍能枚举 26 个当前 Profile 标签页；在锁屏后新启的
+  `chrome-devtools-mcp` 1.9.0 daemon 能响应 `status`，但 `list_pages` 在 60 秒内无响应。因此
+  “锁屏前已建立的 daemon 连接能否持续 snapshot/click”仍必须在解锁后重新建连再锁屏验证，
+  不能把 status 或扩展通道的结果当成 DevTools 通道通过。
 - 页面 title/URL、DOM、截图、Console 和 Network 都可能含敏感信息；审批由上层 Agent 负责，
   结果不应进入普通请求日志。
 
@@ -121,4 +132,6 @@ chrome-devtools list_pages --output-format=json
 
 若 `list_pages` 超时，依次检查：Chrome 确认框、是否有第二个 MCP/CDP 客户端、冻结/异常标签页、
 标签页数量和 `chrome://inspect` 中持续刷新的 Android/WebView target。修改 Chrome 设置或关闭
-用户标签页前必须由用户决定。
+用户标签页前必须由用户决定。官方 daemon 在调用已跨 socket 后没有取消协议；超时只会终止
+当前调用方等待。DevSpace 会阻止同一 Provider 立即叠加后续调用，但彻底恢复可能需要在解锁后
+显式执行 `chrome-devtools start --autoConnect ...` 重建 daemon。

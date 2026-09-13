@@ -804,19 +804,23 @@ Manifest 增加映射示例：
 
 ### 11.1 连接策略
 
-`ChromeDevToolsProvider` 优先直接启动长连接 stdio MCP child：
+`ChromeDevToolsProvider` 复用官方 CLI 管理的用户级 daemon：
 
 ```text
 DevSpace ProviderSupervisor
-  -> spawn chrome-devtools-mcp --autoConnect (shell=false)
-  -> MCP StdioClientTransport
+  -> current-user Unix socket / Windows named pipe
+  -> chrome-devtools daemon (across DevSpace restarts)
+  -> one MCP StdioClientTransport
   -> tools/list + tools/call
   -> 当前用户已运行的 Chrome / CDP
 ```
 
-直接使用 MCP SDK 长连接比为每次调用执行 `chrome-devtools ...` CLI 更适合 Runtime：状态、
-超时、取消和重连都在一个进程内可控。已安装的 `chrome-devtools start/status/list_pages`
-daemon/CLI 仍可作为 `doctor` 诊断和迁移 fallback，但不应成为核心协议的必需依赖。
+DevSpace 不会为每次调用执行 CLI，也不会再启动第二个 `chrome-devtools-mcp --autoConnect`
+stdio child；它直接实现 daemon 的 NUL framed request/response protocol。CLI、CI 与 DevSpace
+因此共享一个已经由 Chrome 确认的连接。Provider stop/reload 不停止用户级 daemon，只有 daemon
+不存在时才运行 manifest 中固定的 `chrome-devtools start --autoConnect ...`。官方协议没有
+call cancellation；DevSpace 在调用跨 socket 后即使上游超时，也会保持该 downstream operation
+占位，直到真实响应或有界 daemon deadline，避免连续叠加请求。
 
 如果 `--autoConnect` 在目标 Chrome 版本或环境中不可用，第二路径是 DevSpace 管理一个本机
 Native Messaging Extension Provider。它必须沿用相同 Capability ID，Provider ID 改为
@@ -893,9 +897,10 @@ Native Host 注册和高权限告知。
 | 登录窗口、密码、Touch ID、FileVault | 不允许自动化 | 永久策略拒绝 |
 
 Runtime 需要一个 `SessionStateProbe`，至少输出 `awake`、`loggedIn`、`locked`、
-`consoleUser` 和 `observedAt`。每个 Descriptor 声明运行条件，Router 在调用前校验。对 Chrome
-后台能力，只有在“解锁时建立连接 -> 锁屏 -> 连续调用 -> 解锁后验证结果”的真实矩阵通过后，
-才能把 `requiresUnlocked` 设为 false。
+`consoleUser` 和 `observedAt`。每个 Descriptor 声明运行条件，Router 在调用前校验。Chrome
+后台能力不设置 `requiresUnlocked` 本地门，调用审批完全交给上层 Agent；downstream 是否能在
+锁屏继续工作由真实连接决定，并记录版本矩阵。首次建立/重连需要图形确认时仍会返回
+`permission_required`。电脑 AX/前台输入不是后台协议，仍按 OS 的实际可用性失败。
 
 目标不是尝试绕过锁屏，而是让不需要前台 UI 的浏览器协议操作在系统允许时继续，并对其他
 能力给出确定、可恢复的错误。
@@ -1224,8 +1229,8 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 4 | 完成（2026-09-13） | 本批提交 | Grant、lease 越权、Schema、队列、幂等、取消、超时、输出上限和脱敏审计 | Fake Provider | Grant 持久化管理入口留待 API/CLI 批次 |
 | 5 | 完成（2026-09-13） | 本批提交 | REST catalog/search/lease/invoke/error/SSE；OAuth token/scope/audience/expiry 与双 resource metadata；完整 test/build/旧 MCP 契约 | Fake Provider + HTTP OAuth client | SSE 采用 resync 快照恢复；持久事件回放留待硬化批次 |
 | 6 | 完成（2026-09-13） | 本批提交 | 固定 8-tool MCP contract、共享 policy/invocation、CLI JSON stdout/退出码、旧 MCP 契约 | Fake Provider 经 MCP、REST 与 CLI | CLI 通过本机 REST；OAuth 模式需 `DEVSPACE_CAPABILITY_BEARER_TOKEN` |
-| 7 | 代码完成、实机授权待验收（2026-09-13） | 本批提交 | 通用 MCP Manifest、stdio+HTTP、env 引用、allowlist、schema-version fail-closed；Chrome 当前 Profile 预置、只读固定映射、页面 lease、串行目标选择和 CLI 注册测试 | Fake Chrome MCP 已贯通；本机 Chrome 152 已确认 `DevToolsActivePort` 与授权提示，尚未由用户批准 | 批准 Chrome 提示后执行 fixture snapshot/screenshot、重启与异常页验证 |
-| 8 | 代码完成、实机锁屏待验收（2026-09-13） | 本批提交 | Chrome mutation 显式映射、持久 Grant 兼容 API/CLI、macOS session probe、调用与 lease 前运行条件门；默认审批委托给上层 Agent | Fake Chrome/locked session；本机当前会话探针 | Chrome 授权后执行 mutation fixture；真实锁屏仍需用户安排解锁窗口 |
+| 7 | daemon 复用完成、DevSpace 实机调用待解锁复验（2026-09-13） | 本批提交 | 通用 MCP Manifest、stdio+HTTP；Chrome 固定映射、lease、串行目标；CLI daemon socket 协议、ownership、framing、取消后不叠加请求测试 | Chrome 152.0.7977.83 + chrome-devtools-mcp 1.9.0；当前 Profile 的 CLI list/snapshot/screenshot 已通过；DevSpace 与 CLI 只保留一个 daemon | 解锁后重建 daemon，完成 DevSpace REST fixture snapshot/screenshot、重启与异常页验证 |
+| 8 | 代码完成、实机锁屏矩阵部分完成（2026-09-13） | 本批提交 | Chrome mutation 显式映射、持久 Grant 兼容 API/CLI、macOS session probe；Chrome 不设本地 unlocked 门，默认审批委托给上层 Agent | 锁屏时 Codex Chrome 扩展仍可枚举 26 个当前 Profile 页；锁屏后新建 DevTools daemon 的 status 成功而 list_pages 60 秒无响应 | 解锁建立 daemon 后再锁屏，验证 list/snapshot/screenshot/mutation；扩展通道结果不等于 DevTools 通道通过 |
 | 9 | 核心路径完成、真实用户活跃/锁屏门待补（2026-09-13） | 本批提交 | 原生 Swift MCP Helper、稳定 identifier 签名脚本、应用 lease 绑定、AX 有界快照、应用所属 layer-zero 窗口截图、近期硬件输入让出、激活/点击/安全输入/按键、secure value 脱敏、Provider 单测 | 本机真实编译/MCP 握手；Accessibility/ScreenCapture 预检均为 true；空白 Fixture App 的 AX、Unicode 输入、限定窗口 PNG 截图真实 canary 通过 | 生产 Developer ID 签名、真实用户活跃让出与锁屏实测 |
 | 10 | 框架与 10m soak 完成、24h/实机 soak 待验收（2026-09-13） | 本批提交 | 独立临时 DevSpace + 真实 stdio MCP fixture；REST/MCP 并发、固定 8-tool、session churn、队列限流/恢复、幂等、取消、超时、输出上限、secure intent、child crash/backoff/recovery、进程树 RSS/FD/socket、关机无孤儿；最终 delegated-approval 10m 为 43,025/43,025 调用、5,000 churn、26 项门全通过、调用 p95 23 ms、峰值 RSS 603.84 MiB | 仅隔离 Fixture，不等同于 Chrome/桌面实机 soak | 24h soak 尚未运行；Chrome 授权、真实锁屏、真实用户活跃让出仍是显式验收门 |
 | 11 | 完成（2026-09-13） | 本批提交 | 固定 REST admin API；固定 MCP 的 `capability_invoke` 调用动态 `devspace.providers.*` 管理能力；默认 grantless delegated approval、enforced-policy 显式兼容开关；Manifest 安全存储；进程内 install/enable/disable/reload/remove；Catalog revision 与 8-tool 不变端到端测试 | 真实 stdio Fake MCP 子进程动态装载、重载和回收 | 包下载/供应链审批由上层管理 Agent 负责 |
