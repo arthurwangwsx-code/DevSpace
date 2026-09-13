@@ -3,8 +3,8 @@
 For the built-in current-profile Chrome preset, see
 [`chrome-current-profile-provider.md`](./chrome-current-profile-provider.md).
 
-DevSpace can keep one downstream MCP client per configured provider, discover its tools,
-register them in the shared capability catalog, and expose them through both:
+DevSpace can keep one downstream MCP client per configured provider, discover its tools and
+protocol assets, register them in the shared capability catalog, and expose them through both:
 
 - `POST /capabilities/mcp` — a fixed eight-tool MCP interface.
 - `/api/capabilities/v1` — a stable REST interface suitable for scripts and CI.
@@ -136,6 +136,20 @@ Capability input/output schema is learned from the downstream tool. A schema cha
 an unchanged capability version is rejected, including after a DevSpace restart because the prior
 catalog is persisted. Bump the manifest mapping's `version` only after reviewing the new contract.
 
+When the downstream MCP advertises `resources` or `prompts` during initialization, DevSpace
+automatically adds five provider-scoped dynamic capabilities without changing the fixed outer API:
+
+- `<provider-id>.resources.list`
+- `<provider-id>.resources.templates.list`
+- `<provider-id>.resources.read`
+- `<provider-id>.prompts.list`
+- `<provider-id>.prompts.get`
+
+These call the standard MCP methods and return their JSON-compatible protocol results. They are
+read-only, open-world capabilities, use the same timeout/cancellation/output-limit/audit path as
+tools, and disappear atomically with the Provider. Downstream instructions remain metadata only
+and are never executed or treated as trusted instructions.
+
 ## Operational behavior
 
 - All MCP, REST, and CLI callers share one supervised provider process/connection.
@@ -144,8 +158,10 @@ catalog is persisted. Bump the manifest mapping's `version` only after reviewing
 - Invocation still passes through schema, queue, timeout, output-limit, cancellation, lease ownership,
   and redacted audit enforcement. Scope/Grant checks are opt-in with
   `DEVSPACE_CAPABILITY_ENFORCE_POLICY=1`; by default approval is delegated to the connected Agent.
-- A downstream MCP's prompts, resources, and instructions are not re-exported. Tools are all exported only
-  when `discoverAllTools=true`; otherwise only explicit mappings appear.
+- Downstream resources, resource templates, and prompts are projected automatically when the server
+  advertises those protocol capabilities. Tools are all exported only when `discoverAllTools=true`;
+  otherwise only explicit tool mappings appear. Server instructions are not re-exported as executable
+  content or treated as trusted instructions.
 - Admin API installation, enable/disable, reload, and recoverable removal update the running
   supervisor and Catalog revision atomically from the caller's perspective; the outer eight MCP tools stay fixed.
 

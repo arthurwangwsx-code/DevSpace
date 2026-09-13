@@ -54,9 +54,14 @@ try {
   const catalogResponse = await fetch(`${base}/capabilities?availableOnly=true`);
   assert.equal(catalogResponse.status, 200);
   const catalog = await catalogResponse.json() as any;
+  assert.equal(catalog.data.items.filter((item: any) => item.providerId === "test.mounted.mcp").length, 9);
   assert.equal(catalog.data.items.some((item: any) => item.id === "test.mounted.echo"), true);
   assert.equal(catalog.data.items.some((item: any) =>
     item.id === "test.mounted.mcp.not_allowlisted"), true);
+  assert.equal(catalog.data.items.some((item: any) =>
+    item.id === "test.mounted.mcp.resources.read"), true);
+  assert.equal(catalog.data.items.some((item: any) =>
+    item.id === "test.mounted.mcp.prompts.get"), true);
   assert.equal(running.capabilityRuntime!.supervisor.list().find(
     ({ id }) => id === "test.mounted.mcp",
   )?.kind, "mcp:stdio");
@@ -71,11 +76,32 @@ try {
   const invocation = await invocationResponse.json() as any;
   assert.equal(invocationResponse.status, 200, JSON.stringify(invocation));
   assert.equal(invocation.data.result.echoed, "mounted");
+  const resourceResponse = await fetch(`${base}/invocations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      capabilityId: "test.mounted.mcp.resources.read",
+      arguments: { uri: "fixture://devspace/readme" },
+    }),
+  });
+  const resourceInvocation = await resourceResponse.json() as any;
+  assert.equal(resourceResponse.status, 200, JSON.stringify(resourceInvocation));
+  assert.match(JSON.stringify(resourceInvocation.data.result), /mounted resource body/);
 
   mcpClient = new Client({ name: "mounted-bridge-test", version: "1.0.0" });
   await mcpClient.connect(new StreamableHTTPClientTransport(
     new URL(`http://127.0.0.1:${address.port}/capabilities/mcp`),
   ));
+  assert.deepEqual((await mcpClient.listTools()).tools.map(({ name }) => name).sort(), [
+    "capability_cancel",
+    "capability_close",
+    "capability_describe",
+    "capability_invoke",
+    "capability_list",
+    "capability_open",
+    "capability_search",
+    "capability_status",
+  ]);
   const exposedCatalog = await mcpClient.callTool({
     name: "capability_list",
     arguments: { providerId: "test.mounted.mcp" },
@@ -94,8 +120,16 @@ try {
     arguments: { capabilityId: "test.mounted.mcp.not_allowlisted", arguments: {} },
   });
   assert.match(JSON.stringify((dynamicBridged.structuredContent as any).data.result), /hidden/);
+  const promptBridged = await mcpClient.callTool({
+    name: "capability_invoke",
+    arguments: {
+      capabilityId: "test.mounted.mcp.prompts.get",
+      arguments: { name: "fixture-prompt", arguments: { topic: "fixed API" } },
+    },
+  });
+  assert.match(JSON.stringify((promptBridged.structuredContent as any).data.result), /Discuss fixed API/);
 
-  console.log("mounted MCP integration passed: manifest -> discover-all child -> catalog -> REST/MCP invocation");
+  console.log("mounted MCP integration passed: manifest -> tools/resources/prompts -> catalog -> REST/MCP invocation");
 } finally {
   await mcpClient?.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));

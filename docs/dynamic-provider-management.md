@@ -98,6 +98,12 @@ increments the catalog revision. With `discoverAllTools=true`, downstream tool-l
 notifications also refresh generated descriptors without changing the fixed eight
 meta-tools.
 
+If the downstream server advertises MCP `resources` or `prompts`, the same Provider
+also registers provider-scoped list/read/templates/get capabilities automatically.
+They are discovered and invoked through the existing fixed meta-tools; no new outer
+REST route or MCP tool is introduced. Server instructions are retained only as
+untrusted connection metadata and never become executable Agent instructions.
+
 ## Persistence and removal
 
 Provider manifests are stored as current-user-owned regular files with mode

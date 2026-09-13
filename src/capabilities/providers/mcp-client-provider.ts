@@ -15,6 +15,9 @@ import type {
 } from "../provider.js";
 import type { JsonObject, JsonValue, ProviderHealth } from "../types.js";
 
+type ProtocolMethod = "resources/list" | "resources/templates/list" | "resources/read"
+  | "prompts/list" | "prompts/get";
+
 export class McpClientProvider implements CapabilityProvider {
   readonly id: string;
   private client?: Client;
@@ -110,8 +113,8 @@ export class McpClientProvider implements CapabilityProvider {
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
     const mappings = this.resolveMappings(tools);
     this.bindings.clear();
-    for (const mapping of mappings) this.bindings.set(mapping.tool, mapping.capabilityId);
-    return mappings.map((mapping) => {
+    for (const mapping of mappings) this.bindings.set(toolBindingKey(mapping.tool), mapping.capabilityId);
+    const toolCapabilities: ProviderCapability[] = mappings.map((mapping) => {
       const tool = byName.get(mapping.tool)!;
       return {
         descriptor: {
@@ -145,6 +148,11 @@ export class McpClientProvider implements CapabilityProvider {
         aliases: [...mapping.aliases],
       };
     });
+    const protocolCapabilities = this.protocolCapabilities(client);
+    for (const capability of protocolCapabilities) {
+      this.bindings.set(protocolBindingKey(capability.binding.mcpMethod as ProtocolMethod), capability.descriptor.id);
+    }
+    return [...toolCapabilities, ...protocolCapabilities];
   }
 
   async invoke(
@@ -152,13 +160,26 @@ export class McpClientProvider implements CapabilityProvider {
     context: ProviderInvocationContext,
   ): Promise<JsonValue> {
     const toolName = typeof request.binding.tool === "string" ? request.binding.tool : undefined;
-    if (!toolName || this.bindings.get(toolName) !== request.capabilityId) {
-      throw new CapabilityError("policy_denied", "The downstream MCP tool is not registered in the catalog.");
+    const protocolMethod = isProtocolMethod(request.binding.mcpMethod)
+      ? request.binding.mcpMethod
+      : undefined;
+    const bindingKey = toolName
+      ? toolBindingKey(toolName)
+      : protocolMethod ? protocolBindingKey(protocolMethod) : undefined;
+    if (!bindingKey || this.bindings.get(bindingKey) !== request.capabilityId) {
+      throw new CapabilityError("policy_denied", "The downstream MCP operation is not registered in the catalog.");
     }
     if (!request.arguments || typeof request.arguments !== "object" || Array.isArray(request.arguments)) {
       throw new CapabilityError("invalid_arguments", "MCP tool arguments must be a JSON object.");
     }
-    return this.callDownstreamTool(toolName, request.arguments as Record<string, unknown>, context.signal);
+    if (toolName) {
+      return this.callDownstreamTool(toolName, request.arguments as Record<string, unknown>, context.signal);
+    }
+    return this.callDownstreamProtocol(
+      protocolMethod!,
+      request.arguments as Record<string, unknown>,
+      context.signal,
+    );
   }
 
   protected async callDownstreamTool(
@@ -199,6 +220,82 @@ export class McpClientProvider implements CapabilityProvider {
     return result.structuredContent
       ? jsonValue(result.structuredContent, `${toolName} structured result`)
       : jsonValue({ content: result.content }, `${toolName} result`);
+  }
+
+  private async callDownstreamProtocol(
+    method: ProtocolMethod,
+    argumentsValue: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<JsonValue> {
+    const client = this.requireClient();
+    if (signal.aborted) throw new CapabilityError("cancelled", "MCP protocol call cancelled.");
+    const options = { signal };
+    if (method === "resources/list") {
+      return jsonValue(await client.listResources(optionalCursor(argumentsValue), options), method);
+    }
+    if (method === "resources/templates/list") {
+      return jsonValue(await client.listResourceTemplates(optionalCursor(argumentsValue), options), method);
+    }
+    if (method === "resources/read") {
+      return jsonValue(await client.readResource({ uri: requiredString(argumentsValue.uri, "uri") }, options), method);
+    }
+    if (method === "prompts/list") {
+      return jsonValue(await client.listPrompts(optionalCursor(argumentsValue), options), method);
+    }
+    const promptArguments = argumentsValue.arguments;
+    if (promptArguments !== undefined && (!promptArguments || typeof promptArguments !== "object" || Array.isArray(promptArguments))) {
+      throw new CapabilityError("invalid_arguments", "arguments must be an object of string values.");
+    }
+    return jsonValue(await client.getPrompt({
+      name: requiredString(argumentsValue.name, "name"),
+      ...(promptArguments === undefined ? {} : {
+        arguments: Object.fromEntries(Object.entries(promptArguments).map(([name, value]) => [
+          name,
+          requiredString(value, `arguments.${name}`),
+        ])),
+      }),
+    }, options), method);
+  }
+
+  private protocolCapabilities(client: Client): ProviderCapability[] {
+    const server = client.getServerCapabilities();
+    const capabilities: ProviderCapability[] = [];
+    if (server?.resources) {
+      capabilities.push(
+        protocolCapability(this.id, "resources/list", "resources.list", "列出 MCP Resources", cursorSchema()),
+        protocolCapability(
+          this.id,
+          "resources/templates/list",
+          "resources.templates.list",
+          "列出 MCP Resource Templates",
+          cursorSchema(),
+        ),
+        protocolCapability(this.id, "resources/read", "resources.read", "读取 MCP Resource", {
+          type: "object",
+          properties: { uri: { type: "string", minLength: 1 } },
+          required: ["uri"],
+          additionalProperties: false,
+        }),
+      );
+    }
+    if (server?.prompts) {
+      capabilities.push(
+        protocolCapability(this.id, "prompts/list", "prompts.list", "列出 MCP Prompts", cursorSchema()),
+        protocolCapability(this.id, "prompts/get", "prompts.get", "获取 MCP Prompt", {
+          type: "object",
+          properties: {
+            name: { type: "string", minLength: 1 },
+            arguments: {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
+          },
+          required: ["name"],
+          additionalProperties: false,
+        }),
+      );
+    }
+    return capabilities;
   }
 
   private createTransport(): Transport {
@@ -295,6 +392,87 @@ export class McpClientProvider implements CapabilityProvider {
     if (!this.client) throw new CapabilityError("provider_unavailable", "Downstream MCP is not connected.");
     return this.client;
   }
+}
+
+function protocolCapability(
+  providerId: string,
+  method: ProtocolMethod,
+  suffix: string,
+  title: string,
+  inputSchema: JsonObject,
+): ProviderCapability {
+  const capabilityId = `${providerId}.${suffix}`;
+  return {
+    descriptor: {
+      id: capabilityId,
+      version: "1.0.0",
+      providerId,
+      title,
+      description: `Call downstream MCP method ${method}.`,
+      tags: ["mcp", "dynamic", method.startsWith("resources/") ? "resource" : "prompt"],
+      inputSchema,
+      effects: { readOnly: true, destructive: false, idempotent: true, openWorld: true },
+      permissions: [],
+      availability: {
+        requiresAwake: false,
+        requiresLoggedInSession: false,
+        requiresUnlocked: false,
+        requiresForegroundApp: false,
+      },
+      execution: {
+        modes: ["sync", "async"],
+        defaultTimeoutMs: 30_000,
+        maxTimeoutMs: 120_000,
+        requiresLease: false,
+        resourceTypes: [],
+      },
+      metadata: {
+        downstreamProtocol: "mcp",
+        downstreamMethod: method,
+        manifestProvider: providerId,
+      },
+    },
+    binding: { mcpMethod: method },
+    aliases: [],
+  };
+}
+
+function cursorSchema(): JsonObject {
+  return {
+    type: "object",
+    properties: { cursor: { type: "string", minLength: 1 } },
+    required: [],
+    additionalProperties: false,
+  };
+}
+
+function optionalCursor(argumentsValue: Record<string, unknown>): { cursor?: string } {
+  return argumentsValue.cursor === undefined
+    ? {}
+    : { cursor: requiredString(argumentsValue.cursor, "cursor") };
+}
+
+function requiredString(value: unknown, name: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new CapabilityError("invalid_arguments", `${name} must be a non-empty string.`);
+  }
+  return value;
+}
+
+function isProtocolMethod(value: unknown): value is ProtocolMethod {
+  return value === "resources/list"
+    || value === "resources/templates/list"
+    || value === "resources/read"
+    || value === "prompts/list"
+    || value === "prompts/get";
+}
+
+function protocolBindingKey(method: ProtocolMethod): string {
+  return `@mcp:${method}`;
+}
+
+function toolBindingKey(tool: string): string {
+  return `@tool:${tool}`;
 }
 
 function toolSlug(name: string): string {

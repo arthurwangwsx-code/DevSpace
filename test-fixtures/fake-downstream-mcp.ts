@@ -24,5 +24,18 @@ for (const name of ["collision.tool", "collision_tool"]) {
     inputSchema: z.object({}),
   }, async () => ({ content: [{ type: "text", text: name }] }));
 }
+server.registerResource("fixture-resource", "fixture://devspace/readme", {
+  description: "A static resource exposed by the mounted MCP fixture.",
+  mimeType: "text/plain",
+}, async (uri) => ({
+  contents: [{ uri: uri.href, mimeType: "text/plain", text: "mounted resource body" }],
+}));
+server.registerPrompt("fixture-prompt", {
+  description: "A prompt exposed by the mounted MCP fixture.",
+  argsSchema: { topic: z.string() },
+}, async ({ topic }) => ({
+  description: "Fixture prompt result",
+  messages: [{ role: "user", content: { type: "text", text: `Discuss ${topic}` } }],
+}));
 
 await server.connect(new StdioServerTransport());

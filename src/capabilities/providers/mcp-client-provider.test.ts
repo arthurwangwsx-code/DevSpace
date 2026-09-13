@@ -23,25 +23,74 @@ const stdio = new McpClientProvider(stdioManifest);
 await stdio.start(context());
 try {
   const capabilities = await stdio.discover(new AbortController().signal);
-  assert.deepEqual(capabilities.map(({ descriptor }) => descriptor.id), ["test.external.echo"]);
-  assert.equal(capabilities[0]!.descriptor.inputSchema.type, "object");
+  assert.deepEqual(capabilities.map(({ descriptor }) => descriptor.id), [
+    "test.external.echo",
+    "test.external.mcp.resources.list",
+    "test.external.mcp.resources.templates.list",
+    "test.external.mcp.resources.read",
+    "test.external.mcp.prompts.list",
+    "test.external.mcp.prompts.get",
+  ]);
+  const echo = capabilities.find(({ descriptor }) => descriptor.id === "test.external.echo")!;
+  assert.equal(echo.descriptor.inputSchema.type, "object");
   const value = await stdio.invoke({
     capabilityId: "test.external.echo",
-    descriptor: capabilities[0]!.descriptor,
-    binding: capabilities[0]!.binding,
+    descriptor: echo.descriptor,
+    binding: echo.binding,
     arguments: { message: "stdio" },
   }, { signal: new AbortController().signal });
   assert.deepEqual(value, { echoed: "stdio" });
+  const resources = capability(capabilities, "test.external.mcp.resources.list");
+  assert.match(JSON.stringify(await stdio.invoke({
+    capabilityId: resources.descriptor.id,
+    descriptor: resources.descriptor,
+    binding: resources.binding,
+    arguments: {},
+  }, { signal: new AbortController().signal })), /fixture:\/\/devspace\/readme/);
+  const templates = capability(capabilities, "test.external.mcp.resources.templates.list");
+  assert.deepEqual(await stdio.invoke({
+    capabilityId: templates.descriptor.id,
+    descriptor: templates.descriptor,
+    binding: templates.binding,
+    arguments: {},
+  }, { signal: new AbortController().signal }), { resourceTemplates: [] });
+  const read = capability(capabilities, "test.external.mcp.resources.read");
+  assert.match(JSON.stringify(await stdio.invoke({
+    capabilityId: read.descriptor.id,
+    descriptor: read.descriptor,
+    binding: read.binding,
+    arguments: { uri: "fixture://devspace/readme" },
+  }, { signal: new AbortController().signal })), /mounted resource body/);
+  const prompt = capability(capabilities, "test.external.mcp.prompts.get");
+  const prompts = capability(capabilities, "test.external.mcp.prompts.list");
+  assert.match(JSON.stringify(await stdio.invoke({
+    capabilityId: prompts.descriptor.id,
+    descriptor: prompts.descriptor,
+    binding: prompts.binding,
+    arguments: {},
+  }, { signal: new AbortController().signal })), /fixture-prompt/);
+  assert.match(JSON.stringify(await stdio.invoke({
+    capabilityId: prompt.descriptor.id,
+    descriptor: prompt.descriptor,
+    binding: prompt.binding,
+    arguments: { name: "fixture-prompt", arguments: { topic: "MCP assets" } },
+  }, { signal: new AbortController().signal })), /Discuss MCP assets/);
+  await assert.rejects(stdio.invoke({
+    capabilityId: prompt.descriptor.id,
+    descriptor: prompt.descriptor,
+    binding: prompt.binding,
+    arguments: { name: "fixture-prompt", arguments: { topic: 42 } },
+  }, { signal: new AbortController().signal }), /arguments\.topic must be a non-empty string/);
   await assert.rejects(stdio.invoke({
     capabilityId: "test.external.echo",
-    descriptor: capabilities[0]!.descriptor,
-    binding: capabilities[0]!.binding,
+    descriptor: echo.descriptor,
+    binding: echo.binding,
     arguments: { message: "__simulate_user_active__" },
   }, { signal: new AbortController().signal }), (error) =>
     error instanceof CapabilityError && error.code === "temporarily_unavailable");
   await assert.rejects(stdio.invoke({
     capabilityId: "test.external.hidden",
-    descriptor: capabilities[0]!.descriptor,
+    descriptor: echo.descriptor,
     binding: { tool: "not_allowlisted" },
     arguments: {},
   }, { signal: new AbortController().signal }), /not registered in the catalog/);
@@ -122,8 +171,8 @@ await dynamic.start(context());
 try {
   const capabilities = await dynamic.discover(new AbortController().signal);
   const dynamicIds = capabilities.map(({ descriptor }) => descriptor.id);
-  assert.equal(dynamicIds.length, 4);
-  assert.equal(new Set(dynamicIds).size, 4);
+  assert.equal(dynamicIds.length, 9);
+  assert.equal(new Set(dynamicIds).size, 9);
   assert.equal(dynamicIds.includes("test.dynamic.mcp.echo"), true);
   assert.equal(dynamicIds.includes("test.dynamic.mcp.not_allowlisted"), true);
   const collisionIds = dynamicIds.filter((id) => id.startsWith("test.dynamic.mcp.collision_tool_"));
@@ -133,7 +182,10 @@ try {
     dynamicIds,
   );
   assert.equal(capabilities.every(({ descriptor }) => descriptor.tags.includes("dynamic")), true);
-  assert.equal(capabilities.every(({ descriptor }) => descriptor.version === "2.1.0"), true);
+  assert.equal(capabilities.filter(({ binding }) => typeof binding.tool === "string")
+    .every(({ descriptor }) => descriptor.version === "2.1.0"), true);
+  assert.equal(capabilities.filter(({ binding }) => typeof binding.mcpMethod === "string")
+    .every(({ descriptor }) => descriptor.version === "1.0.0"), true);
   const hidden = capabilities.find(({ descriptor }) =>
     descriptor.id === "test.dynamic.mcp.not_allowlisted")!;
   assert.deepEqual(await dynamic.invoke({
@@ -148,7 +200,16 @@ try {
   await dynamic.stop("test_complete");
 }
 
-console.log("MCP client provider tests passed: stdio, HTTP, explicit mapping, discover-all, schema fail-closed, user-active yield");
+console.log("MCP client provider tests passed: stdio, HTTP, tools/resources/prompts, discover-all, schema fail-closed, user-active yield");
+
+function capability(
+  capabilities: Awaited<ReturnType<McpClientProvider["discover"]>>,
+  id: string,
+) {
+  const found = capabilities.find(({ descriptor }) => descriptor.id === id);
+  assert.ok(found, `missing capability ${id}`);
+  return found;
+}
 
 function manifest(transport: Record<string, unknown>): McpProviderManifest {
   return parseMcpProviderManifest({

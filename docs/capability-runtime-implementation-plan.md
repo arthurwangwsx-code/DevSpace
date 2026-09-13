@@ -754,6 +754,10 @@ mcp-streamable-http
 annotations 和 server/version 只作为 binding/metadata。`tools/list_changed` 通知触发原子
 rediscover 和 Catalog revision，不能直接修改正在执行的 registration map。
 
+若初始化能力声明包含 `resources` 或 `prompts`，Provider 自动增加 resources list/templates/read
+和 prompts list/get 五项动态 Capability。它们沿用固定 invoke、超时、取消、输出限制和审计链，
+不会增加外层工具；server instructions 只作为不可信连接元数据，不能进入 Agent 指令上下文。
+
 自动 ID 为 `<provider-id>.<normalized-tool-name>`，归一化冲突时追加稳定 hash；Manifest 的
 `discoveredToolVersion` 控制全部自动描述符版本。不同 Provider 的同名 tool 不冲突；同一稳定
 ID 被另一 Provider 占用时整次刷新失败。上游 Schema digest 改变后刷新失败，管理员需要提高
@@ -769,8 +773,9 @@ ID 被另一 Provider 占用时整次刷新失败。上游 Schema digest 改变�
 - MCP annotations 只是风险提示，最终 readOnly/destructive/openWorld 和权限由本地 Manifest
   mapping 决定。
 - 已认证的上层 Agent 可以注册、启停、重载和移除 Provider；DevSpace 不重复实现审批流。
-- v1 必须完整支持 tool discovery/call。resources、resource templates 和 prompts 在后续小批次
-  映射为只读资产/固定元调用，但不能为了它们改变现有 `/mcp`。
+- v1 完整支持 tool discovery/call，并把 resources、resource templates 和 prompts 投影为同一
+  Catalog 下的 provider-scoped operation，不新增顶层 REST route。所有协议资产仍受统一输出
+  上限、取消、审计和 Provider 生命周期管理。
 - 一个下游 MCP 断线只影响该 Provider，不能拖垮现有 workspace MCP 或其他 Providers。
 
 Manifest 增加映射示例：
@@ -1242,7 +1247,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 9 | 核心路径完成、真实用户活跃/锁屏门待补（2026-09-13） | 本批提交 | 原生 Swift MCP Helper、稳定 identifier 签名脚本、应用 lease 绑定、AX 有界快照、应用所属 layer-zero 窗口截图、近期硬件输入让出、激活/点击/安全输入/按键、secure value 脱敏、Provider 单测 | 本机真实编译/MCP 握手；Accessibility/ScreenCapture 预检均为 true；空白 Fixture App 的 AX、Unicode 输入、限定窗口 PNG 截图真实 canary 通过 | 生产 Developer ID 签名、真实用户活跃让出与锁屏实测 |
 | 10 | 框架与 10m soak 完成、24h/实机 soak 待验收（2026-09-13） | 本批提交 | 独立临时 DevSpace + 真实 stdio MCP fixture；REST/MCP 并发、固定 8-tool、session churn、队列限流/恢复、幂等、取消、超时、输出上限、secure intent、child crash/backoff/recovery、进程树 RSS/FD/socket、关机无孤儿；最终 delegated-approval 10m 为 43,025/43,025 调用、5,000 churn、26 项门全通过、调用 p95 23 ms、峰值 RSS 603.84 MiB | 仅隔离 Fixture，不等同于 Chrome/桌面实机 soak | 24h soak 尚未运行；Chrome 授权、真实锁屏、真实用户活跃让出仍是显式验收门 |
 | 11 | 完成（2026-09-13） | 本批提交 | 固定 REST admin API；固定 MCP 的 `capability_invoke` 调用动态 `devspace.providers.*` 管理能力；默认 grantless delegated approval、enforced-policy 显式兼容开关；Manifest 安全存储；进程内 install/enable/disable/reload/remove；Catalog revision 与 8-tool 不变端到端测试 | 真实 stdio Fake MCP 子进程动态装载、重载和回收 | 包下载/供应链审批由上层管理 Agent 负责 |
-| 12 | 完成（2026-09-13） | 本批提交 | Manifest `discoverAllTools`；下游 tools/list 自动生成稳定 capability ID、Schema、描述和保守 effect 元数据；显式映射可覆盖；REST/MCP 自动发现与调用端到端测试 | 真实 stdio Fake MCP 的未映射工具自动进入 Catalog 并可由固定 `capability_invoke` 调用 | prompts/resources 暂不投影为 Capability；需要时以新资产类型扩展 Catalog |
+| 12 | 完成（2026-09-13） | 本批提交 | Manifest `discoverAllTools`；下游 tools/list 自动生成稳定 capability ID、Schema、描述和保守 effect 元数据；显式映射可覆盖；REST/MCP 自动发现与调用端到端测试 | 真实 stdio Fake MCP 的未映射工具自动进入 Catalog 并可由固定 `capability_invoke` 调用 | resources/prompts 后续投影见 Batch 28 |
 | 13 | 框架完成、三阶段实机执行待解锁（2026-09-13） | 本批提交 | `test:current-chrome` 对 lock-state 前置条件、daemon persistence、固定九能力、list、lease、snapshot、screenshot、同页 navigation 和脱敏 JSON/Markdown receipt 做统一验证 | 当前锁屏环境的 unlocked-baseline 预检在任何页面调用前按预期失败并生成 receipt | 用户解锁后依次运行 unlocked-baseline、locked-continuation、unlocked-recovery |
 | 14 | 扩展桥接代码、产品化与测试完成，实机矩阵待解锁（2026-09-13） | `fa02d30`、`577123d` + 本批提交 | MV3 extension、稳定 ID/外置私钥打包、安装与 profile-aware doctor、Native Messaging host、Unix socket bridge、固定八能力、当前标签显式 lease；用户标签仅释放、Agent 标签自动关闭；service-worker ownership 恢复；1 MiB/64 MiB 方向上限、2 MiB 响应、断线/取消/分片、稳定 Node launcher 与隔离安装/打包/doctor 测试；一进程三阶段锁屏矩阵 | CRX/ZIP/unpacked 与 native host 已在本机生成并校验；doctor 准确报告安装材料就绪但 Chrome Profile 启用数为 0；锁屏环境中矩阵在任何浏览器调用前按预期拒绝 | 用户解锁后在当前 Chrome 加载 unpacked extension，并运行 `npm run test:browser-extension` |
 | 15 | 完成（2026-09-13） | `61b1adc` | `waitForHttpServerListening`、未监听关闭兼容与真实端口冲突回归；完整 test/build | 本机 7676 已占用时新实例退出码 1，只输出 EADDRINUSE，不虚报 listening、不抛二次关闭异常 | 无 |
@@ -1258,6 +1263,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 25 | Provider reload 目录连续性修复完成（2026-09-13） | `695ccca` | reload 停旧/启新期间保留 Descriptor，健康状态转为 stopping/starting，调用稳定返回 provider unavailable 而非 capability not found；新 discovery 完成后原子替换；disabled reload 仍退休目录；完整 `npm test` 与 typecheck 通过 | 升级桌面 Host 的并行调用真实捕获了旧行为的瞬时 `capability_not_found`，成为本修复的生产复现证据 | 代码门已完成；生产连续性证据见 Batch 26 |
 | 26 | Provider reload 生产目录连续性门完成（2026-09-13） | 本批提交 | 桌面 Provider 性能 canary 在动态 reload 未完成时持续请求 `desktop.macos.status` Descriptor，任何 404/`capability_not_found` 立即失败；文档明确该门不替代解锁后的 UI 验收；typecheck、build 通过 | 锁屏线上 PASS：reload 84 ms；期间 148 次 Descriptor 探测全部成功；旧 PID 57492 已退出，新 PID 57795 恢复；REST 状态 p95 42 ms、MCP 状态 p95 35 ms、RSS 增长 528 KiB；receipt `.build/desktop-provider-performance/2026-09-13T08-43-00-935Z` | 锁屏状态转换、浏览器插件恢复和桌面 UI fixture 按用户决定留到解锁后；24h 有界 soak 继续运行 |
 | 27 | 统一 release lane 与生产桌面 Fixture 框架完成，locked lane 通过（2026-09-13） | `ac6d47a`、`a5421a0` | `test:capability-release` 记录 commit、全部 dirty paths、runtime-source dirty 子集、逐门日志和 JSON/Markdown receipt；按 core/locked/unlocked/browser-transition 编排，targeted rerun、跳过、源码脏树和前置条件失败均不能形成 release-eligible receipt；`test:desktop-runtime-fixture` 覆盖固定 REST API→Runtime→动态 Provider→签名 Host→Fixture App，并验证 AX 脱敏、窗口截图、输入和应用重启后旧 lease 失效 | 基于 runtime source clean 的 `a5421a0` 完整 locked lane 7/7 通过：typecheck、完整 test、build、capability stress smoke、真实 `chrome-devtools-mcp` 挂载、桌面锁屏边界、线上 reload 连续性；receipt `.build/capability-release/2026-09-13T08-59-34-678Z`，仅记录并忽略并行文档 WIP | unlocked 与 browser-transition lane 需解锁；24h soak 独立完成后才形成最终 release evidence set |
+| 28 | 通用 MCP 协议资产投影完成（2026-09-13） | 本批提交 | 下游初始化声明 `resources`/`prompts` 时自动注册 provider-scoped list/templates/read/get 动态 Capability；固定外层仍为 8 tools；调用沿用 Schema、取消、超时、输出限制与审计；binding key 隔离避免恶意 tool name 与协议方法碰撞；stdio 单测覆盖五个方法及非法 prompt 参数 | 真实 stdio Fake MCP 经 REST 读取 Resource、经固定 MCP 获取 Prompt；无相关 server capability 的 HTTP MCP 不产生虚假 Descriptor | 当前 24h soak 在本批之前启动，本批需完整 locked lane 回归；真实第三方 resource/prompt MCP 可作为后续兼容性扩展，不阻塞协议实现 |
 
 ## 20. 推荐阅读顺序
 
