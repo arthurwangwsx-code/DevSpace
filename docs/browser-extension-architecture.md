@@ -280,6 +280,11 @@ Validated on the user's installed Chrome profile with extension ID
 - The running Chrome process had no `--remote-debugging-*` launch flag. The
   successful path was Extension -> Native Messaging -> DevSpace, independent of
   the external Chrome DevTools provider.
+- `npm run test:browser-open-world:real` separately opens an Agent-owned HTTPS tab,
+  verifies the canonical snapshot/wait descriptors are both `readOnly` and
+  `openWorld`, reads only a semantic snapshot, and closes the tab with its lease.
+  The default target is `https://example.com/`; the test performs no mutation in
+  the external page and never adopts an existing user tab.
 
 ## v0.2 capability hardening
 

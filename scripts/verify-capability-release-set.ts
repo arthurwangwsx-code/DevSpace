@@ -28,6 +28,7 @@ const EXPECTED_LANE_GATES: Record<Lane, string[]> = {
     "capability_stress_smoke",
     "real_external_mcp_mount",
     "production_browser_real_smoke",
+    "production_browser_open_world_readonly",
     "direct_desktop_helper_fixture",
     "production_desktop_fixture",
     "production_desktop_reload",

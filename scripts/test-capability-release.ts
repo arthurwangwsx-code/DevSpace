@@ -112,6 +112,9 @@ function allGates(): Record<Lane, Gate[]> {
   const productionBrowser = npmGate("production_browser_real_smoke", [
     "run", "test:browser-control:real",
   ]);
+  const productionBrowserOpenWorld = npmGate("production_browser_open_world_readonly", [
+    "run", "test:browser-open-world:real", "--", "--output", join(childOutputRoot, "browser-open-world-readonly"),
+  ]);
   const productionDesktopPermissions = npmGate("production_desktop_permissions", [
     "run", "doctor:desktop-host", "--", "--require-permissions",
   ]);
@@ -128,6 +131,7 @@ function allGates(): Record<Lane, Gate[]> {
       productionDesktopPermissions,
       ...core,
       { ...productionBrowser, state: "unlocked" },
+      { ...productionBrowserOpenWorld, state: "unlocked" },
       { ...npmGate("direct_desktop_helper_fixture", ["run", "test:desktop-helper"]), state: "unlocked" },
       { ...npmGate("production_desktop_fixture", [
         "run", "test:desktop-runtime-fixture", "--", "--output", join(childOutputRoot, "desktop-runtime-fixture"),

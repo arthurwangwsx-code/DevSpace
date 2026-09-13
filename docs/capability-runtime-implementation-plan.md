@@ -696,12 +696,13 @@ Scope 语义：
 - argument constraint（导航域名 allowlist、文件路径 allowlist 等）
 - 有效期、创建人、撤销时间
 
-enforced-policy 模式 fail closed；delegated-approval 是本项目默认值。旧策略能力包括：
+enforced-policy 模式 fail closed；delegated-approval 是本项目默认值。以下规则只属于显式启用的
+兼容策略模式，不会在默认 delegated 模式中形成 DevSpace 审批门：
 
 - 已认证主体可发现经过管理员启用的安全摘要。
 - Chrome 的 `list_pages`、`take_snapshot` 可在显式页面 lease 后授予只读调用。
 - 导航、点击、输入、上传、下载等 mutation 需要单独 grant。
-- password/secure field 默认永久拒绝远程填写；只能由明确的高信任本机策略例外。
+- password/secure field 可要求高信任 grant；默认 delegated 模式不拦截输入，但任何模式都不读取其值。
 - 任意 shell、任意 AppleScript、解锁、密码输入和安全设置修改不注册为 Capability。
 
 策略必须包装在 Router 层，不能只放在 REST/MCP adapter 中，否则 CLI 或组合调用可能绕过。
@@ -1270,6 +1271,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 32 | DevSpace 自有生产服务切换与 TCC 身份纠偏完成（2026-09-13） | `68769dd` + 本批 doctor 修复提交 | 自有 LaunchAgent installer/doctor 单测通过；权限 doctor 改为 LaunchServices 启动稳定 App，并有打包回归防止退回直接执行 Mach-O；typecheck 通过 | 生产已从 `com.aibox.devspace.502.7676` 切换到 `com.devspace.502.7676`，复用原状态库，旧 label 卸载；health 精确报告 release `1.0.4+7532e108c50e`、source `7532e108c50e`，browser Profile 自动重连；14 项 desktop capability 与 Host 0.4.0 在线。LaunchServices 实测 TCC 均为 false，而 Terminal 直接执行曾返回 true，后者已被明确判为父进程授权假阳性 | 已通过产品入口发起一次集中授权请求；仍需用户在 macOS 系统界面确认 `DevSpace Desktop Host` 的 Accessibility 与 Screen Recording，然后执行生产 Fixture、unlocked release lane；不自动点击或修改 TCC 数据库 |
 | 33 | 发布回执与生产源码一致性门完成（2026-09-13） | 本批提交 | 最终 evidence-set verifier 内置当前 lane 门清单，旧回执无法自行少声明门禁；回归测试明确验证该 fail-closed 行为；runtime provenance 扩展到 scripts、test fixtures、package 与构建配置；typecheck、service installer test、verifier test 通过 | 三类生产 lane 均先校验 DevSpace 自有 LaunchAgent 的 release/source 与当前 HEAD；unlocked lane 纳入真实当前 Profile browser smoke；service doctor 的 `--require-current-source` 已对线上 release 做正向验证 | 人工 lock→unlock 矩阵按用户要求后测；unlocked desktop lane 仍等待稳定 App 的 macOS TCC 确认；24h soak 保持原进程继续运行 |
 | 34 | 完整 lane 快速前置失败门完成（2026-09-13） | 本批提交 | desktop host doctor 增加 `--require-permissions` 严格模式；locked/unlocked lane 把生产服务源码检查提前，unlocked 再于完整 test/build/stress 之前检查稳定 App 的双 TCC；lane 契约测试校验门禁全集、顺序与唯一性；typecheck 与 verifier test 通过 | 当前稳定 App 的 Accessibility 已为 true、Screen Recording 为 false；实际 unlocked lane 在 0.57 秒内完成 service PASS、permissions FAIL，并明确列出未运行的后续门，receipt `.build/capability-release-preflight/2026-09-13T10-08-52-013Z` | 用户只需补充 Screen Recording 授权后再运行完整 unlocked lane；不会在已知权限缺口下先重复耗时 core 测试 |
+| 35 | 当前 Chrome 外部只读 openWorld 门完成（2026-09-13） | 本批提交 | 新增独立 `test:browser-open-world:real`，严格要求 HTTPS/无 URL 凭据，校验 canonical snapshot/wait 的 readOnly+openWorld 元数据，通过 Agent 自建标签、页面 lease、只读 wait/snapshot 和确定性标签清理生成 JSON/Markdown receipt；unlocked release lane 与最终 gate contract 纳入该门；typecheck 与 lane contract test 通过 | 用户当前 Chrome Profile 经默认 Extension→Native Messaging→DevSpace 路径访问 `https://example.com/`，7/7 PASS、页面 mutation 为 0、未接管用户标签，receipt `.build/browser-open-world-readonly/2026-09-13T10-18-02-867Z` | 外部网络不可用会按独立门明确失败，不以本地 fixture 冒充 openWorld；完整锁屏矩阵仍按用户要求后测 |
 
 ## 20. 推荐阅读顺序
 

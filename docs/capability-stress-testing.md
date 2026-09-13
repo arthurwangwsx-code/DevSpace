@@ -66,9 +66,10 @@ writes a JSON/Markdown lane receipt under `.build/capability-release/`.
   capability stress smoke, and a real external `chrome-devtools-mcp` mount.
 - `locked`: all core gates plus the fail-closed desktop lock boundary and live
   production Provider reload/continuous-catalog canary.
-- `unlocked`: all core gates plus the direct Helper fixture, the deployed
-  production desktop fixture (including stale-process lease rejection), and the
-  production Provider canary.
+- `unlocked`: production service/TCC preflights, all core gates, the current-profile
+  local browser fixture, a separate HTTPS open-world read-only snapshot, the direct
+  Helper fixture, the deployed production desktop fixture (including stale-process
+  lease rejection), and the production Provider canary.
 - `browser-transition`: starts unlocked and runs the live extension baseline →
   locked continuation → unlocked recovery matrix through the production REST API.
 
