@@ -51,6 +51,7 @@
     "test:capabilities": "tsx src/capabilities/descriptor-schema.test.ts && tsx src/capabilities/errors.test.ts && tsx src/capabilities/redaction.test.ts && tsx src/capabilities/registry.test.ts && tsx src/capabilities/provider-supervisor.test.ts && tsx src/capabilities/router.test.ts && tsx src/capabilities/http-router.test.ts && tsx src/capabilities/http-auth.test.ts && tsx src/capabilities/mcp-adapter.test.ts && tsx src/capabilities/cli.test.ts && tsx src/capabilities/provider-admin.integration.test.ts && tsx src/capabilities/mcp-provider-manifest.test.ts && tsx src/capabilities/providers/mcp-client-provider.test.ts && tsx src/capabilities/providers/chrome-devtools-provider.test.ts && tsx src/capabilities/providers/mcp-provider-integration.test.ts && tsx src/stress/capability-runner.test.ts",
     "test:desktop-helper": "sh scripts/build-desktop-helper.sh && sh scripts/build-desktop-fixture.sh && tsx scripts/test-desktop-helper.ts .build/devspace-desktop-helper .build/DevSpaceDesktopFixture.app",
     "test:desktop-lock-boundary": "sh scripts/build-desktop-helper.sh && tsx scripts/test-desktop-lock-boundary.ts .build/devspace-desktop-helper",
+    "test:desktop-provider-performance": "tsx scripts/test-desktop-provider-performance.ts",
     "build:desktop-host": "sh scripts/build-desktop-host.sh",
     "doctor:desktop-host": "node scripts/doctor-desktop-host.mjs",
     "test:current-chrome": "tsx scripts/test-current-chrome-provider.ts",
