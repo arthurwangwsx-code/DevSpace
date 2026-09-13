@@ -35,12 +35,22 @@ try {
   assert.equal(structured.platform, "macOS");
   assert.equal(typeof structured.accessibilityTrusted, "boolean");
   assert.equal(typeof structured.screenCaptureGranted, "boolean");
+  const fixturePermissionsReady = structured.accessibilityTrusted === true
+    && structured.screenCaptureGranted === true;
   console.log(JSON.stringify({
     passed: true,
     toolCount: tools.tools.length,
     accessibilityTrusted: structured.accessibilityTrusted,
     screenCaptureGranted: structured.screenCaptureGranted,
-    ...(fixtureApp ? await runFixtureCanary(client, fixtureApp) : {}),
+    ...(fixtureApp
+      ? fixturePermissionsReady
+        ? await runFixtureCanary(client, fixtureApp)
+        : {
+            fixtureCanarySkipped: true,
+            fixtureCanarySkipReason:
+              "temporary helper lacks stable macOS TCC identity; use test:desktop-runtime-fixture for real AX/screenshot acceptance",
+          }
+      : {}),
   }));
 } finally {
   await client.close().catch(() => {});

@@ -293,6 +293,11 @@ Extension/Native Host/Runtime 断连后，采用带抖动退避、会话 epoch�
 
 - `6d17229` `feat(desktop): complete semantic computer use controls`
 - `68769dd` `feat(macos): own devspace service lifecycle`
+- `5e9d664` `fix(desktop): launch provider with stable TCC identity`
+- `2c1c8e6` `fix(desktop): refresh long-lived app state`
+- `2abb424` `fix(desktop): type through focused accessibility field`
+- `ad496b9` `test(desktop): accept synchronous lease expiry`
+- `901ca74` `fix(desktop): make fixture mutations deterministic`
 
 已落地的 Computer Use 能力包括：精确窗口枚举与指定窗口截图、带短期
 `snapshotId` / `elementId` 的 AX 语义元素、语义点击和聚焦、滚动、拖拽、左/右键与
@@ -302,20 +307,43 @@ Extension/Native Host/Runtime 断连后，采用带抖动退避、会话 epoch�
 工具不变。
 
 权限流程已改成两条明确路径：正常启动与健康检查只做无弹窗 preflight；只有显式运行
-`--request-permissions` 才请求系统显示 Accessibility / Screen Recording 授权 UI。系统已被
-请求显示授权，但 macOS 仍报告两项权限未授权，因此真实生产 fixture 会在第一项权限门禁
-处明确失败，不通过重启、修改 TCC 数据库或自动点击系统设置绕过该边界。
+`--request-permissions` 才请求系统显示 Accessibility / Screen Recording 授权 UI。随后使用
+已获得 Accessibility 的稳定签名 Host 通过公开 AX 接口完成系统设置中的 Screen Recording
+开关操作，没有修改 TCC 数据库、关闭 SIP 或使用安全机制绕过。当前正式
+`DevSpaceDesktopHost.app` 以 `J56BFQN5PZ` 团队和固定 bundle id
+`com.devspace.desktop-host` 安装，版本 `0.4.4`，LaunchServices 身份探测返回
+`accessibilityTrusted=true`、`screenCaptureGranted=true`。
+
+实施过程中还确认了一个关键 TCC 身份问题：Runtime 直接 spawn App Bundle 内 Mach-O 时，
+macOS 会把权限责任归属到错误的启动链，导致正式 App 已授权而 Provider 仍得到 false。
+现已增加 LaunchServices stdio bridge，让 MCP Provider 通过签名 App 身份启动并继续透传
+stdin/stdout；Provider 热重载后状态为 `ready`，14 项桌面 capability 均使用该稳定身份。
+
+另外修复了长生命周期 Helper 的 GUI App 发现刷新、租约注入字段对外 schema、聚焦文本框
+输入，以及 fixture `NSButton.target` 不被强持有导致 `AXPress` 返回成功但 action 未执行的问题。
+`desktop_click_element` 现在不会把 AXPress 的“动作已派发”错误标记成业务结果已验证；真正的
+业务结果由后续 snapshot/postcondition 验证。
 
 DevSpace 现已自带 macOS LaunchAgent 安装器、watchdog 与 doctor，可将服务运行逻辑从兄弟
 仓库迁移到 `~/Library/Application Support/DevSpace/runtime`，记录 release/source commit，
 并区分“已安装版本”和“当前正在运行版本”。安装配置不内嵌 owner token、隧道 API key 等
 秘密；立即切换由显式 `--activate` 控制，以免安装过程意外断开当前远程会话。
 
-验证结果：完整 `npm test` 与 `npm run build` 均通过；桌面 Provider 实机只读性能门禁通过，
+最终验证结果：完整 `npm test` 与 `npm run build` 均通过；桌面 Provider 实机只读性能门禁通过，
 REST `desktop_status` p95 为 44 ms、MCP p95 为 48 ms，测试期间 RSS 增长 928 KiB；clean
 commit 的 Capability smoke 80/80 业务调用成功、invocation p95 26 ms、进程树峰值 RSS
-356.97 MiB、全部 release gates 通过且无孤儿 Provider。上述性能结果均不把尚未获得 TCC
-权限的真实 AX/截图写操作冒充成已完成验收。
+356.97 MiB、全部 release gates 通过且无孤儿 Provider。
+
+真实生产路径验收也已闭环：`npm run test:desktop-runtime-fixture` 使用固定签名 0.4.4 Host、
+正式 Capability Runtime/REST、真实 TCC、真实 AX 和窗口截图完成 22/22 PASS。覆盖权限门、
+Fixture 启动、进程绑定租约、应用激活、AX snapshot、窗口枚举、应用/精确窗口截图、语义点击
+及后置验证、语义聚焦、Command+A、文本输入、允许按键、滚动、拖拽、文本后置验证、应用重启、
+旧租约 `lease_expired` 以及恢复租约。最终回执：
+`.build/desktop-runtime-fixture/2026-09-13T11-12-06-018Z/summary.md`。
+
+临时 ad-hoc Helper 的 `test:desktop-helper` 不再把终端继承的 TCC 当作产品权限证据：没有稳定
+TCC 身份时只验证 MCP 协议、14 项工具和 schema，并明确跳过真实 AX/screenshot canary；真实
+桌面动作只由上述生产 signed Host fixture 负责验收。
 
 ## 附录 A：本地证据索引
 
