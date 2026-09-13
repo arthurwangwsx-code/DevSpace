@@ -59,7 +59,7 @@ export class BrowserControlProvider implements CapabilityProvider {
       capability("browser.page.select", "Select an option in an acquired browser page", "select_option", true, MUTATION, { index: { type: "integer" }, value: { type: "string" } }, ["index", "value"], ["browser.extension.select_option", "select dropdown"]),
       capability("browser.file.upload", "Upload local files through a browser file input", "set_input_files", true, MUTATION, {
         index: { type: "integer" }, files: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 32 },
-      }, ["index", "files"], ["browser.extension.set_input_files", "upload file", "file input"]),
+      }, ["index", "files"], ["browser.extension.set_input_files", "upload file", "file input"], { defaultTimeoutMs: 60_000, maxTimeoutMs: 120_000 }),
       capability("browser.page.type", "Type text into an acquired browser page", "type", true, MUTATION, { text: { type: "string" } }, ["text"], ["browser.extension.type_text", "browser.chrome.type_text", "enter text"]),
       capability("browser.page.press", "Press a key in an acquired browser page", "press", true, MUTATION, { key: { type: "string" } }, ["key"], ["browser.extension.press_key", "browser.chrome.press_key", "keyboard"]),
       capability("browser.page.evaluate", "Evaluate JavaScript in an acquired browser page", "evaluate", true, MUTATION, { expression: { type: "string" }, awaitPromise: { type: "boolean" } }, ["expression"], ["browser.extension.evaluate", "page javascript"]),
@@ -78,7 +78,7 @@ export class BrowserControlProvider implements CapabilityProvider {
       }, ["downloadId"], ["download progress", "download status"]),
       capability("browser.file.wait_download", "Wait for a browser download to complete", "wait_download", false, READ_ONLY, {
         downloadId: { type: "integer" }, timeoutMs: { type: "integer", minimum: 0, maximum: 120000 }, intervalMs: { type: "integer", minimum: 25, maximum: 1000 }, profileId: { type: "string" },
-      }, ["downloadId"], ["wait download", "download complete"]),
+      }, ["downloadId"], ["wait download", "download complete"], { defaultTimeoutMs: 60_000, maxTimeoutMs: 120_000 }),
     ];
   }
   async open(request: ProviderOpenRequest, context: ProviderInvocationContext): Promise<ProviderLease> {
@@ -157,11 +157,21 @@ export class BrowserControlProvider implements CapabilityProvider {
 /** @deprecated Use BrowserControlProvider. Kept for internal test/import compatibility. */
 export class BrowserExtensionProvider extends BrowserControlProvider {}
 
-function capability(id: string, title: string, command: string, requiresLease: boolean, effects: typeof READ_ONLY, properties: JsonObject, required: string[] = [], aliases: string[] = []): ProviderCapability {
+function capability(
+  id: string,
+  title: string,
+  command: string,
+  requiresLease: boolean,
+  effects: typeof READ_ONLY,
+  properties: JsonObject,
+  required: string[] = [],
+  aliases: string[] = [],
+  timeout: { defaultTimeoutMs: number; maxTimeoutMs: number } = { defaultTimeoutMs: 20_000, maxTimeoutMs: 60_000 },
+): ProviderCapability {
   const [, resource = "browser", action = "invoke"] = id.split(".");
   // Bump this version whenever any public browser capability contract changes.
   // The persisted Capability Registry intentionally rejects same-version schema
   // drift across DevSpace restarts.
-  return { descriptor: { id, version: "2.1.0", providerId: BROWSER_EXTENSION_PROVIDER_ID, title, description: title, tags: ["browser", resource, action], inputSchema: { type: "object", properties, required, additionalProperties: false }, effects, permissions: [], availability: { requiresAwake: true, requiresLoggedInSession: true, requiresUnlocked: false, requiresForegroundApp: false }, execution: { modes: ["sync"], defaultTimeoutMs: 20_000, maxTimeoutMs: 60_000, requiresLease, resourceTypes: requiresLease ? ["browser_page"] : [] }, metadata: { domain: "browser", resource, action, routing: "extension-first", transport: "chrome-native-messaging" } }, binding: { command }, aliases };
+  return { descriptor: { id, version: "2.2.0", providerId: BROWSER_EXTENSION_PROVIDER_ID, title, description: title, tags: ["browser", resource, action], inputSchema: { type: "object", properties, required, additionalProperties: false }, effects, permissions: [], availability: { requiresAwake: true, requiresLoggedInSession: true, requiresUnlocked: false, requiresForegroundApp: false }, execution: { modes: ["sync"], defaultTimeoutMs: timeout.defaultTimeoutMs, maxTimeoutMs: timeout.maxTimeoutMs, requiresLease, resourceTypes: requiresLease ? ["browser_page"] : [] }, metadata: { domain: "browser", resource, action, routing: "extension-first", transport: "chrome-native-messaging" } }, binding: { command }, aliases };
 }
 function asObject(value: JsonValue): JsonObject { return value && typeof value === "object" && !Array.isArray(value) ? value : {}; }

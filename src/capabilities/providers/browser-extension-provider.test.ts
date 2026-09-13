@@ -66,9 +66,13 @@ extension.on("data", (chunk) => {
 });
 
 const capabilities = await provider.discover(lifetime.signal);
+const byId = new Map(capabilities.map((entry) => [entry.descriptor.id, entry]));
 assert.equal(capabilities.length, 27);
 assert.equal(new Set(capabilities.map(({ descriptor }) => descriptor.version)).size, 1);
-assert.equal(capabilities[0]?.descriptor.version, "2.1.0");
+assert.equal(capabilities[0]?.descriptor.version, "2.2.0");
+assert.equal(byId.get("browser.file.upload")?.descriptor.execution.defaultTimeoutMs, 60_000);
+assert.equal(byId.get("browser.file.upload")?.descriptor.execution.maxTimeoutMs, 120_000);
+assert.equal(byId.get("browser.file.wait_download")?.descriptor.execution.maxTimeoutMs, 120_000);
 assert.equal(capabilities.every(({ descriptor }) => descriptor.id.startsWith("browser.")), true);
 assert.equal(capabilities.some(({ descriptor }) => descriptor.id.includes(".extension.")), false);
 assert.equal(capabilities.some(({ descriptor }) => descriptor.id.includes(".chrome.")), false);
@@ -85,7 +89,6 @@ registry.replaceProviderCatalog({
   })),
 });
 assert.equal(registry.capabilityCountForProvider("browser.control"), 27);
-const byId = new Map(capabilities.map((entry) => [entry.descriptor.id, entry]));
 const profiles = byId.get("browser.profile.list")!;
 assert.deepEqual(await provider.invoke({
   capabilityId: profiles.descriptor.id,

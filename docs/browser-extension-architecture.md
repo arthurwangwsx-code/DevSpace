@@ -155,12 +155,23 @@ unlocked:
 npm run test:browser-extension
 ```
 
+For a quick unlocked production-path check that does not wait for a lock/unlock
+transition, point the same runner at the live Capability REST endpoint:
+
+```bash
+npm run test:browser-extension -- \
+  --base-url http://127.0.0.1:7676/api/capabilities/v1 \
+  --baseline-only
+```
+
 The runner creates only a loopback fixture and an inactive Agent-owned tab. It
 keeps one Provider connection and one page lease across all three phases,
 prompts for manual lock and unlock, validates snapshot/screenshot/click/type/key
 operations, and closes the Agent tab at the end. It refuses to start when the
 Mac is already locked or another process owns the bridge socket, and writes a
 redacted JSON/Markdown receipt under `.build/browser-extension-matrix/`.
+Baseline-only mode performs the same discovery, lease, mutation, screenshot and
+cleanup checks but stops before asking for a lock transition.
 
 ## Security boundaries
 
@@ -197,17 +208,6 @@ redacted JSON/Markdown receipt under `.build/browser-extension-matrix/`.
 - Agent-created tabs and user/adopted tabs have different cleanup semantics.
 - Existing Chrome DevTools provider remains available for deep debugging.
 
-## v0.3 reliability and control additions
-
-- The native host survives DevSpace process restarts and reconnects to the
-  stable Unix socket without requiring a Chrome extension reload.
-- `browser.page.wait` supports selector/text/load plus URL and network-idle
-  conditions.
-- Browser downloads expose status and completion waiting as canonical
-  second-level capabilities.
-- Semantic snapshots and element lookup traverse open Shadow DOM and
-  same-origin iframes so click/select/upload can keep using one stable element
-  index model.
 ## Real-browser verification
 
 The repository provides an opt-in real Chrome smoke test:
@@ -220,7 +220,8 @@ It intentionally does not run in ordinary CI because it requires an installed
 DevSpace Browser Bridge extension, the native host, and a live Chrome profile.
 The test uses only canonical `browser.*` capabilities through the running
 Capability REST/runtime, and verifies that implementation-specific legacy IDs
-do not leak into default capability search.
+do not leak into default capability search. Each run writes a JSON/Markdown
+receipt under `.build/browser-control-real/`, including fail-closed runs.
 
 The v0.3.0 validation matrix on 2026-09-13 covered:
 
@@ -234,12 +235,25 @@ The v0.3.0 validation matrix on 2026-09-13 covered:
 - DevSpace process restart followed by automatic Native Host/extension
   reconnection without reloading the Chrome extension.
 
-The canonical Browser Capability descriptor version is `2.1.0`. Any future
+The canonical Browser Capability descriptor version is `2.2.0`. Any future
 change to a public capability input/output/effect contract must bump the
 descriptor version. The persisted registry deliberately rejects same-version
 schema drift on restart; this prevents silent API changes behind the fixed MCP
 surface.
 
+## v0.3 reliability and control additions
+
+- The native host survives DevSpace process restarts and reconnects to the
+  stable Unix socket without requiring a Chrome extension reload. It caches the
+  extension's `profile_hello` identity and replays it exactly once on each new
+  socket connection, so a transport reconnect also restores profile discovery.
+- `browser.page.wait` supports selector/text/load plus URL and network-idle
+  conditions.
+- Browser downloads expose status and completion waiting as canonical
+  second-level capabilities.
+- Semantic snapshots and element lookup traverse open Shadow DOM and
+  same-origin iframes so click/select/upload can keep using one stable element
+  index model.
 - Legacy persisted `browser.extension.*` catalog entries are hidden from the
   default second-level index; they remain visible only through explicit legacy
   provider diagnostics.
