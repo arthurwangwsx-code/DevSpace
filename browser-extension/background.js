@@ -3,8 +3,27 @@ const PROTOCOL = 1;
 const clients = new Map();
 const tabOwner = new Map();
 const attached = new Set();
+const consoleEvents = new Map();
+const networkEvents = new Map();
+const MAX_EVENT_BUFFER = 500;
 let port = null;
 let stateReady = null;
+let profileIdPromise = null;
+
+function ensureProfileId() {
+  if (!profileIdPromise) profileIdPromise = (async () => {
+    try {
+      const stored = await chrome.storage.local.get("devspaceProfileId");
+      if (stored?.devspaceProfileId) return stored.devspaceProfileId;
+      const id = globalThis.crypto?.randomUUID?.() || `profile-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      await chrome.storage.local.set({ devspaceProfileId: id });
+      return id;
+    } catch {
+      return "profile-unknown";
+    }
+  })();
+  return profileIdPromise;
+}
 
 async function persistState() {
   const serialized = {};
@@ -48,6 +67,12 @@ function assertOwned(clientId, tabId) {
 async function attach(tabId) {
   if (attached.has(tabId)) return;
   await chrome.debugger.attach({ tabId }, "1.3"); attached.add(tabId);
+  await Promise.allSettled([
+    chrome.debugger.sendCommand({ tabId }, "Runtime.enable"),
+    chrome.debugger.sendCommand({ tabId }, "Log.enable"),
+    chrome.debugger.sendCommand({ tabId }, "Network.enable"),
+    chrome.debugger.sendCommand({ tabId }, "Performance.enable"),
+  ]);
 }
 async function detach(tabId) {
   if (!attached.delete(tabId)) return;
@@ -58,7 +83,7 @@ async function send(tabId, method, params = {}) {
 }
 async function listTabs(clientId, all) {
   const tabs = await chrome.tabs.query({});
-  return { tabs: tabs.filter((tab) => all || tabOwner.get(tab.id) === clientId).map((tab) => ({
+  return { profileId: await ensureProfileId(), tabs: tabs.filter((tab) => all || tabOwner.get(tab.id) === clientId).map((tab) => ({
     tabId: tab.id, windowId: tab.windowId, title: tab.title || "", url: tab.url || "", active: Boolean(tab.active),
     ownership: tabOwner.get(tab.id) === clientId ? (state(clientId).adopted.has(tab.id) ? "adopted" : "agent") : "user",
   })) };
@@ -115,9 +140,7 @@ async function snapshot(tabId) {
 async function click(tabId, params) {
   let x = params.x, y = params.y;
   if (params.index !== undefined) {
-    const expression = `(() => { const e=document.querySelector('[data-devspace-index="${Number(params.index)}"]'); if(!e)return null; const r=e.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`;
-    const point = await send(tabId, "Runtime.evaluate", { expression, returnByValue: true });
-    if (!point.result.value) throw new Error(`snapshot element ${params.index} is unavailable`); ({ x, y } = point.result.value);
+    ({ x, y } = await elementPoint(tabId, params.index));
   }
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("click requires index or x/y");
   await send(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none", buttons: 0 });
@@ -126,17 +149,197 @@ async function click(tabId, params) {
   return { clicked: { x, y } };
 }
 
+async function elementPoint(tabId, index) {
+  const expression = `(() => { const e=document.querySelector('[data-devspace-index="${Number(index)}"]'); if(!e)return null; const r=e.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`;
+  const point = await send(tabId, "Runtime.evaluate", { expression, returnByValue: true });
+  if (!point.result.value) throw new Error(`snapshot element ${index} is unavailable`);
+  return point.result.value;
+}
+
+async function evaluate(tabId, expression, awaitPromise = true) {
+  const value = await send(tabId, "Runtime.evaluate", {
+    expression: String(expression),
+    awaitPromise: Boolean(awaitPromise),
+    returnByValue: true,
+    userGesture: true,
+  });
+  if (value.exceptionDetails) {
+    throw new Error(value.exceptionDetails.exception?.description || value.exceptionDetails.text || "evaluation failed");
+  }
+  return { value: value.result?.value, type: value.result?.type, description: value.result?.description };
+}
+
+async function hover(tabId, params) {
+  let x = params.x, y = params.y;
+  if (params.index !== undefined) ({ x, y } = await elementPoint(tabId, params.index));
+  if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("hover requires index or x/y");
+  await send(tabId, "Input.dispatchMouseEvent", {
+    type: "mouseMoved", x, y, button: "none", buttons: 0, pointerType: "mouse",
+  });
+  return { hovered: { x, y } };
+}
+
+async function scroll(tabId, p) {
+  const x = Number(p.x || 0), y = Number(p.y || 0);
+  await send(tabId, "Input.dispatchMouseEvent", {
+    type: "mouseWheel",
+    x: Number.isFinite(p.atX) ? p.atX : 1,
+    y: Number.isFinite(p.atY) ? p.atY : 1,
+    deltaX: x,
+    deltaY: y,
+  });
+  return { scrolled: { x, y } };
+}
+
+async function selectOption(tabId, index, value) {
+  const script = `(() => {
+    const el=document.querySelector('[data-devspace-index="${Number(index)}"]');
+    if(!el || el.tagName !== 'SELECT') return {ok:false};
+    el.value=${JSON.stringify(String(value))};
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+    return {ok:true,value:el.value};
+  })()`;
+  const result = await evaluate(tabId, script, false);
+  if (!result.value?.ok) throw new Error(`snapshot element ${index} is not a selectable <select>`);
+  return result.value;
+}
+
+async function setInputFiles(tabId, index, files) {
+  const expression = `document.querySelector('[data-devspace-index="${Number(index)}"]')`;
+  const evaluated = await send(tabId, "Runtime.evaluate", { expression });
+  if (!evaluated.result?.objectId) throw new Error(`snapshot element ${index} is unavailable`);
+  const described = await send(tabId, "DOM.describeNode", { objectId: evaluated.result.objectId });
+  const backendNodeId = described.node?.backendNodeId;
+  if (!backendNodeId) throw new Error(`snapshot element ${index} cannot be resolved to a DOM node`);
+  await send(tabId, "DOM.setFileInputFiles", { backendNodeId, files: files.map(String) });
+  return { files: files.length };
+}
+
+async function waitFor(tabId, p) {
+  const timeoutMs = Math.min(Math.max(Number(p.timeoutMs || 5000), 0), 30000);
+  const intervalMs = Math.min(Math.max(Number(p.intervalMs || 100), 25), 1000);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const script = p.selector
+      ? `Boolean(document.querySelector(${JSON.stringify(String(p.selector))}))`
+      : p.text
+        ? `Boolean(document.body && document.body.innerText.includes(${JSON.stringify(String(p.text))}))`
+        : "document.readyState === 'complete'";
+    const result = await evaluate(tabId, script, false);
+    if (result.value === true) return { matched: true };
+    if (Date.now() >= deadline) throw new Error("wait condition timed out");
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+function pushBounded(map, tabId, entry) {
+  let values = map.get(tabId);
+  if (!values) { values = []; map.set(tabId, values); }
+  values.push(entry);
+  if (values.length > MAX_EVENT_BUFFER) values.splice(0, values.length - MAX_EVENT_BUFFER);
+}
+
+function sanitizeNetworkHeaders(headers) {
+  if (!headers || typeof headers !== "object") return undefined;
+  const out = {};
+  for (const [key, value] of Object.entries(headers)) {
+    out[key] = /^(authorization|cookie|set-cookie|proxy-authorization)$/i.test(key) ? "<redacted>" : value;
+  }
+  return out;
+}
+
+function onDebuggerEvent(source, method, params) {
+  const tabId = source?.tabId;
+  if (!Number.isInteger(tabId)) return;
+  if (method === "Runtime.consoleAPICalled") {
+    pushBounded(consoleEvents, tabId, {
+      source: "console", type: params.type, timestamp: params.timestamp,
+      args: (params.args || []).map((arg) => arg.value ?? arg.description ?? arg.type),
+    });
+  } else if (method === "Log.entryAdded") {
+    const entry = params.entry || {};
+    pushBounded(consoleEvents, tabId, {
+      source: "log", level: entry.level, text: entry.text, url: entry.url, timestamp: entry.timestamp,
+    });
+  } else if (method === "Network.requestWillBeSent") {
+    const request = params.request || {};
+    pushBounded(networkEvents, tabId, {
+      phase: "request", requestId: params.requestId, method: request.method, url: request.url,
+      type: params.type, timestamp: params.timestamp, headers: sanitizeNetworkHeaders(request.headers),
+    });
+  } else if (method === "Network.responseReceived") {
+    const response = params.response || {};
+    pushBounded(networkEvents, tabId, {
+      phase: "response", requestId: params.requestId, url: response.url, status: response.status,
+      statusText: response.statusText, mimeType: response.mimeType, type: params.type,
+      timestamp: params.timestamp, fromDiskCache: response.fromDiskCache, fromServiceWorker: response.fromServiceWorker,
+    });
+  }
+}
+
+if (chrome.debugger.onEvent?.addListener) chrome.debugger.onEvent.addListener(onDebuggerEvent);
+
 const handlers = {
-  hello: async () => ({ protocol: PROTOCOL, extensionVersion: chrome.runtime.getManifest().version }),
+  hello: async () => {
+    const manifest = chrome.runtime.getManifest();
+    return {
+      protocol: PROTOCOL,
+      extensionVersion: manifest.version,
+      profileId: await ensureProfileId(),
+      incognito: Boolean(chrome.extension?.inIncognitoContext),
+      permissions: manifest.permissions || [],
+      hostPermissions: manifest.host_permissions || [],
+    };
+  },
   list_tabs: async (p) => listTabs(p.clientId, p.all === true), use_tab: async (p) => useTab(p.clientId, p.tabId),
   release_tab: async (p) => releaseTab(p.clientId, p.tabId), close_tab: async (p) => closeTab(p.clientId, p.tabId),
   open_tab: async (p) => openTab(p.clientId, p.url),
   snapshot: async (p) => { assertOwned(p.clientId, p.tabId); return snapshot(p.tabId); },
   navigate: async (p) => { assertOwned(p.clientId, p.tabId); await chrome.tabs.update(p.tabId, { url: p.url }); return { tabId: p.tabId, url: p.url }; },
+  reload: async (p) => { assertOwned(p.clientId, p.tabId); await chrome.tabs.reload(p.tabId, { bypassCache: Boolean(p.bypassCache) }); return { tabId: p.tabId, reloaded: true }; },
+  go_back: async (p) => {
+    assertOwned(p.clientId, p.tabId);
+    const history = await send(p.tabId, "Page.getNavigationHistory");
+    if (history.currentIndex > 0) await send(p.tabId, "Page.navigateToHistoryEntry", { entryId: history.entries[history.currentIndex - 1].id });
+    return { tabId: p.tabId, moved: history.currentIndex > 0 };
+  },
+  go_forward: async (p) => {
+    assertOwned(p.clientId, p.tabId);
+    const history = await send(p.tabId, "Page.getNavigationHistory");
+    if (history.currentIndex + 1 < history.entries.length) await send(p.tabId, "Page.navigateToHistoryEntry", { entryId: history.entries[history.currentIndex + 1].id });
+    return { tabId: p.tabId, moved: history.currentIndex + 1 < history.entries.length };
+  },
+  activate_tab: async (p) => { assertOwned(p.clientId, p.tabId); await chrome.tabs.update(p.tabId, { active: true }); return { tabId: p.tabId, active: true }; },
   click: async (p) => { assertOwned(p.clientId, p.tabId); return click(p.tabId, p); },
+  hover: async (p) => { assertOwned(p.clientId, p.tabId); return hover(p.tabId, p); },
+  scroll: async (p) => { assertOwned(p.clientId, p.tabId); return scroll(p.tabId, p); },
+  select_option: async (p) => { assertOwned(p.clientId, p.tabId); return selectOption(p.tabId, p.index, p.value); },
+  set_input_files: async (p) => { assertOwned(p.clientId, p.tabId); return setInputFiles(p.tabId, p.index, p.files || []); },
   type: async (p) => { assertOwned(p.clientId, p.tabId); await send(p.tabId, "Input.insertText", { text: p.text }); return { typed: String(p.text).length }; },
   press: async (p) => { assertOwned(p.clientId, p.tabId); await send(p.tabId, "Input.dispatchKeyEvent", { type: "keyDown", key: p.key }); await send(p.tabId, "Input.dispatchKeyEvent", { type: "keyUp", key: p.key }); return { key: p.key }; },
-  screenshot: async (p) => { assertOwned(p.clientId, p.tabId); const r = await send(p.tabId, "Page.captureScreenshot", { format: "png" }); return { data: r.data, mimeType: "image/png" }; },
+  screenshot: async (p) => {
+    assertOwned(p.clientId, p.tabId);
+    const format = p.format === "jpeg" ? "jpeg" : "png";
+    const options = { format, captureBeyondViewport: p.fullPage === true };
+    if (format === "jpeg") options.quality = Math.min(Math.max(Number(p.quality || 85), 1), 100);
+    const r = await send(p.tabId, "Page.captureScreenshot", options);
+    return { data: r.data, mimeType: format === "jpeg" ? "image/jpeg" : "image/png" };
+  },
+  evaluate: async (p) => { assertOwned(p.clientId, p.tabId); return evaluate(p.tabId, p.expression, p.awaitPromise !== false); },
+  get_html: async (p) => { assertOwned(p.clientId, p.tabId); const r = await evaluate(p.tabId, "document.documentElement.outerHTML", false); return { html: r.value || "" }; },
+  wait_for: async (p) => { assertOwned(p.clientId, p.tabId); return waitFor(p.tabId, p); },
+  list_console: async (p) => { assertOwned(p.clientId, p.tabId); await attach(p.tabId); return { messages: [...(consoleEvents.get(p.tabId) || [])].slice(-Math.min(Math.max(Number(p.limit || 100), 1), 500)) }; },
+  list_network: async (p) => { assertOwned(p.clientId, p.tabId); await attach(p.tabId); return { requests: [...(networkEvents.get(p.tabId) || [])].slice(-Math.min(Math.max(Number(p.limit || 100), 1), 500)) }; },
+  performance: async (p) => { assertOwned(p.clientId, p.tabId); const r = await send(p.tabId, "Performance.getMetrics"); return { metrics: r.metrics || [] }; },
+  download: async (p) => {
+    const downloadId = await chrome.downloads.download({
+      url: String(p.url),
+      filename: p.filename ? String(p.filename) : undefined,
+      saveAs: Boolean(p.saveAs),
+    });
+    return { downloadId };
+  },
 };
 async function handle(message, replyPort) {
   await ensureStateReady();
@@ -158,6 +361,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     void persistState();
   }
   attached.delete(tabId);
+  consoleEvents.delete(tabId);
+  networkEvents.delete(tabId);
 });
 chrome.alarms.create("devspace-reconnect", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "devspace-reconnect") connect(); });

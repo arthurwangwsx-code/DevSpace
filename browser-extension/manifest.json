@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "DevSpace Browser Bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxS3xkcuH1k8UyRUoBPJdnF/foPltQNVTMwQIdKgKIYzHlMM6hQbTwoCV+IyPpSqUdX6lRlx8licSRpkrAM0CAbDkOoLv7hER18qvgHtGSM2qzEz48oWReoM0zv0DC/mgr6IYW6BkeAY+DPuhHJBZgfG8Xfik4pUCFN2kdhZnW09gzdfgClAFPMwgKxOK9dQYFoe8Uchvzwam1j5WwW/9GhMHclqdHEu0LB+1blnyfgzVQErqnK5U1Ki4v96tXu/T35hAF6qget5IogflqWwyelT/vJYNtOvjuL5KcWwnkj7HcGUV8hdKx3aAR4OWDg5UXahT9YVKLsOuD+ke0dw9SQIDAQAB",
   "description": "Lets DevSpace agents use explicitly acquired tabs in your signed-in Chrome profile.",
   "minimum_chrome_version": "116",
-  "permissions": ["tabs", "debugger", "nativeMessaging", "storage", "alarms"],
+  "permissions": ["tabs", "debugger", "nativeMessaging", "storage", "alarms", "downloads", "webNavigation", "scripting"],
+  "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" }
 }

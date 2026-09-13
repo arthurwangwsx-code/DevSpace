@@ -77,7 +77,7 @@ try {
   capabilities = await timed("setup", "capability_discovery", () => discoverCapabilities(), {
     summarize: (value) => ({ capabilityCount: value.length }),
   });
-  assert.equal(capabilities.length, 8, "extension provider must expose exactly eight capabilities");
+  assert.equal(capabilities.length, 24, "extension provider must expose the complete v0.2 capability surface");
 
   const opened = await timed("unlocked-baseline", "open_background_fixture", () =>
     invoke("browser.extension.open_page", { url: fixtureUrl! }), {

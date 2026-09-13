@@ -1,16 +1,23 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import { join } from "node:path";
-import { BrowserExtensionProvider } from "./browser-extension-provider.js";
+import { BrowserExtensionProvider, browserExtensionShouldEnable } from "./browser-extension-provider.js";
 
 const root = await mkdtemp(join(os.tmpdir(), "devspace-browser-provider-"));
+const uploadFile = join(root, "upload.txt");
+await writeFile(uploadFile, "fixture\n");
+const autoManifest = join(root, "native-host.json");
+await writeFile(autoManifest, "{}\n");
+assert.equal(browserExtensionShouldEnable({ DEVSPACE_CHROME_NATIVE_HOST_MANIFEST: autoManifest }), true);
+assert.equal(browserExtensionShouldEnable({ DEVSPACE_BROWSER_EXTENSION: "0", DEVSPACE_CHROME_NATIVE_HOST_MANIFEST: autoManifest }), false);
 const socketPath = join(root, "bridge.sock");
 const provider = new BrowserExtensionProvider({
   ...process.env,
   DEVSPACE_BROWSER_SOCKET: socketPath,
-});
+}, [root]);
 const lifetime = new AbortController();
 await provider.start({
   signal: lifetime.signal,
@@ -18,7 +25,7 @@ await provider.start({
   reportCatalogChanged() {},
   log() {},
 });
-assert.equal((await provider.health(lifetime.signal)).state, "degraded");
+assert.equal((await provider.health(lifetime.signal)).state, "ready");
 
 const extension = net.createConnection(socketPath);
 await new Promise<void>((resolve, reject) => {
@@ -53,8 +60,11 @@ extension.on("data", (chunk) => {
 });
 
 const capabilities = await provider.discover(lifetime.signal);
-assert.equal(capabilities.length, 8);
+assert.equal(capabilities.length, 24);
 const byId = new Map(capabilities.map((entry) => [entry.descriptor.id, entry]));
+assert.deepEqual(byId.get("browser.extension.snapshot")?.aliases, ["browser.chrome.take_snapshot"]);
+assert.equal(byId.get("browser.extension.evaluate")?.descriptor.effects.openWorld, true);
+assert.ok(byId.get("browser.extension.set_input_files"));
 const invocationContext = { signal: lifetime.signal };
 const list = byId.get("browser.extension.list_pages")!;
 await provider.invoke({
@@ -92,6 +102,28 @@ assert.deepEqual(seen.at(-1), {
   command: "snapshot",
   params: { clientId: "devspace", tabId: 7 },
 });
+const upload = byId.get("browser.extension.set_input_files")!;
+await provider.invoke({
+  capabilityId: upload.descriptor.id,
+  descriptor: upload.descriptor,
+  binding: upload.binding,
+  arguments: { index: 1, files: [uploadFile] },
+  lease,
+}, invocationContext);
+assert.deepEqual(seen.at(-1), {
+  command: "set_input_files",
+  params: { clientId: "devspace", index: 1, files: [realpathSync(uploadFile)], tabId: 7 },
+});
+await assert.rejects(
+  provider.invoke({
+    capabilityId: upload.descriptor.id,
+    descriptor: upload.descriptor,
+    binding: upload.binding,
+    arguments: { index: 1, files: ["relative.txt"] },
+    lease,
+  }, invocationContext),
+  (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "invalid_arguments"),
+);
 await provider.close(lease, invocationContext);
 assert.equal(seen.at(-1)?.command, "release_tab");
 

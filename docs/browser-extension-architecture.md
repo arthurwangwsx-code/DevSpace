@@ -202,3 +202,32 @@ Validated on the user's installed Chrome profile with extension ID
 - The running Chrome process had no `--remote-debugging-*` launch flag. The
   successful path was Extension -> Native Messaging -> DevSpace, independent of
   the external Chrome DevTools provider.
+
+## v0.2 capability hardening
+
+The extension is now the preferred path for normal browser automation when the
+Native Messaging host is installed. DevSpace auto-registers the provider unless
+`DEVSPACE_BROWSER_EXTENSION=0` is set explicitly. The DevTools provider remains
+available as a separate deep-debugging backend.
+
+v0.2 expands the extension surface from the minimum eight operations to a
+complete day-to-day browser control set: tab discovery/open/adopt/release,
+snapshot and HTML reads, PNG/JPEG screenshots, navigation/reload/back/forward,
+explicit activation, click/hover/scroll/select/type/key input, bounded waits,
+JavaScript evaluation, console/network event buffers, performance metrics and
+Chrome-profile downloads. File inputs can receive files only after the provider
+canonicalizes each path and confirms it is inside DevSpace `allowedRoots`.
+Network Authorization/Cookie headers are redacted in the buffered network
+capability.
+
+The Manifest V3 extension requests `debugger`, `tabs`, `nativeMessaging`,
+`storage`, `alarms`, `downloads`, `webNavigation`, `scripting` and `<all_urls>`.
+These permissions are intentionally broad enough for general Agent browser
+automation. DevSpace still does **not** expose raw cookie/password export or an
+unrestricted arbitrary-CDP transport. High privilege is kept behind explicit
+capabilities, page leases, ownership rules and normal DevSpace audit/policy.
+
+Unpacked upgrades can be staged into the already-installed profile with
+`npm run stage:browser-extension-upgrade`; Chrome still requires a user-visible
+extension reload when the manifest or requested permissions change. This is a
+Chrome security boundary and is not bypassed.
