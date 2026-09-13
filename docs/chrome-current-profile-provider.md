@@ -116,8 +116,9 @@ Grant 持久化在 DevSpace state database 中；创建、拒绝和撤销都会�
   可能导致 `list_pages` 超时。不要用增加无限超时掩盖问题。
 - Chrome 是后台协议能力，DevSpace 不再添加 `requiresUnlocked` 本地限制；锁屏时是否成功由已经
   建立的 Chrome/CDP 连接决定。首次连接或重连仍可能需要解锁后确认。2026-09-13 的本机实测
-  观察到：Codex Chrome 扩展通道在锁屏时仍能枚举 26 个当前 Profile 标签页；在锁屏后新启的
-  `chrome-devtools-mcp` 1.9.0 daemon 能响应 `status`，但 `list_pages` 在 60 秒内无响应。因此
+  观察到：Codex Chrome 扩展通道在锁屏时仍能枚举 26 个当前 Profile 标签页，并能读取本地
+  fixture 页的完整 AX 语义快照；在锁屏后新启的 `chrome-devtools-mcp` 1.9.0 daemon 能响应
+  `status`，但 `list_pages` 在 60 秒内无响应。因此
   “锁屏前已建立的 daemon 连接能否持续 snapshot/click”仍必须在解锁后重新建连再锁屏验证，
   不能把 status 或扩展通道的结果当成 DevTools 通道通过。
 - 页面 title/URL、DOM、截图、Console 和 Network 都可能含敏感信息；审批由上层 Agent 负责，
