@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 if (process.platform !== "darwin") {
@@ -30,8 +30,12 @@ const plistPath = resolve(args["plist-path"] ?? join(homedir(), "Library", "Laun
 const releaseId = args["release-id"] ?? `${packageJson.version}+${sourceRevision(packageRoot)}`;
 const supervisorSource = join(packageRoot, "scripts", "macos", "service-supervisor.mjs");
 const supervisorTarget = join(runtimeRoot, "service-supervisor.mjs");
+const activatorSource = join(packageRoot, "scripts", "macos", "activate-service.mjs");
+const activatorTarget = join(runtimeRoot, "activate-service.mjs");
 const pidFile = join(logDir, "devspace.pid");
 const logFile = join(logDir, "devspace.log");
+const activationLogFile = join(logDir, "activation.log");
+const activationStatusPath = join(logDir, "activation-status.json");
 
 if (!existsSync(devspaceBin)) throw new Error(`DevSpace executable does not exist: ${devspaceBin}`);
 if (!existsSync(node)) throw new Error(`Node executable does not exist: ${node}`);
@@ -39,6 +43,7 @@ mkdirSync(runtimeRoot, { recursive: true, mode: 0o700 });
 mkdirSync(logDir, { recursive: true, mode: 0o700 });
 mkdirSync(dirname(plistPath), { recursive: true });
 copyFileSync(supervisorSource, supervisorTarget);
+copyFileSync(activatorSource, activatorTarget);
 
 const environment = {
   PATH: `${dirname(node)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin`,
@@ -111,11 +116,44 @@ if (existsSync(plistPath)) {
 writeFileSync(plistPath, plist, { mode: 0o600 });
 execFileSync("plutil", ["-lint", plistPath], { stdio: "ignore" });
 
+let activationId;
 if (args.activate === "true") {
-  const domain = `gui/${uid}`;
-  try { execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "ignore" }); } catch {}
-  execFileSync("launchctl", ["bootstrap", domain, plistPath], { stdio: "inherit" });
-  execFileSync("launchctl", ["enable", `${domain}/${label}`], { stdio: "inherit" });
+  // Activation can be requested through the DevSpace service being replaced.
+  // A detached process group must own bootout/bootstrap; otherwise bootout
+  // terminates the calling exec_command before it can restore the service.
+  const logFd = openSync(activationLogFile, "a", 0o600);
+  activationId = `${Date.now()}-${process.pid}`;
+  const activationStatusTemporary = `${activationStatusPath}.${process.pid}.tmp`;
+  writeFileSync(activationStatusTemporary, `${JSON.stringify({
+    state: "scheduled",
+    activationId,
+    label,
+    service: `gui/${uid}/${label}`,
+    requestedByPid: process.pid,
+    updatedAt: new Date().toISOString(),
+  })}\n`, { mode: 0o600 });
+  renameSync(activationStatusTemporary, activationStatusPath);
+  try {
+    const activationArgs = [
+      activatorTarget,
+      "--uid", String(uid),
+      "--label", label,
+      "--plist", plistPath,
+      "--health", `http://${host}:${port}/healthz`,
+      "--status", activationStatusPath,
+      "--activation-id", activationId,
+      "--delay-ms", args["activation-delay-ms"] ?? "1500",
+      "--timeout-ms", args["activation-timeout-ms"] ?? "30000",
+    ];
+    if (args.launchctl) activationArgs.push("--launchctl", resolve(args.launchctl));
+    const activator = spawn(node, activationArgs, {
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+    });
+    activator.unref();
+  } finally {
+    closeSync(logFd);
+  }
 }
 
 console.log(JSON.stringify({
@@ -133,6 +171,8 @@ console.log(JSON.stringify({
   worktreeRoot,
   toolMode,
   releaseId,
+  activationStatusPath: args.activate === "true" ? activationStatusPath : undefined,
+  activationId,
 }));
 
 function parseArgs(values) {

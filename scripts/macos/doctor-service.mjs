@@ -15,6 +15,8 @@ const uid = process.getuid?.() ?? Number(execFileSync("id", ["-u"], { encoding: 
 const port = Number(args.port ?? 7676);
 const label = args.label ?? `com.devspace.${uid}.${port}`;
 const plistPath = resolve(args["plist-path"] ?? join(homedir(), "Library", "LaunchAgents", `${label}.plist`));
+const logDir = resolve(args["log-dir"] ?? join(homedir(), ".local", "state", "devspace-service"));
+const activationStatusPath = resolve(args["activation-status"] ?? join(logDir, "activation-status.json"));
 const url = args.url ?? `http://127.0.0.1:${port}/healthz`;
 const requireCurrentSource = args["require-current-source"] === "true";
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -25,6 +27,15 @@ if (existsSync(plistPath)) {
   try {
     plist = JSON.parse(execFileSync("plutil", ["-convert", "json", "-o", "-", plistPath], { encoding: "utf8" }));
   } catch {}
+}
+
+let activation;
+if (existsSync(activationStatusPath)) {
+  try {
+    activation = JSON.parse(readFileSync(activationStatusPath, "utf8"));
+  } catch {
+    activation = { state: "invalid" };
+  }
 }
 
 let launchctl;
@@ -75,6 +86,8 @@ console.log(JSON.stringify({
   restartRequired,
   label,
   plistPath,
+  activationStatusPath,
+  activation,
   plistExists: existsSync(plistPath),
   plistOwnedByDevSpace,
   supervisorPath,
