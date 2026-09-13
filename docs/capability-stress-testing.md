@@ -17,6 +17,7 @@ provider manifests, or approved user workspaces.
 npm run stress:capabilities:smoke
 npm run stress:capabilities:local
 npm run stress:capabilities:soak
+npm run test:real-mcp-mount
 
 # Reproduce one dimension
 npm run stress:capabilities -- \
@@ -32,6 +33,12 @@ soaks. `--keep-fixture` is diagnostic-only. Results are written as stable
 `summary.json`, human-readable `summary.md`, and bounded `server-output.log`
 under `artifacts/capability-stress/<timestamp>/`. Setup failures write
 `failure.json` as well.
+
+`test:real-mcp-mount` is dependency-sensitive rather than deterministic: it
+uses the locally installed official `chrome-devtools-mcp`, points it at an
+intentionally unreachable loopback browser endpoint so no user page is touched,
+and validates the real package's dynamic install/discover/search/reload/remove
+process lifecycle. Its receipts are stored under `.build/real-mcp-mount/`.
 
 | Profile | Clients | Calls/client | MCP session churn | Duration |
 | --- | ---: | ---: | ---: | ---: |

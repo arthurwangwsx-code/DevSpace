@@ -1240,6 +1240,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 13 | 框架完成、三阶段实机执行待解锁（2026-09-13） | 本批提交 | `test:current-chrome` 对 lock-state 前置条件、daemon persistence、固定九能力、list、lease、snapshot、screenshot、同页 navigation 和脱敏 JSON/Markdown receipt 做统一验证 | 当前锁屏环境的 unlocked-baseline 预检在任何页面调用前按预期失败并生成 receipt | 用户解锁后依次运行 unlocked-baseline、locked-continuation、unlocked-recovery |
 | 14 | 扩展桥接代码与测试完成、实机矩阵待解锁（2026-09-13） | `fa02d30` + 本批提交 | MV3 extension、Native Messaging host、Unix socket bridge、固定八能力、当前标签显式 lease；用户标签仅释放、Agent 标签自动关闭；1 MiB/64 MiB 方向上限、2 MiB 响应、断线/取消/分片、稳定 Node launcher 与隔离安装测试；一进程三阶段锁屏矩阵 | 锁屏环境中矩阵在创建 fixture、socket 或浏览器调用前按预期拒绝 | 用户解锁后加载 unpacked extension、安装 native host 并运行 `npm run test:browser-extension` |
 | 15 | 完成（2026-09-13） | `61b1adc` | `waitForHttpServerListening`、未监听关闭兼容与真实端口冲突回归；完整 test/build | 本机 7676 已占用时新实例退出码 1，只输出 EADDRINUSE，不虚报 listening、不抛二次关闭异常 | 无 |
+| 16 | 完成（2026-09-13） | 本批提交 | `test:real-mcp-mount` 使用实际安装的开源 `chrome-devtools-mcp`，经固定 MCP 动态 install/search/enable/reload/remove，并经 REST disable；校验外层恒为 8 tools、自动发现 29 capabilities、Provider 进程 1→0、Catalog revision 2→7，生成 JSON/Markdown receipt | `chrome-devtools-mcp` 1.9.0 实际子进程；浏览器端点故意指向不可达 loopback，未读取用户页面 | 页面自动化实机证据仍由 current-Chrome 与 extension lock matrix 单独承担 |
 
 ## 20. 推荐阅读顺序
 

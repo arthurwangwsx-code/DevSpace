@@ -151,3 +151,20 @@ catalog is persisted. Bump the manifest mapping's `version` only after reviewing
 
 The capability feature remains off by default while Chrome and desktop providers complete their
 real-machine permission, lock-screen, and soak matrices.
+
+## Real package acceptance
+
+After installing the official `chrome-devtools-mcp` package, exercise the
+generic mount path without attaching to a browser:
+
+```bash
+npm run test:real-mcp-mount
+```
+
+The runner starts an isolated DevSpace, installs the real package dynamically
+through the fixed MCP, verifies automatic tool discovery and search, performs
+REST disable plus MCP enable/reload/remove, asserts that the outer MCP remains
+exactly eight tools, and verifies that Provider-owned processes exit. Results
+are written under `.build/real-mcp-mount/`. Set
+`DEVSPACE_REAL_MCP_COMMAND=/absolute/path/to/another-compatible-server` to test
+another executable that accepts the same diagnostic arguments.
