@@ -61,7 +61,7 @@ try {
   assert.equal(installed.status, "succeeded");
   assert.equal((installed.result as any).providerId, "test.dynamic.mcp");
   assert.equal((installed.result as any).health.state, "ready");
-  assert.equal((installed.result as any).capabilityCount, 4);
+  assert.equal((installed.result as any).capabilityCount, 9);
   assert.equal(existsSync(join(providerDirectory, "test.dynamic.mcp.json")), true);
 
   const afterInstall = await getJson(`${base}/capabilities?providerId=test.dynamic.mcp`);
@@ -69,6 +69,10 @@ try {
     item.id === "test.dynamic.mcp.echo"), true);
   assert.equal(afterInstall.body.data.items.some((item: any) =>
     item.id === "test.dynamic.mcp.not_allowlisted"), true);
+  assert.equal(afterInstall.body.data.items.some((item: any) =>
+    item.id === "test.dynamic.mcp.resources.read"), true);
+  assert.equal(afterInstall.body.data.items.some((item: any) =>
+    item.id === "test.dynamic.mcp.prompts.get"), true);
   const installedRevision = afterInstall.body.meta.catalogRevision;
 
   const disabled = await postJson(`${base}/admin/providers/test.dynamic.mcp/actions`, { action: "disable" });
@@ -91,7 +95,7 @@ try {
 
   const configured = await getJson(`${base}/admin/providers`);
   assert.equal(configured.body.data.providers[0].id, "test.dynamic.mcp");
-  assert.equal(configured.body.data.providers[0].capabilityCount, 4);
+  assert.equal(configured.body.data.providers[0].capabilityCount, 9);
   const removed = await invokeManagement(client, "devspace.providers.remove", {
     providerId: "test.dynamic.mcp",
   });
@@ -101,7 +105,7 @@ try {
   const finalProviders = await getJson(`${base}/providers`);
   assert.equal(finalProviders.body.data.items.some((item: any) => item.id === "test.dynamic.mcp"), false);
 
-  console.log("provider admin integration passed: fixed MCP install, REST disable, MCP enable/reload/remove, catalog revisions");
+  console.log("provider admin integration passed: fixed MCP install, protocol assets, REST disable, MCP enable/reload/remove, catalog revisions");
 } finally {
   await client?.close().catch(() => {});
   await new Promise<void>((resolve) => server.close(() => resolve()));
