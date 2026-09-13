@@ -25,6 +25,7 @@ try {
   testExpiredTokenCleanup(join(root, "expiration"));
   testTransactionalTokenRotation(join(root, "rotation"));
   await testProviderRestartRotationAndRevocation(join(root, "provider"));
+  await testMultipleResourceAudiences(join(root, "multiple-resources"));
 } finally {
   await rm(root, { recursive: true, force: true });
 }
@@ -243,6 +244,62 @@ async function testProviderRestartRotationAndRevocation(stateDir: string): Promi
     );
   } finally {
     secondProvider.close();
+  }
+}
+
+async function testMultipleResourceAudiences(stateDir: string): Promise<void> {
+  const capabilityUrl = new URL("https://agent.example.com/capabilities/mcp");
+  const invalidUrl = new URL("https://agent.example.com/admin");
+  const provider = new SingleUserOAuthProvider(
+    { ...oauthConfig, scopes: ["devspace", "capabilities:discover", "capabilities:invoke"] },
+    [mcpUrl, capabilityUrl],
+    stateDir,
+  );
+  try {
+    const client = await provider.clientsStore.registerClient?.({
+      redirect_uris: [redirectUri],
+      client_name: "Capability client",
+    });
+    assert.ok(client);
+    const code = "code-capability-resource";
+    provider["codes"].set(code, {
+      clientId: client.client_id,
+      params: {
+        redirectUri,
+        codeChallenge: "challenge",
+        scopes: ["capabilities:discover"],
+        resource: capabilityUrl,
+      },
+      expiresAtMs: Date.now() + 60_000,
+    });
+    const issued = await provider.exchangeAuthorizationCode(
+      client,
+      code,
+      undefined,
+      redirectUri,
+      capabilityUrl,
+    );
+    const verified = await provider.verifyAccessToken(issued.access_token);
+    assert.equal(verified.resource?.href, capabilityUrl.href);
+    assert.deepEqual(verified.scopes, ["capabilities:discover"]);
+
+    const invalidCode = "code-invalid-resource";
+    provider["codes"].set(invalidCode, {
+      clientId: client.client_id,
+      params: {
+        redirectUri,
+        codeChallenge: "challenge",
+        scopes: ["capabilities:discover"],
+        resource: capabilityUrl,
+      },
+      expiresAtMs: Date.now() + 60_000,
+    });
+    await assert.rejects(
+      provider.exchangeAuthorizationCode(client, invalidCode, undefined, redirectUri, invalidUrl),
+      InvalidGrantError,
+    );
+  } finally {
+    provider.close();
   }
 }
 

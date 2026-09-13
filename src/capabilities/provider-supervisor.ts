@@ -18,6 +18,7 @@ export interface ProviderSupervisorOptions {
   random?: () => number;
   scheduler?: ProviderSupervisorScheduler;
   log?: ProviderContext["log"];
+  onStateChange?: (providerId: string, health: ProviderHealth) => void;
 }
 
 export interface ProviderSupervisorScheduler {
@@ -47,8 +48,9 @@ const defaultScheduler: ProviderSupervisorScheduler = {
 
 export class ProviderSupervisor {
   private readonly providers = new Map<string, ManagedProvider>();
-  private readonly options: Required<Omit<ProviderSupervisorOptions, "log">> & {
+  private readonly options: Required<Omit<ProviderSupervisorOptions, "log" | "onStateChange">> & {
     log: ProviderContext["log"];
+    onStateChange: NonNullable<ProviderSupervisorOptions["onStateChange"]>;
   };
   private closed = false;
 
@@ -65,6 +67,7 @@ export class ProviderSupervisor {
       random: options.random ?? Math.random,
       scheduler: options.scheduler ?? defaultScheduler,
       log: options.log ?? (() => {}),
+      onStateChange: options.onStateChange ?? (() => {}),
     };
   }
 
@@ -313,6 +316,7 @@ export class ProviderSupervisor {
   private transition(managed: ManagedProvider, health: ProviderHealth): void {
     managed.health = health;
     this.registry.setProviderHealth(managed.provider.id, health);
+    this.options.onStateChange(managed.provider.id, { ...health });
     this.options.log(
       health.state === "failed" ? "error" : health.state === "backoff" ? "warn" : "info",
       "capability.provider.state_changed",

@@ -29,6 +29,17 @@ export interface ResourceLimitsConfig {
   processBufferCharacters: number;
 }
 
+export interface CapabilityConfig {
+  enabled: boolean;
+  configDir: string;
+  maxConcurrent: number;
+  maxConcurrentPerProvider: number;
+  queueLimit: number;
+  maxOutputBytes: number;
+  defaultTimeoutMs: number;
+  maxTimeoutMs: number;
+}
+
 export interface ServerConfig {
   host: string;
   port: number;
@@ -48,6 +59,7 @@ export interface ServerConfig {
   subagents: boolean;
   agentDir: string;
   resources: ResourceLimitsConfig;
+  capabilities: CapabilityConfig;
   logging: LoggingConfig;
 }
 
@@ -295,6 +307,59 @@ function parseResourceLimits(env: NodeJS.ProcessEnv): ResourceLimitsConfig {
   };
 }
 
+function parseCapabilityConfig(env: NodeJS.ProcessEnv): CapabilityConfig {
+  const maxConcurrent = parsePositiveInteger(
+    env.DEVSPACE_CAPABILITY_MAX_CONCURRENT,
+    8,
+    "DEVSPACE_CAPABILITY_MAX_CONCURRENT",
+  );
+  const maxConcurrentPerProvider = parsePositiveInteger(
+    env.DEVSPACE_CAPABILITY_MAX_CONCURRENT_PER_PROVIDER,
+    2,
+    "DEVSPACE_CAPABILITY_MAX_CONCURRENT_PER_PROVIDER",
+  );
+  if (maxConcurrentPerProvider > maxConcurrent) {
+    throw new Error(
+      "DEVSPACE_CAPABILITY_MAX_CONCURRENT_PER_PROVIDER must not exceed DEVSPACE_CAPABILITY_MAX_CONCURRENT.",
+    );
+  }
+  const defaultTimeoutMs = parsePositiveInteger(
+    env.DEVSPACE_CAPABILITY_DEFAULT_TIMEOUT_MS,
+    30_000,
+    "DEVSPACE_CAPABILITY_DEFAULT_TIMEOUT_MS",
+  );
+  const maxTimeoutMs = parsePositiveInteger(
+    env.DEVSPACE_CAPABILITY_MAX_TIMEOUT_MS,
+    120_000,
+    "DEVSPACE_CAPABILITY_MAX_TIMEOUT_MS",
+  );
+  if (defaultTimeoutMs > maxTimeoutMs) {
+    throw new Error(
+      "DEVSPACE_CAPABILITY_DEFAULT_TIMEOUT_MS must not exceed DEVSPACE_CAPABILITY_MAX_TIMEOUT_MS.",
+    );
+  }
+  return {
+    enabled: parseBoolean(env.DEVSPACE_CAPABILITIES),
+    configDir: resolve(expandHomePath(
+      env.DEVSPACE_CAPABILITY_CONFIG_DIR ?? join(homedir(), ".devspace", "capabilities"),
+    )),
+    maxConcurrent,
+    maxConcurrentPerProvider,
+    queueLimit: parseNonNegativeInteger(
+      env.DEVSPACE_CAPABILITY_QUEUE_LIMIT,
+      64,
+      "DEVSPACE_CAPABILITY_QUEUE_LIMIT",
+    ),
+    maxOutputBytes: parsePositiveInteger(
+      env.DEVSPACE_CAPABILITY_MAX_OUTPUT_BYTES,
+      4 * 1024 * 1024,
+      "DEVSPACE_CAPABILITY_MAX_OUTPUT_BYTES",
+    ),
+    defaultTimeoutMs,
+    maxTimeoutMs,
+  };
+}
+
 function parseLoggingConfig(env: NodeJS.ProcessEnv): LoggingConfig {
   return {
     level: parseLogLevel(env.DEVSPACE_LOG_LEVEL),
@@ -412,6 +477,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
         : parseBoolean(env.DEVSPACE_SUBAGENTS),
     agentDir: resolve(expandHomePath(env.DEVSPACE_AGENT_DIR ?? files.config.agentDir ?? defaultAgentDir())),
     resources: parseResourceLimits(env),
+    capabilities: parseCapabilityConfig(env),
     logging: parseLoggingConfig(env),
   };
 }

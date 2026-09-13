@@ -124,6 +124,56 @@ assert.deepEqual(loadConfig(baseEnv).resources, {
   processBufferCharacters: 524_288,
 });
 
+assert.deepEqual(loadConfig(baseEnv).capabilities, {
+  enabled: false,
+  configDir: join(process.env.HOME!, ".devspace", "capabilities"),
+  maxConcurrent: 8,
+  maxConcurrentPerProvider: 2,
+  queueLimit: 64,
+  maxOutputBytes: 4 * 1024 * 1024,
+  defaultTimeoutMs: 30_000,
+  maxTimeoutMs: 120_000,
+});
+assert.deepEqual(
+  loadConfig({
+    ...baseEnv,
+    DEVSPACE_CAPABILITIES: "1",
+    DEVSPACE_CAPABILITY_CONFIG_DIR: "/tmp/devspace-capabilities",
+    DEVSPACE_CAPABILITY_MAX_CONCURRENT: "4",
+    DEVSPACE_CAPABILITY_MAX_CONCURRENT_PER_PROVIDER: "1",
+    DEVSPACE_CAPABILITY_QUEUE_LIMIT: "0",
+    DEVSPACE_CAPABILITY_MAX_OUTPUT_BYTES: "1024",
+    DEVSPACE_CAPABILITY_DEFAULT_TIMEOUT_MS: "500",
+    DEVSPACE_CAPABILITY_MAX_TIMEOUT_MS: "2000",
+  }).capabilities,
+  {
+    enabled: true,
+    configDir: "/tmp/devspace-capabilities",
+    maxConcurrent: 4,
+    maxConcurrentPerProvider: 1,
+    queueLimit: 0,
+    maxOutputBytes: 1024,
+    defaultTimeoutMs: 500,
+    maxTimeoutMs: 2000,
+  },
+);
+assert.throws(
+  () => loadConfig({
+    ...baseEnv,
+    DEVSPACE_CAPABILITY_MAX_CONCURRENT: "1",
+    DEVSPACE_CAPABILITY_MAX_CONCURRENT_PER_PROVIDER: "2",
+  }),
+  /must not exceed DEVSPACE_CAPABILITY_MAX_CONCURRENT/,
+);
+assert.throws(
+  () => loadConfig({
+    ...baseEnv,
+    DEVSPACE_CAPABILITY_DEFAULT_TIMEOUT_MS: "2000",
+    DEVSPACE_CAPABILITY_MAX_TIMEOUT_MS: "1000",
+  }),
+  /must not exceed DEVSPACE_CAPABILITY_MAX_TIMEOUT_MS/,
+);
+
 assert.deepEqual(
   loadConfig({
     ...baseEnv,

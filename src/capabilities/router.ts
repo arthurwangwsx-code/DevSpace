@@ -25,6 +25,7 @@ export interface CapabilityRouterOptions {
   maxOutputBytes?: number;
   defaultTimeoutMs?: number;
   maxTimeoutMs?: number;
+  onEvent?: (type: string, data: JsonObject) => void;
 }
 
 export interface OpenLeaseRequest {
@@ -72,7 +73,8 @@ export class CapabilityInvocationRouter {
   private readonly activeByProvider = new Map<string, number>();
   private active = 0;
   private closed = false;
-  private readonly options: Required<CapabilityRouterOptions>;
+  private readonly options: Required<Omit<CapabilityRouterOptions, "onEvent">>;
+  private readonly onEvent: NonNullable<CapabilityRouterOptions["onEvent"]>;
 
   constructor(
     private readonly registry: CapabilityRegistry,
@@ -90,6 +92,7 @@ export class CapabilityInvocationRouter {
       defaultTimeoutMs: options.defaultTimeoutMs ?? 30_000,
       maxTimeoutMs: options.maxTimeoutMs ?? 120_000,
     };
+    this.onEvent = options.onEvent ?? (() => {});
     if (this.options.maxConcurrent < 1 || this.options.maxConcurrentPerProvider < 1
       || this.options.maxConcurrentPerProvider > this.options.maxConcurrent
       || this.options.queueLimit < 0 || this.options.maxOutputBytes < 1) {
@@ -127,6 +130,7 @@ export class CapabilityInvocationRouter {
       decision: "allowed",
       summary: { leaseId: lease.id, resourceType: lease.resourceType, display: lease.display },
     });
+    this.onEvent("lease.opened", { leaseId: lease.id, providerId: lease.providerId });
     return lease;
   }
 
@@ -149,6 +153,7 @@ export class CapabilityInvocationRouter {
       decision: "allowed",
       summary: { leaseId: record.lease.id, resourceType: record.lease.resourceType },
     });
+    this.onEvent("lease.closed", { leaseId: record.lease.id, providerId: record.lease.providerId });
   }
 
   async invoke(request: InvokeCapabilityRequest): Promise<CapabilityInvocation> {
@@ -226,6 +231,12 @@ export class CapabilityInvocationRouter {
       decision: "allowed",
       summary: { invocationId: internal.public.id, leaseId: request.leaseId },
     });
+    this.onEvent("invocation.queued", {
+      invocationId: internal.public.id,
+      capabilityId: descriptor.id,
+      providerId: descriptor.providerId,
+      status: internal.public.status,
+    });
     if (this.canStart(descriptor.providerId)) this.startInvocation(internal);
     else this.queue.push(internal);
     return mode === "async" ? publicInvocation(internal.public) : internal.completion;
@@ -267,6 +278,10 @@ export class CapabilityInvocationRouter {
       providerId: internal.public.providerId,
       decision: "allowed",
       summary: { invocationId: internal.public.id },
+    });
+    this.onEvent("invocation.cancel_requested", {
+      invocationId: internal.public.id,
+      status: internal.public.status,
     });
     return publicInvocation(internal.public);
   }
@@ -316,6 +331,12 @@ export class CapabilityInvocationRouter {
     internal.public.status = "running";
     internal.public.startedAt = new Date().toISOString();
     this.audit.saveInvocation(internal.public, internal.arguments);
+    this.onEvent("invocation.running", {
+      invocationId: internal.public.id,
+      capabilityId: internal.public.capabilityId,
+      providerId: internal.public.providerId,
+      status: "running",
+    });
     void this.runInvocation(internal);
   }
 
@@ -373,6 +394,12 @@ export class CapabilityInvocationRouter {
         decision: "allowed",
         summary: { invocationId: internal.public.id, outputBytes },
       });
+      this.onEvent("invocation.succeeded", {
+        invocationId: internal.public.id,
+        capabilityId: internal.public.capabilityId,
+        providerId: internal.public.providerId,
+        status: "succeeded",
+      });
       internal.resolve(publicInvocation(internal.public));
     } catch (error) {
       const normalized = internal.timedOut
@@ -414,6 +441,13 @@ export class CapabilityInvocationRouter {
       providerId: internal.public.providerId,
       decision: "allowed",
       summary: { invocationId: internal.public.id, errorCode: error.code },
+    });
+    this.onEvent(`invocation.${status}`, {
+      invocationId: internal.public.id,
+      capabilityId: internal.public.capabilityId,
+      providerId: internal.public.providerId,
+      status,
+      errorCode: error.code,
     });
     internal.reject(new CapabilityError(error.code, error.message, {
       retryable: error.retryable,

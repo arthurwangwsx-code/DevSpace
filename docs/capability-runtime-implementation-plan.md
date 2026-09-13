@@ -1211,7 +1211,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 2 | 完成（2026-09-13） | 本批提交 | SQLite v5、原子 Catalog、revision/cursor、冲突与 BM25 搜索测试 | 不适用 | Provider binding 重启后按设计需重新发现 |
 | 3 | 完成（2026-09-13） | 本批提交 | 单实例、发现、崩溃退避恢复、权限门、禁用与关闭测试 | Fake Provider | 周期 health polling 留待硬化批次 |
 | 4 | 完成（2026-09-13） | 本批提交 | Grant、lease 越权、Schema、队列、幂等、取消、超时、输出上限和脱敏审计 | Fake Provider | Grant 持久化管理入口留待 API/CLI 批次 |
-| 5 | 待实施 | — | — | OAuth client | — |
+| 5 | 完成（2026-09-13） | 本批提交 | REST catalog/search/lease/invoke/error/SSE；OAuth token/scope/audience/expiry 与双 resource metadata；完整 test/build/旧 MCP 契约 | Fake Provider + HTTP OAuth client | SSE 采用 resync 快照恢复；持久事件回放留待硬化批次 |
 | 6 | 待实施 | — | — | MCP/REST/CLI | — |
 | 7 | 待实施 | — | — | 当前 Chrome | — |
 | 8 | 待实施 | — | — | 当前 Chrome + 锁屏 | — |

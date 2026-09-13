@@ -6,11 +6,13 @@ import type { ProviderRegistration } from "./provider.js";
 import { ProviderSupervisor, type ProviderSupervisorOptions } from "./provider-supervisor.js";
 import { CapabilityRegistry } from "./registry.js";
 import { CapabilityInvocationRouter, type CapabilityRouterOptions } from "./router.js";
+import { CapabilityEventHub } from "./events.js";
 
 export interface CapabilityRuntimeOptions {
   stateDir: string;
   supervisor?: ProviderSupervisorOptions;
   router?: CapabilityRouterOptions;
+  providers?: ProviderRegistration[];
 }
 
 export class CapabilityRuntime {
@@ -19,6 +21,7 @@ export class CapabilityRuntime {
   readonly policy: CapabilityPolicyEngine;
   readonly leases: CapabilityLeaseManager;
   readonly router: CapabilityInvocationRouter;
+  readonly events = new CapabilityEventHub();
   private readonly store: SqliteCapabilityCatalogStore;
   private readonly audit: SqliteCapabilityAuditStore;
   private started = false;
@@ -28,7 +31,18 @@ export class CapabilityRuntime {
     this.store = new SqliteCapabilityCatalogStore(options.stateDir);
     this.audit = new SqliteCapabilityAuditStore(options.stateDir);
     this.registry = new CapabilityRegistry(this.store);
-    this.supervisor = new ProviderSupervisor(this.registry, options.supervisor);
+    this.supervisor = new ProviderSupervisor(this.registry, {
+      ...options.supervisor,
+      onStateChange: (providerId, health) => {
+        options.supervisor?.onStateChange?.(providerId, health);
+        this.events.publish("provider.state_changed", {
+          providerId,
+          state: health.state,
+          ...(health.reasonCode ? { reasonCode: health.reasonCode } : {}),
+          catalogRevision: this.registry.revision,
+        });
+      },
+    });
     this.policy = new CapabilityPolicyEngine();
     this.leases = new CapabilityLeaseManager();
     this.router = new CapabilityInvocationRouter(
@@ -37,8 +51,15 @@ export class CapabilityRuntime {
       this.policy,
       this.leases,
       this.audit,
-      options.router,
+      {
+        ...options.router,
+        onEvent: (type, data) => {
+          options.router?.onEvent?.(type, data);
+          this.events.publish(type, { ...data, catalogRevision: this.registry.revision });
+        },
+      },
     );
+    for (const registration of options.providers ?? []) this.registerProvider(registration);
   }
 
   registerProvider(registration: ProviderRegistration): void {

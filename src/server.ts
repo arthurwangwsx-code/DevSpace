@@ -7,7 +7,12 @@ import { monitorEventLoopDelay } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createHttpApp } from "./http-app.js";
-import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import {
+  createOAuthMetadata,
+  getOAuthProtectedResourceMetadataUrl,
+  mcpAuthMetadataRouter,
+  mcpAuthRouter,
+} from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -18,7 +23,7 @@ import {
   RESOURCE_MIME_TYPE,
 } from "@modelcontextprotocol/ext-apps/server";
 import express from "express";
-import type { Request, Response } from "express";
+import type { NextFunction, Request, RequestHandler, Response } from "express";
 import * as z from "zod/v4";
 import { applyPatch } from "./apply-patch.js";
 import { loadConfig, type ServerConfig, type WidgetMode } from "./config.js";
@@ -64,6 +69,11 @@ import {
   getLocalAgentProviderAvailabilitySnapshot,
   type LocalAgentProviderAvailability,
 } from "./local-agent-availability.js";
+import { CapabilityError } from "./capabilities/errors.js";
+import { createCapabilityHttpRouter } from "./capabilities/http-router.js";
+import type { ProviderRegistration } from "./capabilities/provider.js";
+import { CapabilityRuntime } from "./capabilities/runtime.js";
+import type { CapabilityPrincipal } from "./capabilities/types.js";
 
 type Transport = StreamableHTTPServerTransport;
 const requestContext = new AsyncLocalStorage<{ requestId: string }>();
@@ -88,11 +98,18 @@ const SHELL_TOOL_ANNOTATIONS = {
   openWorldHint: true,
 };
 
+const passThroughAuth: RequestHandler = (_req, _res, next: NextFunction) => next();
+
 interface RunningServer {
   app: ReturnType<typeof createHttpApp>;
   config: ServerConfig;
   localAgentProviders: LocalAgentProviderAvailability[];
+  capabilityRuntime?: CapabilityRuntime;
   close(): Promise<void>;
+}
+
+export interface CreateServerOptions {
+  capabilityProviders?: ProviderRegistration[];
 }
 
 type ToolContent =
@@ -1661,7 +1678,7 @@ function createMcpServer(
   return server;
 }
 
-export function createServer(config = loadConfig()): RunningServer {
+export function createServer(config = loadConfig(), options: CreateServerOptions = {}): RunningServer {
   const app = createHttpApp(config);
   const transports = new McpSessionRegistry<Transport>({
     maxSessions: config.resources.mcpMaxSessions,
@@ -1678,12 +1695,52 @@ export function createServer(config = loadConfig()): RunningServer {
   });
   const mcpUrl = new URL("/mcp", config.publicBaseUrl);
   const resourceServerUrl = resourceUrlFromServerUrl(mcpUrl);
-  const oauthProvider = new SingleUserOAuthProvider(config.oauth, mcpUrl, config.stateDir);
+  const capabilityMcpUrl = new URL("/capabilities/mcp", config.publicBaseUrl);
+  const capabilityResourceServerUrl = resourceUrlFromServerUrl(capabilityMcpUrl);
+  const capabilityScopes = ["capabilities:discover", "capabilities:invoke"];
+  const oauthScopes = [...new Set([...config.oauth.scopes, ...capabilityScopes])];
+  const oauthProvider = new SingleUserOAuthProvider(
+    { ...config.oauth, scopes: oauthScopes },
+    [mcpUrl, capabilityMcpUrl],
+    config.stateDir,
+  );
   const bearerAuth = requireBearerAuth({
     verifier: oauthProvider,
     requiredScopes: [config.oauth.scopes[0] ?? "devspace"],
     resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
   });
+  const capabilityDiscoverAuth = config.authMode === "oauth"
+    ? requireBearerAuth({
+      verifier: oauthProvider,
+      requiredScopes: ["capabilities:discover"],
+      resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(capabilityResourceServerUrl),
+    })
+    : passThroughAuth;
+  const capabilityInvokeAuth = config.authMode === "oauth"
+    ? requireBearerAuth({
+      verifier: oauthProvider,
+      requiredScopes: ["capabilities:invoke"],
+      resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(capabilityResourceServerUrl),
+    })
+    : passThroughAuth;
+  const capabilityRuntime = config.capabilities.enabled
+    ? new CapabilityRuntime({
+      stateDir: config.stateDir,
+      providers: options.capabilityProviders,
+      router: {
+        maxConcurrent: config.capabilities.maxConcurrent,
+        maxConcurrentPerProvider: config.capabilities.maxConcurrentPerProvider,
+        queueLimit: config.capabilities.queueLimit,
+        maxOutputBytes: config.capabilities.maxOutputBytes,
+        defaultTimeoutMs: config.capabilities.defaultTimeoutMs,
+        maxTimeoutMs: config.capabilities.maxTimeoutMs,
+      },
+      supervisor: {
+        log: (level, event, fields) => logEvent(config.logging, level, event, fields),
+      },
+    })
+    : undefined;
+  const capabilityReady = capabilityRuntime?.start();
   const workspaceStore = createWorkspaceStore(config.stateDir);
   const workspaces = new WorkspaceRegistry(config, workspaceStore);
   const reviewCheckpoints = createReviewCheckpointManager();
@@ -1855,16 +1912,30 @@ export function createServer(config = loadConfig()): RunningServer {
   });
 
   if (config.authMode === "oauth") {
+    const oauthMetadata = createOAuthMetadata({
+      provider: oauthProvider,
+      issuerUrl: new URL(config.publicBaseUrl),
+      baseUrl: new URL(config.publicBaseUrl),
+      scopesSupported: oauthScopes,
+    });
     app.use(
       mcpAuthRouter({
         provider: oauthProvider,
         issuerUrl: new URL(config.publicBaseUrl),
         baseUrl: new URL(config.publicBaseUrl),
         resourceServerUrl,
-        scopesSupported: config.oauth.scopes,
+        scopesSupported: oauthScopes,
         resourceName: "DevSpace",
       }),
     );
+    if (capabilityRuntime) {
+      app.use(mcpAuthMetadataRouter({
+        oauthMetadata,
+        resourceServerUrl: capabilityResourceServerUrl,
+        scopesSupported: capabilityScopes,
+        resourceName: "DevSpace Capabilities",
+      }));
+    }
   }
 
   app.options("/mcp-app-assets/{*asset}", (_req, res) => {
@@ -1883,8 +1954,45 @@ export function createServer(config = loadConfig()): RunningServer {
   );
 
   app.get("/healthz", (_req, res) => {
-    res.json({ ok: true, name: "devspace" });
+    res.json({
+      ok: true,
+      name: "devspace",
+      capabilities: capabilityRuntime
+        ? { enabled: true, catalogRevision: capabilityRuntime.registry.revision }
+        : { enabled: false },
+    });
   });
+
+  if (capabilityRuntime) {
+    app.use(
+      "/api/capabilities/v1",
+      async (_req, res, next) => {
+        try {
+          await capabilityReady;
+          next();
+        } catch {
+          res.status(503).json({
+            error: {
+              code: "provider_unavailable",
+              message: "Capability runtime failed to start.",
+              retryable: true,
+            },
+            meta: { requestId: res.locals.requestId ?? "unknown" },
+          });
+        }
+      },
+      createCapabilityHttpRouter({
+        runtime: capabilityRuntime,
+        discoverAuth: capabilityDiscoverAuth,
+        invokeAuth: capabilityInvokeAuth,
+        principal: (req) => capabilityPrincipal(
+          req,
+          config.authMode,
+          capabilityResourceServerUrl,
+        ),
+      }),
+    );
+  }
 
   app.all("/mcp", async (req, res) => {
     const requestId = res.locals.requestId as string | undefined;
@@ -2059,6 +2167,7 @@ export function createServer(config = loadConfig()): RunningServer {
     app,
     config,
     localAgentProviders,
+    capabilityRuntime,
     close: () => {
       closePromise ??= (async () => {
         clearInterval(sessionCleanupTimer);
@@ -2068,12 +2177,41 @@ export function createServer(config = loadConfig()): RunningServer {
         const results = await transports.closeAll();
         logSessionCloseResults("server_shutdown", results);
         processSessions.shutdown();
+        await capabilityRuntime?.close();
         oauthProvider.close();
         await workspaceStore.close?.();
         await closeLogEvents();
       })();
       return closePromise;
     },
+  };
+}
+
+function capabilityPrincipal(
+  req: Request,
+  authMode: ServerConfig["authMode"],
+  configuredResource: URL,
+): CapabilityPrincipal {
+  if (authMode === "trusted-local") {
+    return {
+      id: `local:${process.getuid?.() ?? "user"}`,
+      kind: "trusted_local",
+      resource: configuredResource.href,
+      scopes: ["capabilities:discover", "capabilities:invoke", "capabilities:admin"],
+    };
+  }
+  const auth = req.auth;
+  if (!auth?.resource || !checkResourceAllowed({
+    requestedResource: auth.resource,
+    configuredResource,
+  })) {
+    throw new CapabilityError("policy_denied", "The token audience is not the capability resource.");
+  }
+  return {
+    id: `oauth:${auth.clientId}`,
+    kind: "oauth",
+    resource: auth.resource.href,
+    scopes: [...auth.scopes],
   };
 }
 
