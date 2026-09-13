@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { SqliteCapabilityAuditStore } from "./audit-store.js";
 import { SqliteCapabilityCatalogStore } from "./catalog-store.js";
 import { CapabilityLeaseManager } from "./leases.js";
@@ -7,6 +8,10 @@ import { ProviderSupervisor, type ProviderSupervisorOptions } from "./provider-s
 import { CapabilityRegistry } from "./registry.js";
 import { CapabilityInvocationRouter, type CapabilityRouterOptions } from "./router.js";
 import { CapabilityEventHub } from "./events.js";
+import { SqliteCapabilityGrantStore, type StoredCapabilityGrant } from "./grant-store.js";
+import type { CapabilityGrant } from "./policy.js";
+import type { CapabilityPrincipal } from "./types.js";
+import { CapabilityError } from "./errors.js";
 
 export interface CapabilityRuntimeOptions {
   stateDir: string;
@@ -24,12 +29,14 @@ export class CapabilityRuntime {
   readonly events = new CapabilityEventHub();
   private readonly store: SqliteCapabilityCatalogStore;
   private readonly audit: SqliteCapabilityAuditStore;
+  private readonly grants: SqliteCapabilityGrantStore;
   private started = false;
   private closed = false;
 
   constructor(options: CapabilityRuntimeOptions) {
     this.store = new SqliteCapabilityCatalogStore(options.stateDir);
     this.audit = new SqliteCapabilityAuditStore(options.stateDir);
+    this.grants = new SqliteCapabilityGrantStore(options.stateDir);
     this.registry = new CapabilityRegistry(this.store);
     this.supervisor = new ProviderSupervisor(this.registry, {
       ...options.supervisor,
@@ -44,6 +51,7 @@ export class CapabilityRuntime {
       },
     });
     this.policy = new CapabilityPolicyEngine();
+    for (const grant of this.grants.loadAll()) this.policy.addGrant(grant);
     this.leases = new CapabilityLeaseManager();
     this.router = new CapabilityInvocationRouter(
       this.registry,
@@ -80,6 +88,78 @@ export class CapabilityRuntime {
     await this.router.close();
     await this.supervisor.close();
     this.audit.close();
+    this.grants.close();
     this.store.close();
+  }
+
+  listGrants(principal: CapabilityPrincipal): StoredCapabilityGrant[] {
+    requireAdmin(principal);
+    const stored = new Map(this.grants.loadAll().map((grant) => [grant.id, grant]));
+    return this.policy.listGrants().map((grant) => ({
+      ...grant,
+      createdBy: stored.get(grant.id)?.createdBy ?? "unknown",
+      createdAt: stored.get(grant.id)?.createdAt ?? "unknown",
+    }));
+  }
+
+  createGrant(
+    principal: CapabilityPrincipal,
+    input: Omit<CapabilityGrant, "id" | "revokedAt"> & { id?: string },
+  ): StoredCapabilityGrant {
+    requireAdmin(principal);
+    if (input.expiresAt
+      && (!Number.isFinite(Date.parse(input.expiresAt)) || Date.parse(input.expiresAt) <= Date.now())) {
+      throw new CapabilityError("invalid_arguments", "Grant expiresAt must be a future ISO timestamp.");
+    }
+    const grantId = input.id ?? `grant_${randomUUID()}`;
+    if (this.policy.listGrants().some((grant) => grant.id === grantId)) {
+      throw new CapabilityError("conflict", "Grant id already exists.");
+    }
+    const grant: StoredCapabilityGrant = {
+      ...input,
+      id: grantId,
+      createdBy: principal.id,
+      createdAt: new Date().toISOString(),
+    };
+    this.policy.addGrant(grant);
+    try {
+      this.grants.create(grant);
+    } catch (error) {
+      this.policy.removeGrant(grant.id);
+      throw new CapabilityError("conflict", "Grant id already exists or could not be persisted.", { cause: error });
+    }
+    this.audit.recordEvent({
+      requestId: `grant:${grant.id}`,
+      principalId: principal.id,
+      eventType: "capability.grant.created",
+      providerId: grant.providerPattern,
+      decision: "allowed",
+      summary: { grantId: grant.id, grantee: grant.principalId, capabilityPattern: grant.capabilityPattern },
+    });
+    this.events.publish("grant.created", { grantId: grant.id, principalId: grant.principalId });
+    return structuredClone(grant);
+  }
+
+  revokeGrant(principal: CapabilityPrincipal, grantId: string): void {
+    requireAdmin(principal);
+    const revokedAt = new Date().toISOString();
+    if (!this.grants.revoke(grantId, revokedAt)) {
+      throw new CapabilityError("capability_not_found", "Unknown or already revoked grant.");
+    }
+    this.policy.revokeGrant(grantId, revokedAt);
+    this.audit.recordEvent({
+      requestId: `grant:${grantId}`,
+      principalId: principal.id,
+      eventType: "capability.grant.revoked",
+      decision: "allowed",
+      summary: { grantId },
+    });
+    this.events.publish("grant.revoked", { grantId });
+  }
+}
+
+function requireAdmin(principal: CapabilityPrincipal): void {
+  if (!principal.scopes.includes("capabilities:admin")) {
+    throw new CapabilityError("policy_denied", "The principal lacks capabilities:admin.");
   }
 }

@@ -1699,7 +1699,7 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
   const resourceServerUrl = resourceUrlFromServerUrl(mcpUrl);
   const capabilityMcpUrl = new URL("/capabilities/mcp", config.publicBaseUrl);
   const capabilityResourceServerUrl = resourceUrlFromServerUrl(capabilityMcpUrl);
-  const capabilityScopes = ["capabilities:discover", "capabilities:invoke"];
+  const capabilityScopes = ["capabilities:discover", "capabilities:invoke", "capabilities:admin"];
   const oauthScopes = [...new Set([...config.oauth.scopes, ...capabilityScopes])];
   const oauthProvider = new SingleUserOAuthProvider(
     { ...config.oauth, scopes: oauthScopes },
@@ -1729,6 +1729,13 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
     ? requireBearerAuth({
       verifier: oauthProvider,
       requiredScopes: [],
+      resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(capabilityResourceServerUrl),
+    })
+    : passThroughAuth;
+  const capabilityAdminAuth = config.authMode === "oauth"
+    ? requireBearerAuth({
+      verifier: oauthProvider,
+      requiredScopes: ["capabilities:admin"],
       resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(capabilityResourceServerUrl),
     })
     : passThroughAuth;
@@ -1997,6 +2004,7 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
         runtime: capabilityRuntime,
         discoverAuth: capabilityDiscoverAuth,
         invokeAuth: capabilityInvokeAuth,
+        adminAuth: capabilityAdminAuth,
         principal: (req) => capabilityPrincipal(
           req,
           config.authMode,

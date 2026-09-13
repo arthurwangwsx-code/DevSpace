@@ -31,13 +31,17 @@ try {
   const address = server.address() as AddressInfo;
   const base = `http://127.0.0.1:${address.port}/api/capabilities/v1`;
   const principalId = `local:${process.getuid?.() ?? "user"}`;
-  running.capabilityRuntime!.policy.addGrant({
+  const createdGrant = await postJson(`${base}/grants`, {
     id: "test-all",
     principalId,
     capabilityPattern: "test.fake.*",
     providerPattern: "test.fake.*",
     allowedEffects: ["readOnly", "mutation", "destructive", "openWorld"],
   });
+  assert.equal(createdGrant.response.status, 200);
+  assert.equal(createdGrant.body.data.id, "test-all");
+  const grants = await getJson(`${base}/grants`);
+  assert.equal(grants.body.data.items[0].createdBy, principalId);
 
   const providers = await getJson(`${base}/providers`);
   assert.equal(providers.response.status, 200);
@@ -86,6 +90,9 @@ try {
   assert.equal(bad.response.status, 404);
   assert.equal(bad.body.error.code, "capability_not_found");
   assert.equal(typeof bad.body.meta.requestId, "string");
+
+  const revoked = await fetch(`${base}/grants/test-all`, { method: "DELETE" });
+  assert.equal(revoked.status, 200);
 
   const controller = new AbortController();
   const eventsResponse = await fetch(`${base}/events`, { signal: controller.signal });

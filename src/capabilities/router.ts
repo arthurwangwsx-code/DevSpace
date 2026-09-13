@@ -5,6 +5,11 @@ import { jsonValueSchema } from "./descriptor-schema.js";
 import { CapabilityError, normalizeCapabilityError } from "./errors.js";
 import { CapabilityLeaseManager } from "./leases.js";
 import { CapabilityPolicyEngine } from "./policy.js";
+import {
+  enforceSessionRequirements,
+  SystemSessionStateProbe,
+  type SessionStateProbe,
+} from "./session-state.js";
 import type { ProviderLease } from "./provider.js";
 import type { ProviderSupervisor } from "./provider-supervisor.js";
 import type { CapabilityBinding, CapabilityRegistry } from "./registry.js";
@@ -26,6 +31,7 @@ export interface CapabilityRouterOptions {
   defaultTimeoutMs?: number;
   maxTimeoutMs?: number;
   onEvent?: (type: string, data: JsonObject) => void;
+  sessionStateProbe?: SessionStateProbe;
 }
 
 export interface OpenLeaseRequest {
@@ -73,8 +79,9 @@ export class CapabilityInvocationRouter {
   private readonly activeByProvider = new Map<string, number>();
   private active = 0;
   private closed = false;
-  private readonly options: Required<Omit<CapabilityRouterOptions, "onEvent">>;
+  private readonly options: Required<Omit<CapabilityRouterOptions, "onEvent" | "sessionStateProbe">>;
   private readonly onEvent: NonNullable<CapabilityRouterOptions["onEvent"]>;
+  private readonly sessionStateProbe: SessionStateProbe;
 
   constructor(
     private readonly registry: CapabilityRegistry,
@@ -93,6 +100,7 @@ export class CapabilityInvocationRouter {
       maxTimeoutMs: options.maxTimeoutMs ?? 120_000,
     };
     this.onEvent = options.onEvent ?? (() => {});
+    this.sessionStateProbe = options.sessionStateProbe ?? new SystemSessionStateProbe();
     if (this.options.maxConcurrent < 1 || this.options.maxConcurrentPerProvider < 1
       || this.options.maxConcurrentPerProvider > this.options.maxConcurrent
       || this.options.queueLimit < 0 || this.options.maxOutputBytes < 1) {
@@ -108,6 +116,17 @@ export class CapabilityInvocationRouter {
       this.recordPolicyDenial(request.requestId, request.principal, undefined, request.providerId, error);
       throw error;
     }
+    const requirements = this.registry.runtimeRequirementsForResource(
+      request.providerId,
+      request.resourceType,
+    );
+    if (requirements) {
+      await enforceSessionRequirements(
+        requirements,
+        this.sessionStateProbe,
+        new AbortController().signal,
+      );
+    }
     const health = this.supervisor.getHealth(request.providerId);
     requireReadyHealth(health?.state, health?.userAction);
     const providerLease = await this.supervisor.openResource(
@@ -115,6 +134,22 @@ export class CapabilityInvocationRouter {
       { resourceType: request.resourceType, selector: request.selector },
       new AbortController().signal,
     );
+    try {
+      this.policy.authorizeOpenTarget({
+        principal: request.principal,
+        providerId: request.providerId,
+        resourceType: request.resourceType,
+        display: providerLease.display,
+      });
+    } catch (error) {
+      await this.supervisor.closeResource(
+        request.providerId,
+        providerLease,
+        new AbortController().signal,
+      ).catch(() => {});
+      this.recordPolicyDenial(request.requestId, request.principal, undefined, request.providerId, error);
+      throw error;
+    }
     const lease = this.leases.create({
       principal: request.principal,
       providerId: request.providerId,
@@ -167,6 +202,11 @@ export class CapabilityInvocationRouter {
       throw new CapabilityError("invalid_arguments", `Capability does not support ${mode} mode.`);
     }
     this.validate(`${descriptor.id}@${descriptor.version}:input`, descriptor.inputSchema, request.arguments);
+    await enforceSessionRequirements(
+      descriptor.availability,
+      this.sessionStateProbe,
+      new AbortController().signal,
+    );
     const health = this.supervisor.getHealth(descriptor.providerId);
     requireReadyHealth(health?.state, health?.userAction);
     const leaseRecord = descriptor.execution.requiresLease

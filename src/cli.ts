@@ -46,7 +46,7 @@ import {
   findChromeDevToolsMcpCommand,
 } from "./capabilities/providers/chrome-devtools-provider.js";
 
-type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "help" | "version";
+type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "grants" | "help" | "version";
 const require = createRequire(import.meta.url);
 const SUPPORTED_NODE_RANGE = ">=20.12 <27";
 
@@ -82,6 +82,9 @@ async function main(argv: string[]): Promise<void> {
     case "providers":
       await runProvidersCommand(args);
       return;
+    case "grants":
+      await runGrantsCommand(args);
+      return;
     case "help":
       printHelp();
       return;
@@ -93,7 +96,7 @@ async function main(argv: string[]): Promise<void> {
 
 function normalizeCommand(command: string | undefined): Command {
   if (!command || command === "serve" || command === "start") return "serve";
-  if (command === "init" || command === "doctor" || command === "verify" || command === "config" || command === "agents" || command === "capabilities" || command === "providers") return command;
+  if (command === "init" || command === "doctor" || command === "verify" || command === "config" || command === "agents" || command === "capabilities" || command === "providers" || command === "grants") return command;
   if (command === "help" || command === "--help" || command === "-h") return "help";
   if (command === "version" || command === "--version" || command === "-v") return "version";
   throw new Error(`Unknown command: ${command}`);
@@ -389,6 +392,7 @@ function printHelp(): void {
       "  devspace capabilities list|search|describe|open|call|status|cancel|close [options]",
       "  devspace providers list [--json]",
       "  devspace providers add-chrome [--command <absolute-path>]",
+      "  devspace grants list|add|revoke [options]",
       "  devspace -v, --version   Print the installed version",
       "",
       "For temporary tunnels:",
@@ -534,6 +538,43 @@ async function runProvidersCommand(args: string[]): Promise<void> {
   await printCapabilityResponse(await capabilityFetch("/providers", options), options);
 }
 
+async function runGrantsCommand(args: string[]): Promise<void> {
+  const [subcommand, ...rest] = args;
+  const options = capabilityCliOptions(rest);
+  if (subcommand === "list" || subcommand === "ls") {
+    await printCapabilityResponse(await capabilityFetch("/grants", options), options);
+    return;
+  }
+  if (subcommand === "add") {
+    const principalId = options.values.principal;
+    const capabilityPattern = options.values["capability-pattern"];
+    const providerPattern = options.values["provider-pattern"];
+    const effects = options.values.effects?.split(",").map((value) => value.trim()).filter(Boolean);
+    if (!principalId || !capabilityPattern || !providerPattern || !effects?.length) {
+      throw new Error("Usage: devspace grants add --principal ID --capability-pattern GLOB --provider-pattern GLOB --effects readOnly,openWorld [--resource-type TYPE] [--expires-at ISO]");
+    }
+    await printCapabilityResponse(await capabilityFetch("/grants", options, {
+      id: options.values.id,
+      principalId,
+      capabilityPattern,
+      providerPattern,
+      allowedEffects: effects,
+      resourceType: options.values["resource-type"],
+      expiresAt: options.values["expires-at"],
+    }), options);
+    return;
+  }
+  if (subcommand === "revoke") {
+    const [grantId] = options.positionals;
+    if (!grantId) throw new Error("Usage: devspace grants revoke <grant-id>");
+    await printCapabilityResponse(await capabilityFetch(
+      `/grants/${encodeURIComponent(grantId)}`, options, undefined, "DELETE",
+    ), options);
+    return;
+  }
+  throw new Error("Usage: devspace grants list|add|revoke [options]");
+}
+
 interface ParsedCapabilityCliOptions {
   flags: Set<string>;
   values: Record<string, string | undefined>;
@@ -547,6 +588,7 @@ function capabilityCliOptions(args: string[]): ParsedCapabilityCliOptions {
   const valueOptions = new Set([
     "url", "provider", "tag", "cursor", "limit", "type", "selector", "ttl-seconds",
     "arguments", "lease", "timeout-ms", "idempotency-key",
+    "id", "principal", "capability-pattern", "provider-pattern", "effects", "resource-type", "expires-at",
   ]);
   for (let index = 0; index < args.length; index++) {
     const argument = args[index]!;

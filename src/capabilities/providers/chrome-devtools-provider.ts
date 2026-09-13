@@ -23,6 +23,7 @@ const RUNTIME_REQUIREMENTS = {
   requiresForegroundApp: false,
 };
 const READ_ONLY = { readOnly: true, destructive: false, idempotent: true, openWorld: true };
+const MUTATION = { readOnly: false, destructive: false, idempotent: false, openWorld: true };
 
 export class ChromeDevToolsProvider extends McpClientProvider {
   private serial = Promise.resolve();
@@ -36,10 +37,14 @@ export class ChromeDevToolsProvider extends McpClientProvider {
     if (!Number.isInteger(pageId) || (pageId as number) < 0) {
       throw new CapabilityError("invalid_arguments", "selector.pageId must be a non-negative integer.");
     }
-    await this.runSerialized(async () => {
+    const display = await this.runSerialized(async () => {
+      const pages = await this.callChrome("list_pages", {}, context.signal);
+      const page = findPage(pages, pageId as number);
+      if (!page) throw new CapabilityError("invalid_arguments", "selector.pageId is not an available Chrome page.");
       await this.callChrome("select_page", { pageId: pageId as number, bringToFront: false }, context.signal);
+      return { pageId: pageId as number, ...(page.origin ? { origin: page.origin } : {}) };
     });
-    return { handle: { pageId: pageId as number }, display: { pageId: pageId as number } };
+    return { handle: { pageId: pageId as number }, display };
   }
 
   override async invoke(
@@ -54,6 +59,9 @@ export class ChromeDevToolsProvider extends McpClientProvider {
             throw new CapabilityError("lease_required", "A valid browser_page lease is required.");
           }
           await this.callChrome("select_page", { pageId: pageId as number, bringToFront: false }, context.signal);
+        }
+        if (["type_text", "press_key"].includes(String(request.binding.tool))) {
+          await this.assertFocusedElementIsNotSecure(context.signal);
         }
         const result = await super.invoke(request, context);
         this.pageOperationSucceeded = true;
@@ -82,6 +90,17 @@ export class ChromeDevToolsProvider extends McpClientProvider {
     const result = this.serial.then(operation, operation);
     this.serial = result.then(() => undefined, () => undefined);
     return result;
+  }
+
+  private async assertFocusedElementIsNotSecure(signal: AbortSignal): Promise<void> {
+    const inspection = await this.callChrome("evaluate_script", {
+      function: "() => { const e = document.activeElement; const secure = e instanceof HTMLInputElement && (e.type === 'password' || /(?:current|new)-password/.test(e.autocomplete || '')); return { devspaceSecureField: secure, devspaceInspected: true }; }",
+    }, signal);
+    const serialized = JSON.stringify(inspection);
+    if (!/devspaceInspected[^a-zA-Z0-9]+(?:true|True)/.test(serialized)
+      || /devspaceSecureField[^a-zA-Z0-9]+(?:true|True)/.test(serialized)) {
+      throw new CapabilityError("policy_denied", "Typing into secure or unverified fields is not allowed.");
+    }
   }
 
   private classifyInitialConnectionError(error: unknown): unknown {
@@ -118,11 +137,15 @@ export function createChromeDevToolsManifest(command: string): McpProviderManife
         ],
       },
       tools: [
-        mapping("list_pages", "browser.chrome.list_pages", "列出当前 Chrome 页面", false, ["browser", "chrome", "pages"]),
-        mapping("take_snapshot", "browser.chrome.take_snapshot", "读取 Chrome 页面语义快照", true, ["browser", "chrome", "snapshot"]),
-        mapping("take_screenshot", "browser.chrome.take_screenshot", "截取 Chrome 页面图像", true, ["browser", "chrome", "screenshot"]),
-        mapping("list_console_messages", "browser.chrome.list_console_messages", "读取 Chrome 页面控制台消息", true, ["browser", "chrome", "console"]),
-        mapping("list_network_requests", "browser.chrome.list_network_requests", "读取 Chrome 页面网络请求", true, ["browser", "chrome", "network"]),
+        mapping("list_pages", "browser.chrome.list_pages", "列出当前 Chrome 页面", false, ["browser", "chrome", "pages"], READ_ONLY),
+        mapping("take_snapshot", "browser.chrome.take_snapshot", "读取 Chrome 页面语义快照", true, ["browser", "chrome", "snapshot"], READ_ONLY),
+        mapping("take_screenshot", "browser.chrome.take_screenshot", "截取 Chrome 页面图像", true, ["browser", "chrome", "screenshot"], READ_ONLY),
+        mapping("list_console_messages", "browser.chrome.list_console_messages", "读取 Chrome 页面控制台消息", true, ["browser", "chrome", "console"], READ_ONLY),
+        mapping("list_network_requests", "browser.chrome.list_network_requests", "读取 Chrome 页面网络请求", true, ["browser", "chrome", "network"], READ_ONLY),
+        mapping("navigate_page", "browser.chrome.navigate", "导航 Chrome 页面", true, ["browser", "chrome", "navigation", "mutation"], MUTATION),
+        mapping("click", "browser.chrome.click", "点击 Chrome 页面元素", true, ["browser", "chrome", "input", "mutation"], MUTATION),
+        mapping("type_text", "browser.chrome.type_text", "向 Chrome 当前焦点输入文本", true, ["browser", "chrome", "input", "mutation"], MUTATION),
+        mapping("press_key", "browser.chrome.press_key", "向 Chrome 页面发送按键", true, ["browser", "chrome", "input", "mutation"], MUTATION),
       ],
     },
   });
@@ -142,7 +165,14 @@ export function findChromeDevToolsMcpCommand(environment: NodeJS.ProcessEnv = pr
   throw new Error("chrome-devtools-mcp was not found on PATH. Install it with: npm install -g chrome-devtools-mcp@latest");
 }
 
-function mapping(tool: string, capabilityId: string, title: string, requiresLease: boolean, tags: string[]) {
+function mapping(
+  tool: string,
+  capabilityId: string,
+  title: string,
+  requiresLease: boolean,
+  tags: string[],
+  effects: typeof READ_ONLY,
+) {
   return {
     tool,
     capabilityId,
@@ -150,7 +180,7 @@ function mapping(tool: string, capabilityId: string, title: string, requiresLeas
     version: "1.0.0",
     tags,
     aliases: [],
-    effects: READ_ONLY,
+    effects,
     availability: RUNTIME_REQUIREMENTS,
     permissions: [{
       id: "chrome.remote_debugging",
@@ -173,4 +203,43 @@ function executable(path: string): string {
 function looksLikeConnectionApprovalTimeout(error: unknown): boolean {
   const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   return /timed? out|deadline|request timed out|transport closed|socket connection was closed/i.test(message);
+}
+
+function findPage(value: JsonValue, pageId: number): { origin?: string } | undefined {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const pages = value.pages;
+    if (Array.isArray(pages)) {
+      for (const page of pages) {
+        if (typeof page === "number" && page === pageId) return {};
+        if (page && typeof page === "object" && !Array.isArray(page)
+          && page.pageId === pageId && typeof page.url === "string") {
+          return { origin: safeOrigin(page.url) };
+        }
+      }
+    }
+    for (const child of Object.values(value)) {
+      const found = findPage(child, pageId);
+      if (found) return found;
+    }
+  } else if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = findPage(child, pageId);
+      if (found) return found;
+    }
+  } else if (typeof value === "string") {
+    for (const line of value.split("\n")) {
+      const match = line.trim().match(/^(\d+):\s+(\S+)/);
+      if (match && Number(match[1]) === pageId) return { origin: safeOrigin(match[2]!) };
+    }
+  }
+  return undefined;
+}
+
+function safeOrigin(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    return url.origin === "null" ? undefined : url.origin;
+  } catch {
+    return undefined;
+  }
 }

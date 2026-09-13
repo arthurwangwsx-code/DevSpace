@@ -54,10 +54,18 @@ DevSpace 不会点击、绕过或持久化这个安全确认。Chrome/系统重�
 | `browser.chrome.take_screenshot` | `take_screenshot` | `browser_page` | awake + logged-in + unlocked |
 | `browser.chrome.list_console_messages` | `list_console_messages` | `browser_page` | awake + logged-in + unlocked |
 | `browser.chrome.list_network_requests` | `list_network_requests` | `browser_page` | awake + logged-in + unlocked |
+| `browser.chrome.navigate` | `navigate_page` | `browser_page` | awake + logged-in + unlocked |
+| `browser.chrome.click` | `click` | `browser_page` | awake + logged-in + unlocked |
+| `browser.chrome.type_text` | `type_text` | `browser_page` | awake + logged-in + unlocked |
+| `browser.chrome.press_key` | `press_key` | `browser_page` | awake + logged-in + unlocked |
 
 `select_page` 仅供 Provider 在 lease 内部使用，不会出现在 Agent 可搜索/调用的目录里。所有页面
 调用串行执行，并在调用前重新选择 lease 中的 `pageId`，避免共享 MCP 的隐式 selected-page
 状态造成跨 Agent 串页。
+
+Mutation 能力还必须命中包含 `mutation` 与 `openWorld` 的显式 grant。`type_text` 和
+`press_key` 调用前会通过页面内脚本检查当前焦点；密码框、password autocomplete 或无法确认
+目标类型时一律拒绝。v1 不暴露无法可靠关联 AX UID 与 DOM input type 的 `fill`。
 
 ## CLI / CI 调用
 
@@ -72,8 +80,24 @@ devspace capabilities call browser.chrome.take_snapshot \
 ```
 
 OAuth 部署中，发现端使用 `capabilities:discover`，调用和 lease 使用
-`capabilities:invoke`。CI 应通过 `DEVSPACE_CAPABILITY_BEARER_TOKEN` 注入短期 token；不得把
-Chrome Cookie、URL query、页面内容或 bearer token 写入 manifest 和日志。
+`capabilities:invoke`，Grant 管理使用 `capabilities:admin`。CI 应通过
+`DEVSPACE_CAPABILITY_BEARER_TOKEN` 注入短期 token；不得把 Chrome Cookie、URL query、
+页面内容或 bearer token 写入 manifest 和日志。
+
+管理员可以给一个外部 Agent/CI 创建有期限的最小 Grant：
+
+```bash
+devspace grants add \
+  --principal agent:browser-ci \
+  --capability-pattern 'browser.chrome.*' \
+  --provider-pattern browser.chrome.devtools \
+  --effects readOnly,mutation,openWorld \
+  --resource-type browser_page \
+  --expires-at 2026-09-14T00:00:00Z
+```
+
+使用 `devspace grants list --json` 查询，使用 `devspace grants revoke <grant-id>` 撤销。
+Grant 持久化在 DevSpace state database 中；创建、拒绝和撤销都会生成脱敏审计事件。
 
 ## 已知边界
 

@@ -30,7 +30,21 @@ export class CapabilityPolicyEngine {
   addGrant(grant: CapabilityGrant): void {
     validatePattern(grant.capabilityPattern);
     validatePattern(grant.providerPattern);
+    if (grant.allowedEffects.length === 0
+      || grant.allowedEffects.some((effect) => !["readOnly", "mutation", "destructive", "openWorld"].includes(effect))) {
+      throw new CapabilityError("invalid_arguments", "Grant allowedEffects must contain supported effects.");
+    }
     this.grants.set(grant.id, structuredClone(grant));
+  }
+
+  removeGrant(grantId: string): void {
+    this.grants.delete(grantId);
+  }
+
+  listGrants(): CapabilityGrant[] {
+    return [...this.grants.values()]
+      .map((grant) => structuredClone(grant))
+      .sort((left, right) => left.id.localeCompare(right.id));
   }
 
   revokeGrant(grantId: string, revokedAt = new Date().toISOString()): void {
@@ -55,6 +69,22 @@ export class CapabilityPolicyEngine {
       && (candidate.resourceType === undefined || candidate.resourceType === input.resourceType));
     if (!grant) {
       throw new CapabilityError("policy_denied", "No active grant permits this resource lease.");
+    }
+  }
+
+  authorizeOpenTarget(input: {
+    principal: CapabilityPrincipal;
+    providerId: string;
+    resourceType: string;
+    display: JsonObject;
+  }): void {
+    this.requireInvokeScope(input.principal);
+    const grant = this.activeGrants(input.principal).find((candidate) =>
+      globMatches(candidate.providerPattern, input.providerId)
+      && (candidate.resourceType === undefined || candidate.resourceType === input.resourceType)
+      && targetMatches(candidate, input.display));
+    if (!grant) {
+      throw new CapabilityError("policy_denied", "No active grant permits this resource target.");
     }
   }
 

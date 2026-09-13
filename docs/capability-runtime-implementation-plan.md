@@ -1214,7 +1214,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 5 | 完成（2026-09-13） | 本批提交 | REST catalog/search/lease/invoke/error/SSE；OAuth token/scope/audience/expiry 与双 resource metadata；完整 test/build/旧 MCP 契约 | Fake Provider + HTTP OAuth client | SSE 采用 resync 快照恢复；持久事件回放留待硬化批次 |
 | 6 | 完成（2026-09-13） | 本批提交 | 固定 8-tool MCP contract、共享 policy/invocation、CLI JSON stdout/退出码、旧 MCP 契约 | Fake Provider 经 MCP、REST 与 CLI | CLI 通过本机 REST；OAuth 模式需 `DEVSPACE_CAPABILITY_BEARER_TOKEN` |
 | 7 | 代码完成、实机授权待验收（2026-09-13） | 本批提交 | 通用 MCP Manifest、stdio+HTTP、env 引用、allowlist、schema-version fail-closed；Chrome 当前 Profile 预置、只读固定映射、页面 lease、串行目标选择和 CLI 注册测试 | Fake Chrome MCP 已贯通；本机 Chrome 152 已确认 `DevToolsActivePort` 与授权提示，尚未由用户批准 | 批准 Chrome 提示后执行 fixture snapshot/screenshot、重启与异常页验证 |
-| 8 | 待实施 | — | — | 当前 Chrome + 锁屏 | — |
+| 8 | 代码完成、实机锁屏待验收（2026-09-13） | 本批提交 | Chrome mutation 显式映射、secure/unverified field fail-closed、持久 Grant admin API/CLI、macOS session probe、调用与 lease 前运行条件门 | Fake Chrome/locked session；本机当前会话探针 | Chrome 授权后执行 mutation fixture；真实锁屏仍需用户安排解锁窗口 |
 | 9 | 待实施 | — | — | macOS UI + TCC | — |
 | 10 | 待实施 | — | — | 综合 soak | — |
 

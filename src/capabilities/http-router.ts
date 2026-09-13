@@ -10,6 +10,7 @@ export interface CapabilityHttpRouterOptions {
   runtime: CapabilityRuntime;
   discoverAuth: RequestHandler;
   invokeAuth: RequestHandler;
+  adminAuth: RequestHandler;
   principal(req: Request): CapabilityPrincipal;
 }
 
@@ -17,6 +18,7 @@ export function createCapabilityHttpRouter(options: CapabilityHttpRouterOptions)
   const router = express.Router();
   const discover = [options.discoverAuth, principalMiddleware(options.principal)];
   const invoke = [options.invokeAuth, principalMiddleware(options.principal)];
+  const admin = [options.adminAuth, principalMiddleware(options.principal)];
 
   router.get("/providers", ...discover, handle(options.runtime, (req) => ({
     items: options.runtime.supervisor.list(),
@@ -107,6 +109,30 @@ export function createCapabilityHttpRouter(options: CapabilityHttpRouterOptions)
       userAction: provider.health.userAction,
     })),
   })));
+  router.get("/grants", ...admin, handle(options.runtime, (req) =>
+    ({ items: options.runtime.listGrants(principal(req)) })));
+  router.post("/grants", ...admin, handle(options.runtime, (req) => {
+    const body = objectBody(req.body);
+    const constraints = optionalObject(body.targetConstraints);
+    return options.runtime.createGrant(principal(req), {
+      ...(body.id === undefined ? {} : { id: requiredString(body.id, "id") }),
+      principalId: requiredString(body.principalId, "principalId"),
+      capabilityPattern: requiredString(body.capabilityPattern, "capabilityPattern"),
+      providerPattern: requiredString(body.providerPattern, "providerPattern"),
+      ...(body.resourceType === undefined ? {} : { resourceType: requiredString(body.resourceType, "resourceType") }),
+      allowedEffects: requiredEffects(body.allowedEffects),
+      ...(constraints ? { targetConstraints: {
+        ...(constraints.origins ? { origins: requiredStringArray(constraints.origins, "targetConstraints.origins") } : {}),
+        ...(constraints.bundleIds ? { bundleIds: requiredStringArray(constraints.bundleIds, "targetConstraints.bundleIds") } : {}),
+      } } : {}),
+      ...(body.expiresAt === undefined ? {} : { expiresAt: requiredString(body.expiresAt, "expiresAt") }),
+    });
+  }));
+  router.delete("/grants/:grantId", ...admin, handle(options.runtime, (req) => {
+    const grantId = pathParam(req.params.grantId, "grantId");
+    options.runtime.revokeGrant(principal(req), grantId);
+    return { revoked: true, grantId };
+  }));
   router.get("/events", ...discover, (req, res) => streamEvents(options.runtime, req, res));
   return router;
 }
@@ -243,6 +269,23 @@ function optionalStringArray(value: unknown, field: string): string[] | undefine
     throw new CapabilityError("invalid_arguments", `${field} must be an array of strings.`);
   }
   return value;
+}
+
+function requiredStringArray(value: unknown, field: string): string[] {
+  const parsed = optionalStringArray(value, field);
+  if (!parsed || parsed.length === 0) {
+    throw new CapabilityError("invalid_arguments", `${field} must be a non-empty array of strings.`);
+  }
+  return parsed;
+}
+
+function requiredEffects(value: unknown): Array<"readOnly" | "mutation" | "destructive" | "openWorld"> {
+  const effects = requiredStringArray(value, "allowedEffects");
+  const allowed = new Set(["readOnly", "mutation", "destructive", "openWorld"]);
+  if (effects.some((effect) => !allowed.has(effect))) {
+    throw new CapabilityError("invalid_arguments", "allowedEffects contains an unsupported effect.");
+  }
+  return effects as Array<"readOnly" | "mutation" | "destructive" | "openWorld">;
 }
 
 function optionalInteger(value: unknown, field: string): number | undefined {

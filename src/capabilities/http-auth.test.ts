@@ -48,6 +48,12 @@ store.saveAccessToken(hash("expired"), {
   expiresAt: now - 1,
   resource: capabilityResource,
 });
+store.saveAccessToken(hash("valid-admin"), {
+  clientId: client.client_id,
+  scopes: ["capabilities:admin"],
+  expiresAt: now + 3_600,
+  resource: capabilityResource,
+});
 store.close();
 
 const running = createServer(config);
@@ -67,6 +73,9 @@ try {
   assert.equal((await authorizedFetch(endpoint, "expired")).status, 401);
   const accepted = await authorizedFetch(endpoint, "valid-discover");
   assert.equal(accepted.status, 200);
+  const grantsEndpoint = `${origin}/api/capabilities/v1/grants`;
+  assert.equal((await authorizedFetch(grantsEndpoint, "valid-discover")).status, 403);
+  assert.equal((await authorizedFetch(grantsEndpoint, "valid-admin")).status, 200);
 
   const existingMetadata = await fetch(`${origin}/.well-known/oauth-protected-resource/mcp`);
   assert.equal(existingMetadata.status, 200);
@@ -77,7 +86,11 @@ try {
   assert.equal(capabilityMetadata.status, 200);
   const metadata = await capabilityMetadata.json() as any;
   assert.equal(metadata.resource, capabilityResource);
-  assert.deepEqual(metadata.scopes_supported, ["capabilities:discover", "capabilities:invoke"]);
+  assert.deepEqual(metadata.scopes_supported, [
+    "capabilities:discover",
+    "capabilities:invoke",
+    "capabilities:admin",
+  ]);
 
   console.log("capability auth tests passed: token, scope, audience, expiry, dual metadata");
 } finally {

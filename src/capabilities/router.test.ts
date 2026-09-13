@@ -8,6 +8,7 @@ import { FakeCapabilityProvider, fakeDescriptor } from "./fake-provider.test-sup
 import { CapabilityLeaseManager } from "./leases.js";
 import { CapabilityRuntime } from "./runtime.js";
 import type { CapabilityDescriptor, CapabilityPrincipal } from "./types.js";
+import type { SessionState } from "./session-state.js";
 
 const root = mkdtempSync(join(tmpdir(), "devspace-capability-router-"));
 const providerId = "test.fake.provider";
@@ -20,9 +21,22 @@ const echo: CapabilityDescriptor = {
     additionalProperties: true,
   },
 };
-const page = descriptor("test.fake.read_page", true, true);
+const page = {
+  ...descriptor("test.fake.read_page", true, true),
+  availability: {
+    ...descriptor("test.fake.read_page", true, true).availability,
+    requiresUnlocked: true,
+  },
+};
 const mutate = descriptor("test.fake.type_text", false, true);
 const provider = new FakeCapabilityProvider(providerId, [echo, page, mutate]);
+const sessionState: SessionState = {
+  awake: true,
+  loggedIn: true,
+  locked: false,
+  consoleUser: "fixture",
+  observedAt: new Date().toISOString(),
+};
 const runtime = new CapabilityRuntime({
   stateDir: root,
   router: {
@@ -31,6 +45,7 @@ const runtime = new CapabilityRuntime({
     queueLimit: 1,
     maxOutputBytes: 256,
     maxTimeoutMs: 5_000,
+    sessionStateProbe: { async probe() { return { ...sessionState }; } },
   },
 });
 runtime.registerProvider({ provider, kind: "fake", enabled: true });
@@ -43,6 +58,15 @@ runtime.policy.addGrant({
   capabilityPattern: "test.fake.echo",
   providerPattern: providerId,
   allowedEffects: ["readOnly"],
+});
+runtime.policy.addGrant({
+  id: "grant-origin-denied",
+  principalId: otherPrincipal.id,
+  capabilityPattern: "test.fake.*",
+  providerPattern: providerId,
+  resourceType: "browser_page",
+  allowedEffects: ["readOnly"],
+  targetConstraints: { origins: ["https://allowed.test"] },
 });
 runtime.policy.addGrant({
   id: "grant-page",
@@ -94,6 +118,13 @@ try {
     ttlMs: 10_000,
   });
   assert.equal(runtime.leases.size, 1);
+  await assert.rejects(runtime.router.openLease({
+    requestId: "req-open-origin-denied",
+    principal: otherPrincipal,
+    providerId,
+    resourceType: "browser_page",
+    selector: { label: "fixture", origin: "https://denied.test" },
+  }), isCapabilityError("policy_denied"));
   assert.throws(() => runtime.leases.get(lease.id, otherPrincipal), isCapabilityError("policy_denied"));
   const pageResult = await runtime.router.invoke({
     ...request("req-page", principal, page.id, {}),
@@ -163,9 +194,29 @@ try {
   );
   provider.invokeResult = undefined;
 
+  sessionState.locked = true;
+  await assert.rejects(
+    runtime.router.invoke({
+      ...request("req-locked", principal, page.id, {}),
+      leaseId: lease.id,
+    }),
+    isCapabilityError("temporarily_unavailable"),
+  );
+  await assert.rejects(
+    runtime.router.openLease({
+      requestId: "req-open-locked",
+      principal,
+      providerId,
+      resourceType: "browser_page",
+      selector: { label: "locked" },
+    }),
+    isCapabilityError("temporarily_unavailable"),
+  );
+  sessionState.locked = false;
+
   await runtime.router.closeLease({ requestId: "req-close", principal, leaseId: lease.id });
   assert.equal(runtime.leases.size, 0);
-  assert.equal(provider.closeCount, 1);
+  assert.equal(provider.closeCount, 2);
 
   const database = openDatabase(root);
   try {

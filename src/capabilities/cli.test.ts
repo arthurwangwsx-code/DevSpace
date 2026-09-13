@@ -72,6 +72,23 @@ try {
   assert.equal(chrome.code, 0);
   assert.equal(JSON.parse(chrome.stdout).connection, "current-chrome-auto-connect");
 
+  const principalId = `local:${process.getuid?.() ?? "user"}`;
+  const grant = await runCli([
+    "grants", "add", "--url", url,
+    "--id", "cli-grant",
+    "--principal", principalId,
+    "--capability-pattern", "test.fake.*",
+    "--provider-pattern", "test.fake.*",
+    "--effects", "readOnly",
+    "--json",
+  ], env);
+  assert.equal(grant.code, 0);
+  assert.equal(JSON.parse(grant.stdout).data.id, "cli-grant");
+  const listedGrants = await runCli(["grants", "list", "--url", url, "--json"], env);
+  assert.equal(JSON.parse(listedGrants.stdout).data.items.length, 1);
+  const revokedGrant = await runCli(["grants", "revoke", "cli-grant", "--url", url, "--json"], env);
+  assert.equal(JSON.parse(revokedGrant.stdout).data.revoked, true);
+
   console.log("capability CLI tests passed: stable JSON stdout and CI exit codes");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));

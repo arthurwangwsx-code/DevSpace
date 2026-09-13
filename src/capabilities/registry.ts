@@ -9,6 +9,7 @@ import type {
   CapabilityListQuery,
   CapabilitySearchQuery,
   CapabilitySummary,
+  CapabilityRuntimeRequirements,
   JsonValue,
   ProviderHealth,
 } from "./types.js";
@@ -140,6 +141,23 @@ export class CapabilityRegistry {
       throw new CapabilityError("provider_unavailable", "The provider has not been restored yet.");
     }
     return entry.binding;
+  }
+
+  runtimeRequirementsForResource(
+    providerId: string,
+    resourceType: string,
+  ): CapabilityRuntimeRequirements | undefined {
+    const descriptors = [...this.entries.values()]
+      .map(({ descriptor }) => descriptor)
+      .filter((descriptor) => descriptor.providerId === providerId
+        && descriptor.execution.resourceTypes.includes(resourceType));
+    if (descriptors.length === 0) return undefined;
+    return {
+      requiresAwake: descriptors.some(({ availability }) => availability.requiresAwake),
+      requiresLoggedInSession: descriptors.some(({ availability }) => availability.requiresLoggedInSession),
+      requiresUnlocked: descriptors.some(({ availability }) => availability.requiresUnlocked),
+      requiresForegroundApp: descriptors.some(({ availability }) => availability.requiresForegroundApp),
+    };
   }
 
   list(

@@ -17,7 +17,7 @@ assert.deepEqual(generated.spec.transport, {
   args: ["--autoConnect", "--no-category-extensions", "--no-performance-crux", "--no-usage-statistics"],
   envFrom: {},
 });
-assert.equal(generated.spec.tools.length, 5);
+assert.equal(generated.spec.tools.length, 9);
 assert.equal(generated.spec.tools[0]!.requiresLease, false);
 assert.equal(generated.spec.tools[1]!.requiresLease, true);
 assert.equal(generated.spec.tools[1]!.availability.requiresUnlocked, true);
@@ -42,18 +42,33 @@ try {
     "browser.chrome.take_screenshot",
     "browser.chrome.list_console_messages",
     "browser.chrome.list_network_requests",
+    "browser.chrome.navigate",
+    "browser.chrome.click",
+    "browser.chrome.type_text",
+    "browser.chrome.press_key",
   ]);
   const snapshot = discovered[1]!;
   assert.deepEqual(snapshot.descriptor.execution.resourceTypes, ["browser_page"]);
   await assert.rejects(provider.open({ resourceType: "browser_page", selector: { pageId: -1 } }, signal()), /non-negative/);
   const lease0 = await provider.open({ resourceType: "browser_page", selector: { pageId: 0 } }, signal());
   const lease1 = await provider.open({ resourceType: "browser_page", selector: { pageId: 1 } }, signal());
+  assert.deepEqual(lease0.display, { pageId: 0, origin: "https://zero.fixture.test" });
+  assert.deepEqual(lease1.display, { pageId: 1, origin: "https://one.fixture.test" });
   const [page0, page1] = await Promise.all([
     invoke(provider, snapshot, lease0),
     invoke(provider, snapshot, lease1),
   ]);
   assert.deepEqual(page0, { tool: "take_snapshot", selectedPage: 0 });
   assert.deepEqual(page1, { tool: "take_snapshot", selectedPage: 1 });
+  const typed = discovered.find(({ descriptor }) => descriptor.id === "browser.chrome.type_text")!;
+  assert.equal(typed.descriptor.effects.readOnly, false);
+  assert.deepEqual(await provider.invoke({
+    capabilityId: typed.descriptor.id,
+    descriptor: typed.descriptor,
+    binding: typed.binding,
+    arguments: { text: "fixture" },
+    lease: lease1,
+  }, signal()), { tool: "type_text", selectedPage: 1 });
   await assert.rejects(invoke(provider, snapshot), (error) => error instanceof CapabilityError && error.code === "lease_required");
 } finally {
   await provider.stop("test_complete");
