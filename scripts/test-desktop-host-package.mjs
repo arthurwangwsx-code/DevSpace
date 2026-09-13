@@ -34,7 +34,7 @@ try {
   assert.equal(result.adHoc, true);
   assert.equal(result.stableSigningIdentity, false);
   assert.equal(result.permissionProbeTransport, "launch-services");
-  assert.equal(result.permissions?.version, "0.4.1");
+  assert.equal(result.permissions?.version, "0.4.2");
   assert.equal(waitForProcessExit(executable, 3_000), true, "permission probe helper remained running");
   const bridgeRequest = [
     { jsonrpc: "2.0", id: 1, method: "initialize", params: {
@@ -50,8 +50,8 @@ try {
   });
   assert.equal(bridge.status, 0, `${bridge.stderr}\n${bridge.stdout}`);
   const bridgeReplies = bridge.stdout.trim().split("\n").map((line) => JSON.parse(line));
-  assert.equal(bridgeReplies[0]?.result?.serverInfo?.version, "0.4.1");
-  assert.equal(bridgeReplies[1]?.result?.structuredContent?.version, "0.4.1");
+  assert.equal(bridgeReplies[0]?.result?.serverInfo?.version, "0.4.2");
+  assert.equal(bridgeReplies[1]?.result?.structuredContent?.version, "0.4.2");
   const client = new Client({ name: "desktop-host-package-test", version: "1.0.0" });
   const transport = new StdioClientTransport({ command: executable, args: [], stderr: "pipe" });
   try {
@@ -62,7 +62,7 @@ try {
     }
     const status = await client.callTool({ name: "desktop_status", arguments: {} });
     assert.equal(status.isError, undefined);
-    assert.equal(status.structuredContent?.version, "0.4.1");
+    assert.equal(status.structuredContent?.version, "0.4.2");
   } finally {
     await client.close().catch(() => {});
     await transport.close().catch(() => {});

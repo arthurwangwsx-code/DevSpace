@@ -3,7 +3,7 @@ import ApplicationServices
 import Foundation
 import ScreenCaptureKit
 
-let helperVersion = "0.4.1"
+let helperVersion = "0.4.2"
 let userActivityYieldSeconds = 1.0
 let snapshotMaxAgeSeconds = 30.0
 let snapshotCacheLimit = 16
@@ -392,8 +392,12 @@ func desktopStatus() -> [String: Any] {
 
 func listApps() -> [[String: Any]] {
     var applications = Dictionary(uniqueKeysWithValues: NSWorkspace.shared.runningApplications
-        .filter { $0.activationPolicy == .regular && !$0.isTerminated }
-        .map { ($0.processIdentifier, $0) })
+        .compactMap { cached -> (pid_t, NSRunningApplication)? in
+            guard let app = NSRunningApplication(processIdentifier: cached.processIdentifier),
+                  app.activationPolicy == .regular,
+                  !app.isTerminated else { return nil }
+            return (app.processIdentifier, app)
+        })
 
     // A long-lived LSUIElement host does not necessarily pump AppKit's main run loop, so
     // NSWorkspace's runningApplications snapshot can lag behind applications launched after
@@ -661,7 +665,7 @@ func expectedProcessId(_ arguments: [String: Any]) throws -> pid_t? {
 }
 
 func requireFrontmost(_ app: NSRunningApplication) throws {
-    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else {
+    guard app.isActive else {
         throw HelperError(message: "The leased application is not frontmost; refusing global input.")
     }
 }
