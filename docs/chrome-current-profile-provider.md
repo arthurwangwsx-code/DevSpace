@@ -131,6 +131,30 @@ chrome-devtools status
 chrome-devtools list_pages --output-format=json
 ```
 
+## 分阶段实机验收
+
+真实测试脚本只接受 loopback fixture，并且只把 origin、页面数量、输出字节数、耗时和通过状态
+写入产物，不保存其他标签页 URL、页面正文或截图内容：
+
+```bash
+# 1. 解锁，建立并验证基线；导航 mutation 只重新加载同一个本地 fixture URL
+npm run test:current-chrome -- --phase unlocked-baseline \
+  --fixture-url http://127.0.0.1:19080/
+
+# 2. 保持 daemon/Chrome 不变，锁屏后验证后台读取
+npm run test:current-chrome -- --phase locked-continuation \
+  --fixture-url http://127.0.0.1:19080/
+
+# 3. 再次解锁，验证恢复和同页 mutation
+npm run test:current-chrome -- --phase unlocked-recovery \
+  --fixture-url http://127.0.0.1:19080/
+```
+
+每一阶段生成独立 `summary.json` 和 `summary.md`，默认位于
+`.build/current-chrome-provider/<timestamp>/`。脚本验证固定九项 Chrome 能力、当前 Profile
+fixture 页、页面 lease、snapshot、screenshot、同页导航，以及 Provider 停止后 daemon 仍存活。
+阶段与实际锁屏状态不匹配时会在发出任何页面调用前失败，避免制造无效证据。
+
 若 `list_pages` 超时，依次检查：Chrome 确认框、是否有第二个 MCP/CDP 客户端、冻结/异常标签页、
 标签页数量和 `chrome://inspect` 中持续刷新的 Android/WebView target。修改 Chrome 设置或关闭
 用户标签页前必须由用户决定。官方 daemon 在调用已跨 socket 后没有取消协议；超时只会终止

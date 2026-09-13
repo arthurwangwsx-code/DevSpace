@@ -1237,6 +1237,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 10 | 框架与 10m soak 完成、24h/实机 soak 待验收（2026-09-13） | 本批提交 | 独立临时 DevSpace + 真实 stdio MCP fixture；REST/MCP 并发、固定 8-tool、session churn、队列限流/恢复、幂等、取消、超时、输出上限、secure intent、child crash/backoff/recovery、进程树 RSS/FD/socket、关机无孤儿；最终 delegated-approval 10m 为 43,025/43,025 调用、5,000 churn、26 项门全通过、调用 p95 23 ms、峰值 RSS 603.84 MiB | 仅隔离 Fixture，不等同于 Chrome/桌面实机 soak | 24h soak 尚未运行；Chrome 授权、真实锁屏、真实用户活跃让出仍是显式验收门 |
 | 11 | 完成（2026-09-13） | 本批提交 | 固定 REST admin API；固定 MCP 的 `capability_invoke` 调用动态 `devspace.providers.*` 管理能力；默认 grantless delegated approval、enforced-policy 显式兼容开关；Manifest 安全存储；进程内 install/enable/disable/reload/remove；Catalog revision 与 8-tool 不变端到端测试 | 真实 stdio Fake MCP 子进程动态装载、重载和回收 | 包下载/供应链审批由上层管理 Agent 负责 |
 | 12 | 完成（2026-09-13） | 本批提交 | Manifest `discoverAllTools`；下游 tools/list 自动生成稳定 capability ID、Schema、描述和保守 effect 元数据；显式映射可覆盖；REST/MCP 自动发现与调用端到端测试 | 真实 stdio Fake MCP 的未映射工具自动进入 Catalog 并可由固定 `capability_invoke` 调用 | prompts/resources 暂不投影为 Capability；需要时以新资产类型扩展 Catalog |
+| 13 | 框架完成、三阶段实机执行待解锁（2026-09-13） | 本批提交 | `test:current-chrome` 对 lock-state 前置条件、daemon persistence、固定九能力、list、lease、snapshot、screenshot、同页 navigation 和脱敏 JSON/Markdown receipt 做统一验证 | 当前锁屏环境的 unlocked-baseline 预检在任何页面调用前按预期失败并生成 receipt | 用户解锁后依次运行 unlocked-baseline、locked-continuation、unlocked-recovery |
 
 ## 20. 推荐阅读顺序
 

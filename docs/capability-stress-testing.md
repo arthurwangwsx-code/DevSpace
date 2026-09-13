@@ -137,3 +137,14 @@ distinct:
 Never run mutation load against a real account or production page. A real-provider
 soak must use a dedicated profile/config, explicit target constraints, a local
 fixture, and a human-agreed lock/unlock window.
+
+Current Chrome has a bounded real-provider runner:
+
+```bash
+npm run test:current-chrome -- --phase unlocked-baseline --fixture-url http://127.0.0.1:19080/
+npm run test:current-chrome -- --phase locked-continuation --fixture-url http://127.0.0.1:19080/
+npm run test:current-chrome -- --phase unlocked-recovery --fixture-url http://127.0.0.1:19080/
+```
+
+It fails before browser invocation when the requested phase does not match the actual macOS lock state.
+Only the loopback fixture origin and bounded measurements enter its reports.
