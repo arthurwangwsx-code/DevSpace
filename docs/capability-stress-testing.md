@@ -198,13 +198,15 @@ The production desktop Provider also has a non-mutating performance canary:
 ```bash
 npm run test:desktop-provider-performance -- \
   --rest-samples 50 \
-  --mcp-samples 25
+  --mcp-samples 25 \
+  --reload-provider
 ```
 
 It is safe to run while locked because it invokes only `desktop.macos.status`.
 It verifies the exact eight-tool outer MCP contract, exact eight-capability desktop
 catalog, REST and MCP invocation paths, stable Provider PID, permission-health
-consistency, local latency gates, and bounded RSS growth. JSON and Markdown receipts
+consistency, local latency gates, bounded RSS growth, and—when explicitly requested—
+dynamic reload with old-child exit and new-child recovery. JSON and Markdown receipts
 are written under `.build/desktop-provider-performance/`. Passing this canary proves
 the deployed control path and status performance; it does not replace unlocked AX,
 screenshot, input, restart, or lock-transition fixtures.

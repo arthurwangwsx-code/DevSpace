@@ -33,6 +33,7 @@ let providerHealth: Record<string, unknown> | undefined;
 let permissionStatus: { accessibilityTrusted: boolean; screenCaptureGranted: boolean } | undefined;
 let rssStartKiB: number | undefined;
 let rssEndKiB: number | undefined;
+let recovery: { oldPid: number; newPid: number; oldPidExited: boolean } | undefined;
 let client: Client | undefined;
 let failure: string | undefined;
 
@@ -102,6 +103,29 @@ try {
       rssGrowthKiB,
     },
   });
+
+  if (options.reloadProvider) {
+    const reload = await metrics.measure("mcp.reload_provider", () => client!.callTool({
+      name: "capability_invoke",
+      arguments: {
+        capabilityId: "devspace.providers.control",
+        arguments: { providerId: PROVIDER_ID, action: "reload" },
+        mode: "sync",
+      },
+    }));
+    assert.equal(reload.isError, undefined);
+    assert.equal(object(object(reload.structuredContent).data).status, "succeeded");
+    const recoveredStatus = await metrics.measure("rest.desktop_status_after_reload", invokeRestStatus);
+    assert.notEqual(recoveredStatus.processId, providerPid, "desktop Provider kept the old PID after reload");
+    assert.deepEqual({
+      accessibilityTrusted: recoveredStatus.accessibilityTrusted,
+      screenCaptureGranted: recoveredStatus.screenCaptureGranted,
+    }, permissionStatus, "desktop permission state changed after reload");
+    const oldPidExited = !(await processExists(providerPid));
+    assert.equal(oldPidExited, true, `old desktop Provider PID ${providerPid} is still running`);
+    recovery = { oldPid: providerPid, newPid: recoveredStatus.processId, oldPidExited };
+    steps.push({ name: "provider_reload_recovered", passed: true, details: recovery });
+  }
 } catch (error) {
   failure = safeError(error);
   process.exitCode = 1;
@@ -115,8 +139,8 @@ const report = {
   finishedAt: new Date().toISOString(),
   endpoint: { origin: options.baseUrl.origin, capabilityPath: options.baseUrl.pathname },
   session: session ? { awake: session.awake, loggedIn: session.loggedIn, locked: session.locked } : undefined,
-  samples: { rest: options.restSamples, mcp: options.mcpSamples },
-  provider: { id: PROVIDER_ID, health: providerHealth, pids: [...providerPids], rssStartKiB, rssEndKiB },
+  samples: { rest: options.restSamples, mcp: options.mcpSamples, reloadProvider: options.reloadProvider },
+  provider: { id: PROVIDER_ID, health: providerHealth, pids: [...providerPids], rssStartKiB, rssEndKiB, recovery },
   permissions: permissionStatus,
   metrics: metrics.report(),
   gates: {
@@ -187,6 +211,15 @@ async function processRssKiB(pid: number): Promise<number | undefined> {
   } catch { return undefined; }
 }
 
+async function processExists(pid: number): Promise<boolean> {
+  try {
+    await execFileAsync("/bin/ps", ["-p", String(pid)], {
+      encoding: "utf8", timeout: 2_000, maxBuffer: 64 * 1024,
+    });
+    return true;
+  } catch { return false; }
+}
+
 interface DesktopStatus {
   processId: number;
   accessibilityTrusted: boolean;
@@ -225,8 +258,13 @@ function parseOptions(args: string[]) {
   let restP95GateMs = 250;
   let mcpP95GateMs = 500;
   let rssGrowthGateKiB = 64 * 1024;
+  let reloadProvider = false;
   for (let index = 0; index < args.length; index++) {
     const key = args[index]!;
+    if (key === "--reload-provider") {
+      reloadProvider = true;
+      continue;
+    }
     const value = args[++index];
     if (!value) throw new Error(`missing value for ${key}`);
     if (key === "--url") baseUrl = new URL(value);
@@ -238,7 +276,16 @@ function parseOptions(args: string[]) {
     else if (key === "--rss-growth-kib") rssGrowthGateKiB = positiveInteger(value, key, 1024 * 1024);
     else throw new Error(`unknown option: ${key}`);
   }
-  return { baseUrl, outputRoot, restSamples, mcpSamples, restP95GateMs, mcpP95GateMs, rssGrowthGateKiB };
+  return {
+    baseUrl,
+    outputRoot,
+    restSamples,
+    mcpSamples,
+    restP95GateMs,
+    mcpP95GateMs,
+    rssGrowthGateKiB,
+    reloadProvider,
+  };
 }
 
 function positiveInteger(value: string, name: string, max: number): number {
