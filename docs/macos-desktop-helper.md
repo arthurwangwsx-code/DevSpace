@@ -11,6 +11,9 @@ devspace providers add-desktop \
   --command "$PWD/.build/devspace-desktop-helper"
 ```
 
+Run `npm run test:desktop-lock-boundary` separately while macOS is locked; the
+test must reject UI and lease operations.
+
 The build script compiles an optimized binary and applies an ad-hoc signature with the stable identifier
 `com.devspace.desktop-helper`. Production packaging should replace this with a Developer ID signature and
 keep the installed path and designated requirement stable before the user grants TCC permissions.
@@ -52,3 +55,7 @@ by the fixture canary.
 Lock-screen support is fail-closed: every AX and input capability declares `requiresUnlocked=true`. This
 helper does not and must not attempt to unlock the Mac. Background protocol providers such as Chrome may be
 relaxed only after their own versioned lock-screen soak passes.
+
+`npm run test:desktop-lock-boundary` is the real locked-session acceptance path. It proves the helper remains
+reachable for status while the Runtime rejects both a desktop capability call and an `app_window` lease
+before any login-window interaction, and writes a redacted receipt under `.build/desktop-lock-boundary/`.

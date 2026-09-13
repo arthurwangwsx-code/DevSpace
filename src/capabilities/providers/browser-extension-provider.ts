@@ -1,7 +1,7 @@
 import os from "node:os";
 import { existsSync } from "node:fs";
 import { realpathSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { CapabilityError } from "../errors.js";
 import type { CapabilityProvider, ProviderCapability, ProviderContext, ProviderInvocation, ProviderInvocationContext, ProviderLease, ProviderOpenRequest } from "../provider.js";
 import type { JsonObject, JsonValue, ProviderHealth } from "../types.js";
@@ -27,10 +27,7 @@ export class BrowserExtensionProvider implements CapabilityProvider {
   readonly id = BROWSER_EXTENSION_PROVIDER_ID;
   private readonly bridge: BrowserExtensionBridge;
   private readySince?: string;
-  constructor(
-    environment: NodeJS.ProcessEnv = process.env,
-    private readonly allowedFileRoots: string[] = [],
-  ) {
+  constructor(environment: NodeJS.ProcessEnv = process.env) {
     this.bridge = new BrowserExtensionBridge(environment.DEVSPACE_BROWSER_SOCKET || join(os.homedir(), ".devspace", "browser-extension.sock"));
   }
   async start(_context: ProviderContext): Promise<void> { await this.bridge.start(); this.readySince = new Date().toISOString(); }
@@ -62,7 +59,7 @@ export class BrowserExtensionProvider implements CapabilityProvider {
       capability("browser.extension.hover", "Hover an acquired Chrome tab", "hover", true, MUTATION, { index: { type: "integer" }, x: { type: "number" }, y: { type: "number" } }),
       capability("browser.extension.scroll", "Scroll an acquired Chrome tab", "scroll", true, MUTATION, { x: { type: "number" }, y: { type: "number" }, atX: { type: "number" }, atY: { type: "number" } }),
       capability("browser.extension.select_option", "Select a value in a select element", "select_option", true, MUTATION, { index: { type: "integer" }, value: { type: "string" } }, ["index", "value"]),
-      capability("browser.extension.set_input_files", "Upload approved local files through a file input", "set_input_files", true, MUTATION, {
+      capability("browser.extension.set_input_files", "Upload local files through a file input", "set_input_files", true, MUTATION, {
         index: { type: "integer" }, files: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 32 },
       }, ["index", "files"]),
       capability("browser.extension.type_text", "Type in an acquired Chrome tab", "type", true, MUTATION, { text: { type: "string" } }, ["text"], ["browser.chrome.type_text"]),
@@ -141,13 +138,6 @@ export class BrowserExtensionProvider implements CapabilityProvider {
     let target: string;
     try { target = realpathSync(value); }
     catch { throw new CapabilityError("invalid_arguments", `Upload file does not exist: ${value}`); }
-    const allowed = this.allowedFileRoots.some((root) => {
-      let canonicalRoot: string;
-      try { canonicalRoot = realpathSync(root); } catch { return false; }
-      const rel = relative(canonicalRoot, target);
-      return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-    });
-    if (!allowed) throw new CapabilityError("policy_denied", "Upload file is outside DevSpace allowed roots.");
     return target;
   }
 }

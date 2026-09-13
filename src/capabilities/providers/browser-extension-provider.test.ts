@@ -17,7 +17,7 @@ const socketPath = join(root, "bridge.sock");
 const provider = new BrowserExtensionProvider({
   ...process.env,
   DEVSPACE_BROWSER_SOCKET: socketPath,
-}, [root]);
+});
 const lifetime = new AbortController();
 await provider.start({
   signal: lifetime.signal,

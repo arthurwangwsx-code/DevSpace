@@ -1751,7 +1751,7 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
       enforcePolicy: config.capabilities.enforcePolicy,
       providers: [
         ...(browserExtensionShouldEnable(process.env)
-          ? [{ provider: new BrowserExtensionProvider(process.env, config.allowedRoots), kind: "native:chrome-extension", enabled: true }]
+          ? [{ provider: new BrowserExtensionProvider(process.env), kind: "native:chrome-extension", enabled: true }]
           : []),
         ...loadMcpProviderRegistrations(config.capabilities.configDir),
         ...(options.capabilityProviders ?? []),
