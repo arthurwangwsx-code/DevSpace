@@ -61,6 +61,7 @@ try {
   assert.equal(activationStatus.state, "ready", JSON.stringify(activationStatus));
   assert.equal(object(activationStatus.health).ok, true);
 
+  const providers = await waitForProvidersReady(deadline);
   const postCanary = await productionCanary();
   assert.equal(postCanary.exitCode, 0, postCanary.output);
   const reportedWorkingDirectory = postCanary.output.split("\n").find((line) => line.startsWith("/"));
@@ -79,6 +80,7 @@ try {
     unavailableSamples,
     activation,
     activationStatus,
+    providers,
     postCanary,
   };
 } catch (error) {
@@ -168,6 +170,26 @@ async function health(url: URL, timeoutMs = 2_000): Promise<Record<string, unkno
   return object(await response.json());
 }
 
+async function waitForProvidersReady(deadline: number): Promise<Record<string, unknown>[]> {
+  const url = new URL("/api/capabilities/v1/providers", options.healthUrl);
+  let last: Record<string, unknown>[] = [];
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(2_000) });
+      assert.equal(response.ok, true, `provider health returned HTTP ${response.status}`);
+      const payload = object(await response.json());
+      last = array(object(payload.data).items).map(object);
+      const enabled = last.filter((provider) => provider.enabled === true);
+      if (enabled.length > 0 && enabled.every((provider) => {
+        const state = object(provider.health).state;
+        return state === "ready" || state === "degraded";
+      })) return enabled;
+    } catch {}
+    await delay(100);
+  }
+  throw new Error(`enabled providers did not recover: ${JSON.stringify(last)}`);
+}
+
 function parseActivation(output: string): Record<string, unknown> {
   for (const line of output.trim().split("\n").reverse()) {
     if (!line.startsWith("{") || !line.includes('"activationId"')) continue;
@@ -218,6 +240,11 @@ function loopbackUrl(value: string, expectedPath: string): URL {
 function object(value: unknown): Record<string, unknown> {
   assert.ok(value && typeof value === "object" && !Array.isArray(value), "expected object");
   return value as Record<string, unknown>;
+}
+
+function array(value: unknown): unknown[] {
+  assert.ok(Array.isArray(value), "expected array");
+  return value;
 }
 
 function numberAt(value: Record<string, unknown>, parent: string, key: string): number {

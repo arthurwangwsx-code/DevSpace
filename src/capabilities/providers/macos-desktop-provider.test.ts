@@ -15,7 +15,7 @@ assert.equal(generated.spec.tools.length, 14);
 const generatedById = new Map(generated.spec.tools.map((tool) => [tool.capabilityId, tool]));
 assert.equal(generatedById.get("desktop.macos.list_windows")!.requiresLease, true);
 assert.equal(generatedById.get("desktop.macos.list_windows")!.permissions.length, 0);
-assert.equal(generatedById.get("desktop.macos.snapshot_app")!.version, "2.1.0");
+assert.equal(generatedById.get("desktop.macos.snapshot_app")!.version, "2.2.0");
 assert.equal(generatedById.get("desktop.macos.screenshot_window")!.effects.readOnly, true);
 assert.equal(generatedById.get("desktop.macos.screenshot_window")!.permissions[0]!.id, "macos.screen-capture");
 assert.equal(generatedById.get("desktop.macos.click_element")!.effects.readOnly, false);

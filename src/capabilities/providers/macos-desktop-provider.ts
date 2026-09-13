@@ -208,7 +208,9 @@ function mapping(
     tool,
     capabilityId,
     title,
-    version: requiresLease ? "2.1.0" : "1.0.0",
+    // 2.2 removes bundleId/processId from the public schema. Runtime injects
+    // those process-bound lease fields internally immediately before invoke.
+    version: requiresLease ? "2.2.0" : "1.0.0",
     tags: ["desktop", "macos", effects.readOnly ? "read" : "mutation"],
     aliases: [],
     effects,
