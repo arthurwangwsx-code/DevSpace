@@ -184,6 +184,7 @@ devspace doctor
 - [Troubleshooting Gotchas](https://github.com/Waishnav/devspace/blob/main/docs/gotchas.md)
 - [Running DevSpace in Lima (Chinese)](docs/lima-devspace.md)
 - [MCP Resource Control and High-Concurrency Stability (Chinese)](docs/mcp-resource-control.md)
+- [Universal Capability Runtime Implementation Plan (Chinese)](docs/capability-runtime-implementation-plan.md)
 - [Performance and Reliability Plan](docs/performance-and-reliability.md)
 - [Stress and Soak Testing](docs/stress-testing.md)
 

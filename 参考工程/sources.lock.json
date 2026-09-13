@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-13",
+  "clonePolicy": {
+    "depth": 1,
+    "trackedByDevSpace": false,
+    "purpose": "Read-only implementation research; not runtime dependencies"
+  },
+  "repositories": [
+    {
+      "name": "docker-mcp-gateway",
+      "repository": "docker/mcp-gateway",
+      "url": "https://github.com/docker/mcp-gateway.git",
+      "commit": "a21c0ac1c1e7a9f01a4b713a40d9a3b4c32d722b",
+      "license": "MIT",
+      "category": "capability-gateway"
+    },
+    {
+      "name": "mcp-gateway-registry",
+      "repository": "agentic-community/mcp-gateway-registry",
+      "url": "https://github.com/agentic-community/mcp-gateway-registry.git",
+      "commit": "7c353798fa7d4da6ca1b3f3d2c502505bfbb8f73",
+      "license": "Apache-2.0",
+      "category": "capability-registry"
+    },
+    {
+      "name": "mcp-registry",
+      "repository": "modelcontextprotocol/registry",
+      "url": "https://github.com/modelcontextprotocol/registry.git",
+      "commit": "739b70e8bc1bea203c5a35ab699f1df51d091568",
+      "license": "MIT-to-Apache-2.0 transition; inspect repository LICENSE",
+      "category": "registry-specification"
+    },
+    {
+      "name": "chrome-devtools-mcp",
+      "repository": "ChromeDevTools/chrome-devtools-mcp",
+      "url": "https://github.com/ChromeDevTools/chrome-devtools-mcp.git",
+      "commit": "d9a8cb6ec22aadf5cb964c5e97a8b047693046e2",
+      "license": "Apache-2.0",
+      "category": "browser-mcp"
+    },
+    {
+      "name": "playwright-mcp",
+      "repository": "microsoft/playwright-mcp",
+      "url": "https://github.com/microsoft/playwright-mcp.git",
+      "commit": "8a13ef8e9f7385a0f89477922127f31cbfde9761",
+      "license": "Apache-2.0",
+      "category": "browser-mcp"
+    },
+    {
+      "name": "qwen-open-computer-use",
+      "repository": "QwenLM/open-computer-use",
+      "url": "https://github.com/QwenLM/open-computer-use.git",
+      "commit": "f238d1bc85b53bd785d2618d4fbb5d2402207c7a",
+      "license": "MIT",
+      "category": "computer-automation"
+    },
+    {
+      "name": "munim-computer-use",
+      "repository": "munimtechnologies/munim-computer-use",
+      "url": "https://github.com/munimtechnologies/munim-computer-use.git",
+      "commit": "4cf64d0a6676db58d18bb52c0c56fede479b5240",
+      "license": "Apache-2.0",
+      "category": "computer-and-browser-automation"
+    },
+    {
+      "name": "macos-mcp",
+      "repository": "CursorTouch/MacOS-MCP",
+      "url": "https://github.com/CursorTouch/MacOS-MCP.git",
+      "commit": "a7e135c2509232f572f41ab6686cf71d8c1fdff1",
+      "license": "MIT",
+      "category": "macos-automation"
+    }
+  ]
+}

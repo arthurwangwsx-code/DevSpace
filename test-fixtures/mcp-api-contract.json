@@ -1,0 +1,1780 @@
+{
+  "minimal": [
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Run a shell command inside an open workspace. Use only for tests, builds, git inspection, package scripts, search, file discovery, and directory inspection. In minimal tool mode, grep, glob, and ls are disabled; use command-line tools such as grep, rg, find, ls, and tree for those read-only inspection actions. Do not use bash to create or modify files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use edit for targeted changes and write for new files or full rewrites. Prefer read for direct file reads. Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "command": {
+            "description": "Shell command to run. Must not create or modify project files; use edit or write for file changes.",
+            "type": "string"
+          },
+          "timeout": {
+            "description": "Timeout in seconds. Defaults to 30, max 300.",
+            "exclusiveMinimum": 0,
+            "maximum": 300,
+            "type": "number"
+          },
+          "workingDirectory": {
+            "description": "Optional working directory relative to the workspace root. Defaults to the workspace root.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "command"
+        ],
+        "type": "object"
+      },
+      "name": "bash",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "title": "Bash"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Edit one file inside an open workspace by replacing exact text blocks. Prefer this over write for targeted changes. Each oldText must match a unique, non-overlapping region of the original file; merge nearby changes into one edit and keep oldText as small as possible while still unique. Call open_workspace first and pass workspaceId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "edits": {
+            "items": {
+              "properties": {
+                "newText": {
+                  "description": "Replacement text.",
+                  "type": "string"
+                },
+                "oldText": {
+                  "description": "Exact text to replace. Must match uniquely in the original file.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "oldText",
+                "newText"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "path": {
+            "description": "File path to edit, relative to the workspace root.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "path",
+          "edits"
+        ],
+        "type": "object"
+      },
+      "name": "edit",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          },
+          "status": {
+            "const": "applied",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result",
+          "status"
+        ],
+        "type": "object"
+      },
+      "title": "Edit file"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Open or resume a local project directory as a coding workspace. Checkout mode reuses the most recently active workspace for the same path by default, including after its in-memory metadata was released. Set forceNew only when a distinct checkout session is explicitly required. Worktree mode always creates an isolated managed Git worktree. Returns a persistent workspaceId, loaded root project instructions, and nested instruction file paths.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "baseRef": {
+            "description": "Git ref to base a worktree on. Only used with mode=\"worktree\". Defaults to HEAD.",
+            "type": "string"
+          },
+          "forceNew": {
+            "description": "Checkout mode only. Defaults to false so the latest workspace for the same path is resumed. Set true only when a distinct workspaceId is explicitly needed.",
+            "type": "boolean"
+          },
+          "mode": {
+            "description": "Defaults to checkout. Use checkout to work in the actual directory. Use worktree to create an isolated managed Git worktree for parallel work.",
+            "enum": [
+              "checkout",
+              "worktree"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "Absolute path, or a leading-tilde home path such as ~/project, to a local project directory inside an allowed root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "open_workspace",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "agentProviders": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "available": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "available"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "agents": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "providerAvailable": {
+                  "type": "boolean"
+                },
+                "providerUnavailableReason": {
+                  "type": "string"
+                },
+                "thinking": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "provider"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "agentsFiles": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "availableAgentsFiles": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "checkout",
+              "worktree"
+            ],
+            "type": "string"
+          },
+          "resumed": {
+            "type": "boolean"
+          },
+          "root": {
+            "type": "string"
+          },
+          "skillDiagnostics": {
+            "items": {},
+            "type": "array"
+          },
+          "skills": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "sourceRoot": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "worktree": {
+            "additionalProperties": false,
+            "properties": {
+              "baseRef": {
+                "type": "string"
+              },
+              "baseSha": {
+                "type": "string"
+              },
+              "detached": {
+                "type": "boolean"
+              },
+              "dirtySource": {
+                "type": "boolean"
+              },
+              "managed": {
+                "type": "boolean"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "baseRef",
+              "baseSha",
+              "dirtySource",
+              "detached",
+              "managed"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "resumed",
+          "root",
+          "mode",
+          "agentsFiles",
+          "availableAgentsFiles",
+          "skills",
+          "agentProviders",
+          "agents",
+          "skillDiagnostics",
+          "instruction"
+        ],
+        "type": "object"
+      },
+      "title": "Open workspace"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Read a file inside an open workspace. Use this for file inspection instead of shell commands like cat or sed. Call open_workspace first and pass workspaceId. UTF-8 text is streamed in pages up to 1 MiB (default 20,000 lines). Follow the returned byteOffset to continue; do not combine byteOffset with offset. Images up to 16 MiB use the image reader. Use this tool to inspect relevant AGENTS.md or CLAUDE.md files listed by open_workspace before working in nested directories.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "byteOffset": {
+            "description": "Zero-based byte cursor returned by the previous page; omit offset when using this.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "limit": {
+            "description": "Maximum number of lines to read.",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "offset": {
+            "description": "1-indexed line number to start reading from.",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "path": {
+            "description": "File path to read, relative to the workspace root.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "read",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "title": "Read file"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Release this workspace's in-memory metadata only when the user explicitly requests resource release or the workspace is known to be unused for a long time. The workspace session remains persisted and recoverable: if the conversation continues, pass the same workspaceId to any workspace tool and DevSpace will restore it automatically. This does not delete files or worktrees, stop commands, revoke the workspaceId, close the MCP transport, or stop the shared server.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "workspaceId": {
+            "description": "Persistent workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId"
+        ],
+        "type": "object"
+      },
+      "name": "release_workspace",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "instruction": {
+            "type": "string"
+          },
+          "recoverable": {
+            "type": "boolean"
+          },
+          "released": {
+            "type": "boolean"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "released",
+          "recoverable",
+          "instruction"
+        ],
+        "type": "object"
+      },
+      "title": "Release workspace memory"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Create or completely overwrite a file inside an open workspace. Prefer edit for targeted changes to existing files. Call open_workspace first and pass workspaceId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "content": {
+            "description": "Complete new file content.",
+            "type": "string"
+          },
+          "path": {
+            "description": "File path to write, relative to the workspace root.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "path",
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "write",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "title": "Write file"
+    }
+  ],
+  "codex": [
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Apply one Codex-style patch inside an open workspace. Supports adding, overwriting, updating, deleting, and moving files. Use this for all file modifications. Paths must be relative to the workspace. Call open_workspace first and pass workspaceId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "patch": {
+            "description": "Patch text enclosed by *** Begin Patch and *** End Patch markers.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "patch"
+        ],
+        "type": "object"
+      },
+      "name": "apply_patch",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "additions": {
+            "type": "number"
+          },
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "operation": {
+                  "enum": [
+                    "add",
+                    "update",
+                    "delete",
+                    "move"
+                  ],
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "previousPath": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "operation"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "removals": {
+            "type": "number"
+          },
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result",
+          "additions",
+          "removals",
+          "files"
+        ],
+        "type": "object"
+      },
+      "title": "Apply patch"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Run a command inside an open workspace. Returns its result when it exits during the yield window, otherwise returns a sessionId for write_stdin. Use this for file inspection, tests, builds, package scripts, and long-running processes. Call open_workspace first and pass workspaceId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "cmd": {
+            "description": "Shell command to execute.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "columns": {
+            "description": "Initial PTY width. Defaults to 80.",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxOutputTokens": {
+            "description": "Approximate output token budget. Defaults to 10000.",
+            "exclusiveMinimum": 0,
+            "maximum": 100000,
+            "type": "integer"
+          },
+          "rows": {
+            "description": "Initial PTY height. Defaults to 24.",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "tty": {
+            "description": "Allocate a pseudo-terminal for interactive commands. Defaults to false.",
+            "type": "boolean"
+          },
+          "workingDirectory": {
+            "description": "Working directory relative to the workspace root. Defaults to the workspace root.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          },
+          "yieldTimeMs": {
+            "description": "Milliseconds to wait before returning a running session. Defaults to 10000.",
+            "maximum": 30000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "cmd"
+        ],
+        "type": "object"
+      },
+      "name": "exec_command",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "exitCode": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "outputTruncated": {
+            "type": "boolean"
+          },
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "sessionId": {
+            "type": "number"
+          },
+          "signal": {
+            "type": "string"
+          },
+          "wallTimeMs": {
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "result",
+          "running",
+          "wallTimeMs",
+          "outputTruncated"
+        ],
+        "type": "object"
+      },
+      "title": "Execute command"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Open or resume a local project directory as a coding workspace. Checkout mode reuses the most recently active workspace for the same path by default, including after its in-memory metadata was released. Set forceNew only when a distinct checkout session is explicitly required. Worktree mode always creates an isolated managed Git worktree. Returns a persistent workspaceId, loaded root project instructions, and nested instruction file paths.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "baseRef": {
+            "description": "Git ref to base a worktree on. Only used with mode=\"worktree\". Defaults to HEAD.",
+            "type": "string"
+          },
+          "forceNew": {
+            "description": "Checkout mode only. Defaults to false so the latest workspace for the same path is resumed. Set true only when a distinct workspaceId is explicitly needed.",
+            "type": "boolean"
+          },
+          "mode": {
+            "description": "Defaults to checkout. Use checkout to work in the actual directory. Use worktree to create an isolated managed Git worktree for parallel work.",
+            "enum": [
+              "checkout",
+              "worktree"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "Absolute path, or a leading-tilde home path such as ~/project, to a local project directory inside an allowed root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "open_workspace",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "agentProviders": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "available": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "available"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "agents": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "providerAvailable": {
+                  "type": "boolean"
+                },
+                "providerUnavailableReason": {
+                  "type": "string"
+                },
+                "thinking": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "provider"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "agentsFiles": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "availableAgentsFiles": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "checkout",
+              "worktree"
+            ],
+            "type": "string"
+          },
+          "resumed": {
+            "type": "boolean"
+          },
+          "root": {
+            "type": "string"
+          },
+          "skillDiagnostics": {
+            "items": {},
+            "type": "array"
+          },
+          "skills": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "sourceRoot": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "worktree": {
+            "additionalProperties": false,
+            "properties": {
+              "baseRef": {
+                "type": "string"
+              },
+              "baseSha": {
+                "type": "string"
+              },
+              "detached": {
+                "type": "boolean"
+              },
+              "dirtySource": {
+                "type": "boolean"
+              },
+              "managed": {
+                "type": "boolean"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "baseRef",
+              "baseSha",
+              "dirtySource",
+              "detached",
+              "managed"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "resumed",
+          "root",
+          "mode",
+          "agentsFiles",
+          "availableAgentsFiles",
+          "skills",
+          "agentProviders",
+          "agents",
+          "skillDiagnostics",
+          "instruction"
+        ],
+        "type": "object"
+      },
+      "title": "Open workspace"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Read a file inside an open workspace. Use this for file inspection instead of shell commands like cat or sed. Call open_workspace first and pass workspaceId. UTF-8 text is streamed in pages up to 1 MiB (default 20,000 lines). Follow the returned byteOffset to continue; do not combine byteOffset with offset. Images up to 16 MiB use the image reader. Use this tool to inspect relevant AGENTS.md or CLAUDE.md files listed by open_workspace before working in nested directories.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "byteOffset": {
+            "description": "Zero-based byte cursor returned by the previous page; omit offset when using this.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "limit": {
+            "description": "Maximum number of lines to read.",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "offset": {
+            "description": "1-indexed line number to start reading from.",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "path": {
+            "description": "File path to read, relative to the workspace root.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "read",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "title": "Read file"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Release this workspace's in-memory metadata only when the user explicitly requests resource release or the workspace is known to be unused for a long time. The workspace session remains persisted and recoverable: if the conversation continues, pass the same workspaceId to any workspace tool and DevSpace will restore it automatically. This does not delete files or worktrees, stop commands, revoke the workspaceId, close the MCP transport, or stop the shared server.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "workspaceId": {
+            "description": "Persistent workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId"
+        ],
+        "type": "object"
+      },
+      "name": "release_workspace",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "instruction": {
+            "type": "string"
+          },
+          "recoverable": {
+            "type": "boolean"
+          },
+          "released": {
+            "type": "boolean"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "released",
+          "recoverable",
+          "instruction"
+        ],
+        "type": "object"
+      },
+      "title": "Release workspace memory"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Poll or write characters to a process returned by exec_command. Omit chars or pass an empty string to poll. Pass \\u0003 to send Ctrl-C.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "chars": {
+            "description": "Characters to write. Omit or pass an empty string to poll.",
+            "type": "string"
+          },
+          "columns": {
+            "description": "Resize a PTY to this width.",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxOutputTokens": {
+            "description": "Approximate output token budget. Defaults to 10000.",
+            "exclusiveMinimum": 0,
+            "maximum": 100000,
+            "type": "integer"
+          },
+          "rows": {
+            "description": "Resize a PTY to this height.",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sessionId": {
+            "description": "Process session identifier returned by exec_command.",
+            "type": "number"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier used to start the process.",
+            "type": "string"
+          },
+          "yieldTimeMs": {
+            "description": "Milliseconds to wait for process output or completion. Defaults to 10000.",
+            "maximum": 30000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "sessionId"
+        ],
+        "type": "object"
+      },
+      "name": "write_stdin",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "exitCode": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "outputTruncated": {
+            "type": "boolean"
+          },
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "sessionId": {
+            "type": "number"
+          },
+          "signal": {
+            "type": "string"
+          },
+          "wallTimeMs": {
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "result",
+          "running",
+          "wallTimeMs",
+          "outputTruncated"
+        ],
+        "type": "object"
+      },
+      "title": "Write to process"
+    }
+  ],
+  "full": [
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Run a shell command inside an open workspace. Use only for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not use bash to create or modify files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use edit for targeted changes and write for new files or full rewrites. Prefer read, grep, glob, and ls for file inspection. Call open_workspace first and pass workspaceId. This is powerful local execution and should only be exposed behind strong authentication.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "command": {
+            "description": "Shell command to run. Must not create or modify project files; use edit or write for file changes.",
+            "type": "string"
+          },
+          "timeout": {
+            "description": "Timeout in seconds. Defaults to 30, max 300.",
+            "exclusiveMinimum": 0,
+            "maximum": 300,
+            "type": "number"
+          },
+          "workingDirectory": {
+            "description": "Optional working directory relative to the workspace root. Defaults to the workspace root.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "command"
+        ],
+        "type": "object"
+      },
+      "name": "bash",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "title": "Bash"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Edit one file inside an open workspace by replacing exact text blocks. Prefer this over write for targeted changes. Each oldText must match a unique, non-overlapping region of the original file; merge nearby changes into one edit and keep oldText as small as possible while still unique. Call open_workspace first and pass workspaceId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "edits": {
+            "items": {
+              "properties": {
+                "newText": {
+                  "description": "Replacement text.",
+                  "type": "string"
+                },
+                "oldText": {
+                  "description": "Exact text to replace. Must match uniquely in the original file.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "oldText",
+                "newText"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "path": {
+            "description": "File path to edit, relative to the workspace root.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "path",
+          "edits"
+        ],
+        "type": "object"
+      },
+      "name": "edit",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          },
+          "status": {
+            "const": "applied",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result",
+          "status"
+        ],
+        "type": "object"
+      },
+      "title": "Edit file"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Find files by glob pattern inside an open workspace. Use this to discover filenames or narrow file sets before reading. Respects project ignore rules. Call open_workspace first and pass workspaceId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "path": {
+            "description": "Optional path scope relative to the workspace root.",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "File glob pattern.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "name": "glob",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "title": "Glob"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Search file contents inside an open workspace. Use this before broad reads when looking for symbols, text, or usage sites. Respects project ignore rules. Call open_workspace first and pass workspaceId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "include": {
+            "description": "Optional include glob.",
+            "type": "string"
+          },
+          "path": {
+            "description": "Optional path or glob scope relative to the workspace root.",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "Search pattern.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "name": "grep",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "title": "Grep"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "List a directory inside an open workspace. Use this for directory inspection before reading files. Call open_workspace first and pass workspaceId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "path": {
+            "description": "Directory path to list, relative to the workspace root.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "ls",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "title": "Ls"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Open or resume a local project directory as a coding workspace. Checkout mode reuses the most recently active workspace for the same path by default, including after its in-memory metadata was released. Set forceNew only when a distinct checkout session is explicitly required. Worktree mode always creates an isolated managed Git worktree. Returns a persistent workspaceId, loaded root project instructions, and nested instruction file paths.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "baseRef": {
+            "description": "Git ref to base a worktree on. Only used with mode=\"worktree\". Defaults to HEAD.",
+            "type": "string"
+          },
+          "forceNew": {
+            "description": "Checkout mode only. Defaults to false so the latest workspace for the same path is resumed. Set true only when a distinct workspaceId is explicitly needed.",
+            "type": "boolean"
+          },
+          "mode": {
+            "description": "Defaults to checkout. Use checkout to work in the actual directory. Use worktree to create an isolated managed Git worktree for parallel work.",
+            "enum": [
+              "checkout",
+              "worktree"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "Absolute path, or a leading-tilde home path such as ~/project, to a local project directory inside an allowed root.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "open_workspace",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "agentProviders": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "available": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "available"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "agents": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "providerAvailable": {
+                  "type": "boolean"
+                },
+                "providerUnavailableReason": {
+                  "type": "string"
+                },
+                "thinking": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "provider"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "agentsFiles": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "availableAgentsFiles": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "checkout",
+              "worktree"
+            ],
+            "type": "string"
+          },
+          "resumed": {
+            "type": "boolean"
+          },
+          "root": {
+            "type": "string"
+          },
+          "skillDiagnostics": {
+            "items": {},
+            "type": "array"
+          },
+          "skills": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "sourceRoot": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "worktree": {
+            "additionalProperties": false,
+            "properties": {
+              "baseRef": {
+                "type": "string"
+              },
+              "baseSha": {
+                "type": "string"
+              },
+              "detached": {
+                "type": "boolean"
+              },
+              "dirtySource": {
+                "type": "boolean"
+              },
+              "managed": {
+                "type": "boolean"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "baseRef",
+              "baseSha",
+              "dirtySource",
+              "detached",
+              "managed"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "resumed",
+          "root",
+          "mode",
+          "agentsFiles",
+          "availableAgentsFiles",
+          "skills",
+          "agentProviders",
+          "agents",
+          "skillDiagnostics",
+          "instruction"
+        ],
+        "type": "object"
+      },
+      "title": "Open workspace"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Read a file inside an open workspace. Use this for file inspection instead of shell commands like cat or sed. Call open_workspace first and pass workspaceId. UTF-8 text is streamed in pages up to 1 MiB (default 20,000 lines). Follow the returned byteOffset to continue; do not combine byteOffset with offset. Images up to 16 MiB use the image reader. Use this tool to inspect relevant AGENTS.md or CLAUDE.md files listed by open_workspace before working in nested directories.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "byteOffset": {
+            "description": "Zero-based byte cursor returned by the previous page; omit offset when using this.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "limit": {
+            "description": "Maximum number of lines to read.",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "offset": {
+            "description": "1-indexed line number to start reading from.",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "path": {
+            "description": "File path to read, relative to the workspace root.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "read",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "title": "Read file"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Release this workspace's in-memory metadata only when the user explicitly requests resource release or the workspace is known to be unused for a long time. The workspace session remains persisted and recoverable: if the conversation continues, pass the same workspaceId to any workspace tool and DevSpace will restore it automatically. This does not delete files or worktrees, stop commands, revoke the workspaceId, close the MCP transport, or stop the shared server.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "workspaceId": {
+            "description": "Persistent workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId"
+        ],
+        "type": "object"
+      },
+      "name": "release_workspace",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "instruction": {
+            "type": "string"
+          },
+          "recoverable": {
+            "type": "boolean"
+          },
+          "released": {
+            "type": "boolean"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "released",
+          "recoverable",
+          "instruction"
+        ],
+        "type": "object"
+      },
+      "title": "Release workspace memory"
+    },
+    {
+      "_meta": {},
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Create or completely overwrite a file inside an open workspace. Prefer edit for targeted changes to existing files. Call open_workspace first and pass workspaceId.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "content": {
+            "description": "Complete new file content.",
+            "type": "string"
+          },
+          "path": {
+            "description": "File path to write, relative to the workspace root.",
+            "type": "string"
+          },
+          "workspaceId": {
+            "description": "Workspace identifier returned by open_workspace.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "path",
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "write",
+      "outputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "result": {
+            "description": "Model-readable result text for follow-up reasoning and plain MCP hosts.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object"
+      },
+      "title": "Write file"
+    }
+  ]
+}

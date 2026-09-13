@@ -4,3 +4,10 @@ releases/
 artifacts/stress/
 .env
 *.log
+
+# Third-party repositories kept as local, shallow reference checkouts. Track only
+# the reproducibility manifest and research notes, not vendored source trees.
+/参考工程/*
+!/参考工程/README.md
+!/参考工程/sources.lock.json
+!/参考工程/sync-references.mjs
