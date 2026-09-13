@@ -18,6 +18,7 @@ export interface McpCanaryResult {
   workspaceId: string;
   resumed: boolean;
   toolCount: number;
+  toolNames: string[];
   timingsMs: {
     initialize: number;
     toolsList: number;
@@ -71,6 +72,15 @@ export async function runMcpCanary(options: McpCanaryOptions): Promise<McpCanary
   try {
     await measure("initialize", () => client.connect(transport));
     const tools = await measure("toolsList", () => client.listTools(undefined, { timeout: timeoutMs }));
+    const toolNames = tools.tools.map(({ name }) => name).sort();
+    assert.deepEqual(toolNames, [
+      "apply_patch",
+      "exec_command",
+      "open_workspace",
+      "read",
+      "release_workspace",
+      "write_stdin",
+    ], "production MCP must expose the exact codex tool contract");
     const open = await measure("openWorkspace", () => call("open_workspace", {
       path: options.workspacePath,
     }));
@@ -87,7 +97,7 @@ export async function runMcpCanary(options: McpCanaryOptions): Promise<McpCanary
     const command = await measure("execCommand", () => call("exec_command", {
       workspaceId,
       cmd: "pwd",
-      yield_time_ms: 1_000,
+      yieldTimeMs: 1_000,
     }));
     assert.equal(command.structuredContent?.exitCode, 0, "exec_command pwd did not exit successfully");
 
@@ -99,6 +109,7 @@ export async function runMcpCanary(options: McpCanaryOptions): Promise<McpCanary
       workspaceId,
       resumed: open.structuredContent?.resumed === true,
       toolCount: tools.tools.length,
+      toolNames,
       timingsMs: {
         ...timings,
         total: roundMilliseconds(performance.now() - totalStartedAt),

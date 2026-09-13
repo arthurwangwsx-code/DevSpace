@@ -13,18 +13,18 @@ try {
   const commit = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
   const expected = {
     locked: [
-      "production_service_identity", "typecheck", "unit_and_integration", "production_build",
+      "production_service_identity", "production_workspace_mcp_canary", "typecheck", "unit_and_integration", "production_build",
       "capability_stress_smoke", "real_external_mcp_mount", "desktop_lock_boundary",
       "production_desktop_reload",
     ],
     unlocked: [
-      "production_service_identity", "production_desktop_permissions", "typecheck",
+      "production_service_identity", "production_workspace_mcp_canary", "production_desktop_permissions", "typecheck",
       "unit_and_integration", "production_build", "capability_stress_smoke",
       "real_external_mcp_mount", "production_browser_real_smoke",
       "production_browser_open_world_readonly", "direct_desktop_helper_fixture",
       "production_desktop_fixture", "production_desktop_reload",
     ],
-    "browser-transition": ["production_service_identity", "production_browser_lock_matrix"],
+    "browser-transition": ["production_service_identity", "production_workspace_mcp_canary", "production_browser_lock_matrix"],
   };
 
   for (const [lane, required] of Object.entries(expected)) {

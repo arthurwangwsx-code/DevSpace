@@ -42,6 +42,9 @@ try {
     assert.equal(result.workspacePath, projectRoot);
     assert.equal(result.readPath, "AGENTS.md");
     assert.equal(result.toolCount, 6);
+    assert.deepEqual(result.toolNames, [
+      "apply_patch", "exec_command", "open_workspace", "read", "release_workspace", "write_stdin",
+    ]);
     assert.equal(typeof result.workspaceId, "string");
     assert.ok(result.timingsMs.total >= 0);
   } finally {

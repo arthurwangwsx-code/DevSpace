@@ -11,6 +11,7 @@ type Component = { name: string; path: string; checks: Check[]; passed: boolean 
 const EXPECTED_LANE_GATES: Record<Lane, string[]> = {
   locked: [
     "production_service_identity",
+    "production_workspace_mcp_canary",
     "typecheck",
     "unit_and_integration",
     "production_build",
@@ -21,6 +22,7 @@ const EXPECTED_LANE_GATES: Record<Lane, string[]> = {
   ],
   unlocked: [
     "production_service_identity",
+    "production_workspace_mcp_canary",
     "production_desktop_permissions",
     "typecheck",
     "unit_and_integration",
@@ -35,6 +37,7 @@ const EXPECTED_LANE_GATES: Record<Lane, string[]> = {
   ],
   "browser-transition": [
     "production_service_identity",
+    "production_workspace_mcp_canary",
     "production_browser_lock_matrix",
   ],
 };

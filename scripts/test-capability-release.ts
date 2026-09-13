@@ -109,6 +109,15 @@ function allGates(): Record<Lane, Gate[]> {
   const productionService = npmGate("production_service_identity", [
     "run", "doctor:macos-service", "--", "--require-current-source",
   ]);
+  const productionWorkspaceMcp: Gate = {
+    name: "production_workspace_mcp_canary",
+    command: process.execPath,
+    args: [
+      resolve("dist/cli.js"), "verify", process.cwd(),
+      "--url", new URL("/mcp", options.baseUrl).toString(),
+      "--file", "package.json",
+    ],
+  };
   const productionBrowser = npmGate("production_browser_real_smoke", [
     "run", "test:browser-control:real",
   ]);
@@ -122,12 +131,14 @@ function allGates(): Record<Lane, Gate[]> {
     core,
     locked: [
       productionService,
+      productionWorkspaceMcp,
       ...core,
       { ...npmGate("desktop_lock_boundary", ["run", "test:desktop-lock-boundary"]), state: "locked" },
       { ...productionDesktop, state: "locked" },
     ],
     unlocked: [
       productionService,
+      productionWorkspaceMcp,
       productionDesktopPermissions,
       ...core,
       { ...productionBrowser, state: "unlocked" },
@@ -138,7 +149,7 @@ function allGates(): Record<Lane, Gate[]> {
       ]), state: "unlocked" },
       { ...productionDesktop, state: "unlocked" },
     ],
-    "browser-transition": [productionService, {
+    "browser-transition": [productionService, productionWorkspaceMcp, {
       ...npmGate("production_browser_lock_matrix", [
         "run", "test:browser-extension", "--", "--base-url", options.baseUrl,
         "--output", join(childOutputRoot, "browser-extension-matrix"),

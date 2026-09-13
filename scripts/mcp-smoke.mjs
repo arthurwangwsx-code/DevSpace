@@ -36,7 +36,7 @@ try {
     byteOffset = Number(marker[1]);
   }
   assert.equal(hash.digest('hex'), createHash('sha256').update(original).digest('hex'));
-  const command = await call('exec_command', { workspaceId, cmd: 'pwd', yield_time_ms: 1000 });
+  const command = await call('exec_command', { workspaceId, cmd: 'pwd', yieldTimeMs: 1000 });
   assert.equal(command.structuredContent.exitCode, 0);
   // Intentional release is part of the recovery test, never an end-of-chat policy.
   await call('release_workspace', { workspaceId });
