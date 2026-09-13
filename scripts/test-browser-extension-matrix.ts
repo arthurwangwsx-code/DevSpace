@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
-import net from "node:net";
 import os from "node:os";
 import { join, resolve } from "node:path";
 import { SystemSessionStateProbe } from "../src/capabilities/session-state.js";
@@ -53,8 +53,8 @@ try {
   if (initialSession.locked) {
     throw new Error("browser extension matrix must start while the macOS session is unlocked");
   }
-  if (!options.baseUrl && await socketIsListening(socketPath)) {
-    throw new Error("another browser extension bridge already owns the local socket");
+  if (!options.baseUrl && existsSync(socketPath)) {
+    throw new Error("another browser extension bridge or a stale socket already owns the local path");
   }
 
   const fixture = await startFixture();
@@ -379,16 +379,6 @@ button.addEventListener('click',()=>{button.textContent='Increment '+(++count);d
 
 function closeServer(server: Server): Promise<void> {
   return new Promise((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise()));
-}
-
-function socketIsListening(path: string): Promise<boolean> {
-  return new Promise((resolvePromise) => {
-    const socket = net.createConnection(path);
-    const finish = (value: boolean) => { socket.destroy(); resolvePromise(value); };
-    socket.setTimeout(300, () => finish(false));
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-  });
 }
 
 function snapshotElements(value: JsonValue): Array<{ index?: number; label?: string }> {
