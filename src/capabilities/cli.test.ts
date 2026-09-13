@@ -42,6 +42,14 @@ try {
   assert.equal(providers.code, 0);
   assert.equal(JSON.parse(providers.stdout).data.items.some((item: any) => item.id === "test.fake.provider"), true);
 
+  const unavailableApi = await runCli([
+    "providers", "list", "--url", `http://127.0.0.1:${address.port}/not-capabilities`, "--json",
+  ], env);
+  assert.equal(unavailableApi.code, 1);
+  assert.match(unavailableApi.stderr, /HTTP 404 Not Found \(text\/html\) instead of JSON/);
+  assert.match(unavailableApi.stderr, /DEVSPACE_CAPABILITIES=1/);
+  assert.doesNotMatch(unavailableApi.stderr, /Unexpected token|JSON\.parse/);
+
   const missing = await runCli([
     "capabilities", "describe", "missing.capability", "--url", url, "--json",
   ], env);

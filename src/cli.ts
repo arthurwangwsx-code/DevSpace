@@ -749,13 +749,25 @@ async function capabilityFetch(
     headers,
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  const payload = await response.json() as unknown;
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim()
+    || "unknown content type";
+  const responseText = await response.text();
+  let payload: unknown;
+  try {
+    payload = JSON.parse(responseText);
+  } catch {
+    const status = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`;
+    const hint = response.status === 404
+      ? " The Capability API route is unavailable; verify the server version and DEVSPACE_CAPABILITIES=1."
+      : "";
+    throw new Error(`Capability API returned ${status} (${contentType}) instead of JSON.${hint}`);
+  }
   if (!response.ok) {
     const message = typeof payload === "object" && payload
       && "error" in payload && typeof payload.error === "object" && payload.error
       && "code" in payload.error && "message" in payload.error
       ? `${String(payload.error.code)}: ${String(payload.error.message)}`
-      : `Capability API returned HTTP ${response.status}`;
+      : `Capability API returned HTTP ${response.status} (${contentType})`;
     throw new Error(message);
   }
   return payload;
