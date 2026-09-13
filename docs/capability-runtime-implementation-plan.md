@@ -1238,6 +1238,8 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 11 | 完成（2026-09-13） | 本批提交 | 固定 REST admin API；固定 MCP 的 `capability_invoke` 调用动态 `devspace.providers.*` 管理能力；默认 grantless delegated approval、enforced-policy 显式兼容开关；Manifest 安全存储；进程内 install/enable/disable/reload/remove；Catalog revision 与 8-tool 不变端到端测试 | 真实 stdio Fake MCP 子进程动态装载、重载和回收 | 包下载/供应链审批由上层管理 Agent 负责 |
 | 12 | 完成（2026-09-13） | 本批提交 | Manifest `discoverAllTools`；下游 tools/list 自动生成稳定 capability ID、Schema、描述和保守 effect 元数据；显式映射可覆盖；REST/MCP 自动发现与调用端到端测试 | 真实 stdio Fake MCP 的未映射工具自动进入 Catalog 并可由固定 `capability_invoke` 调用 | prompts/resources 暂不投影为 Capability；需要时以新资产类型扩展 Catalog |
 | 13 | 框架完成、三阶段实机执行待解锁（2026-09-13） | 本批提交 | `test:current-chrome` 对 lock-state 前置条件、daemon persistence、固定九能力、list、lease、snapshot、screenshot、同页 navigation 和脱敏 JSON/Markdown receipt 做统一验证 | 当前锁屏环境的 unlocked-baseline 预检在任何页面调用前按预期失败并生成 receipt | 用户解锁后依次运行 unlocked-baseline、locked-continuation、unlocked-recovery |
+| 14 | 扩展桥接代码与测试完成、实机矩阵待解锁（2026-09-13） | `fa02d30` + 本批提交 | MV3 extension、Native Messaging host、Unix socket bridge、固定八能力、当前标签显式 lease；用户标签仅释放、Agent 标签自动关闭；1 MiB/64 MiB 方向上限、2 MiB 响应、断线/取消/分片、稳定 Node launcher 与隔离安装测试；一进程三阶段锁屏矩阵 | 锁屏环境中矩阵在创建 fixture、socket 或浏览器调用前按预期拒绝 | 用户解锁后加载 unpacked extension、安装 native host 并运行 `npm run test:browser-extension` |
+| 15 | 完成（2026-09-13） | `61b1adc` | `waitForHttpServerListening`、未监听关闭兼容与真实端口冲突回归；完整 test/build | 本机 7676 已占用时新实例退出码 1，只输出 EADDRINUSE，不虚报 listening、不抛二次关闭异常 | 无 |
 
 ## 20. 推荐阅读顺序
 

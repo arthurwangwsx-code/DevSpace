@@ -120,6 +120,20 @@ attachment indication are browser-level behavior; the upstream Agent owns any
 approval workflow. The extension does not try to bypass Chrome or macOS
 security controls.
 
+After installation, run the real lock-transition acceptance while initially
+unlocked:
+
+```bash
+npm run test:browser-extension
+```
+
+The runner creates only a loopback fixture and an inactive Agent-owned tab. It
+keeps one Provider connection and one page lease across all three phases,
+prompts for manual lock and unlock, validates snapshot/screenshot/click/type/key
+operations, and closes the Agent tab at the end. It refuses to start when the
+Mac is already locked or another process owns the bridge socket, and writes a
+redacted JSON/Markdown receipt under `.build/browser-extension-matrix/`.
+
 ## Security boundaries
 
 - No arbitrary CDP passthrough.

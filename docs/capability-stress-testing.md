@@ -148,3 +148,17 @@ npm run test:current-chrome -- --phase unlocked-recovery --fixture-url http://12
 
 It fails before browser invocation when the requested phase does not match the actual macOS lock state.
 Only the loopback fixture origin and bounded measurements enter its reports.
+
+The extension path has a stricter single-process transition runner:
+
+```bash
+npm run test:browser-extension
+```
+
+Start it while macOS is unlocked, then follow its lock and unlock prompts. It
+keeps the same extension connection, local fixture, Agent-owned tab and lease
+across the unlocked baseline, locked continuation and unlocked recovery phases.
+This distinguishes genuine lock continuation from a fresh connection made in
+each phase. Unit coverage also verifies bridge fragmentation/disconnect/output
+bounds, adopted-versus-Agent tab cleanup, native-messaging framing and a 2 MiB
+response relay.
