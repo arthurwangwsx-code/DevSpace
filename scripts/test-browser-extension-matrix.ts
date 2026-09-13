@@ -18,6 +18,7 @@ interface Options {
   outputRoot: string;
   connectTimeoutMs: number;
   transitionTimeoutMs: number;
+  baseUrl?: string;
 }
 
 interface StepResult {
@@ -43,6 +44,7 @@ let fixtureServer: Server | undefined;
 let fixtureUrl: string | undefined;
 let capabilities: ProviderCapability[] = [];
 let lease: ProviderLease | undefined;
+let remoteLeaseId: string | undefined;
 let failure: string | undefined;
 let providerStarted = false;
 
@@ -51,7 +53,7 @@ try {
   if (initialSession.locked) {
     throw new Error("browser extension matrix must start while the macOS session is unlocked");
   }
-  if (await socketIsListening(socketPath)) {
+  if (!options.baseUrl && await socketIsListening(socketPath)) {
     throw new Error("another browser extension bridge already owns the local socket");
   }
 
@@ -59,16 +61,20 @@ try {
   fixtureServer = fixture.server;
   fixtureUrl = fixture.url;
   const failures: string[] = [];
-  const context: ProviderContext = {
-    signal: lifetime.signal,
-    reportFailure: (error) => failures.push(safeError(error)),
-    reportCatalogChanged: () => {},
-    log: () => {},
-  };
-  await timed("setup", "provider_start", () => provider.start(context));
-  providerStarted = true;
-  await timed("setup", "extension_connect", () => waitForExtension(provider, options.connectTimeoutMs));
-  capabilities = await timed("setup", "capability_discovery", () => provider.discover(lifetime.signal), {
+  if (options.baseUrl) {
+    await timed("setup", "runtime_extension_connect", () => waitForRemoteExtension(options.baseUrl!, options.connectTimeoutMs));
+  } else {
+    const context: ProviderContext = {
+      signal: lifetime.signal,
+      reportFailure: (error) => failures.push(safeError(error)),
+      reportCatalogChanged: () => {},
+      log: () => {},
+    };
+    await timed("setup", "provider_start", () => provider.start(context));
+    providerStarted = true;
+    await timed("setup", "extension_connect", () => waitForExtension(provider, options.connectTimeoutMs));
+  }
+  capabilities = await timed("setup", "capability_discovery", () => discoverCapabilities(), {
     summarize: (value) => ({ capabilityCount: value.length }),
   });
   assert.equal(capabilities.length, 8, "extension provider must expose exactly eight capabilities");
@@ -79,10 +85,7 @@ try {
     });
   const tabId = objectValue(opened).tabId;
   assert.ok(Number.isInteger(tabId), "extension did not return an agent tab id");
-  lease = await timed("unlocked-baseline", "acquire_agent_tab", () => provider.open!({
-    resourceType: "browser_page",
-    selector: { tabId: tabId as number },
-  }, { signal: lifetime.signal }), {
+  lease = await timed("unlocked-baseline", "acquire_agent_tab", () => openLease(tabId as number), {
     summarize: (value) => ({ ownership: value.display.ownership ?? null }),
   });
   assert.equal(lease.display.ownership, "agent");
@@ -100,8 +103,8 @@ try {
   failure = safeError(error);
   process.exitCode = 1;
 } finally {
-  if (lease && providerStarted) {
-    await provider.close(lease, { signal: new AbortController().signal }).catch(() => {});
+  if (lease) {
+    await closeLease().catch(() => {});
   }
   lifetime.abort("matrix_complete");
   if (providerStarted) await provider.stop("matrix_complete").catch(() => {});
@@ -113,6 +116,7 @@ const report = {
   startedAt: runId,
   finishedAt: new Date().toISOString(),
   fixture: fixtureUrl ? { origin: new URL(fixtureUrl).origin } : undefined,
+  transport: options.baseUrl ? "runtime-rest" : "direct-provider",
   steps,
   ...(failure ? { failure } : {}),
 };
@@ -188,6 +192,18 @@ async function waitForSnapshot(phase: StepResult["phase"], name: string): Promis
 async function invoke(id: string, argumentsValue: JsonObject): Promise<JsonValue> {
   const selected = capabilities.find((entry) => entry.descriptor.id === id);
   assert.ok(selected, `missing capability: ${id}`);
+  if (options.baseUrl) {
+    const invocation = await requestJson("POST", `${options.baseUrl}/invocations`, {
+      capabilityId: id,
+      arguments: argumentsValue,
+      mode: "sync",
+      ...(selected.descriptor.execution.requiresLease ? { leaseId: remoteLeaseId } : {}),
+    });
+    if (invocation.status !== "succeeded") {
+      throw new Error(`runtime invocation failed: ${safeJson(invocation.error)}`);
+    }
+    return (invocation.result ?? null) as JsonValue;
+  }
   return provider.invoke({
     capabilityId: id,
     descriptor: selected.descriptor,
@@ -195,6 +211,57 @@ async function invoke(id: string, argumentsValue: JsonObject): Promise<JsonValue
     arguments: argumentsValue,
     ...(selected.descriptor.execution.requiresLease ? { lease } : {}),
   }, { signal: lifetime.signal });
+}
+
+async function discoverCapabilities(): Promise<ProviderCapability[]> {
+  if (!options.baseUrl) return provider.discover(lifetime.signal);
+  const result = await requestJson(
+    "GET",
+    `${options.baseUrl}/capabilities?providerId=${encodeURIComponent(provider.id)}&availableOnly=false`,
+  );
+  const items = Array.isArray(result.items) ? result.items : [];
+  return Promise.all(items.map(async (summary) => {
+    const id = objectValue(summary as JsonValue).id;
+    assert.equal(typeof id, "string", "runtime returned a capability without an id");
+    const descriptor = await requestJson(
+      "GET",
+      `${options.baseUrl}/capabilities/${encodeURIComponent(id as string)}`,
+    );
+    return { descriptor: descriptor as unknown as ProviderCapability["descriptor"], binding: {} };
+  }));
+}
+
+async function openLease(tabId: number): Promise<ProviderLease> {
+  if (!options.baseUrl) {
+    return provider.open!({
+      resourceType: "browser_page",
+      selector: { tabId },
+    }, { signal: lifetime.signal });
+  }
+  const result = await requestJson("POST", `${options.baseUrl}/leases`, {
+    providerId: provider.id,
+    resourceType: "browser_page",
+    selector: { tabId },
+    ttlSeconds: Math.max(60, Math.ceil(options.transitionTimeoutMs * 2 / 1_000)),
+  });
+  assert.equal(typeof result.id, "string", "runtime did not return a lease id");
+  remoteLeaseId = result.id as string;
+  return {
+    handle: { tabId },
+    display: objectValue((result.display ?? {}) as JsonValue),
+  };
+}
+
+async function closeLease(): Promise<void> {
+  if (options.baseUrl) {
+    if (!remoteLeaseId) return;
+    await requestJson("DELETE", `${options.baseUrl}/leases/${encodeURIComponent(remoteLeaseId)}`);
+    remoteLeaseId = undefined;
+    return;
+  }
+  if (lease && providerStarted) {
+    await provider.close(lease, { signal: new AbortController().signal });
+  }
 }
 
 async function timed<T>(
@@ -233,6 +300,44 @@ async function waitForExtension(target: BrowserExtensionProvider, timeoutMs: num
     await sleep(500);
   }
   throw new Error("browser extension did not connect; reload it or verify the native host installation");
+}
+
+async function waitForRemoteExtension(baseUrl: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const result = await requestJson("POST", `${baseUrl}/invocations`, {
+        capabilityId: "browser.extension.list_pages",
+        arguments: { all: true },
+        mode: "sync",
+      });
+      if (result.status === "succeeded") return;
+      lastError = new Error(`runtime extension probe failed: ${safeJson(result.error)}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(500);
+  }
+  throw lastError ?? new Error("browser extension did not connect to the running DevSpace runtime");
+}
+
+async function requestJson(method: "GET" | "POST" | "DELETE", url: string, body?: JsonObject): Promise<JsonObject> {
+  const token = process.env.DEVSPACE_CAPABILITY_BEARER_TOKEN;
+  const response = await fetch(url, {
+    method,
+    signal: lifetime.signal,
+    headers: {
+      ...(body ? { "content-type": "application/json" } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const envelope = await response.json() as { data?: JsonObject; error?: unknown };
+  if (!response.ok || !envelope.data) {
+    throw new Error(`runtime request failed (${response.status}): ${safeJson(envelope.error)}`);
+  }
+  return envelope.data;
 }
 
 async function waitForLockState(locked: boolean, timeoutMs: number): Promise<void> {
@@ -322,9 +427,16 @@ function parseArgs(args: string[]): Options {
     if (flag === "--output") result.outputRoot = value;
     else if (flag === "--connect-timeout") result.connectTimeoutMs = parseDuration(value);
     else if (flag === "--transition-timeout") result.transitionTimeoutMs = parseDuration(value);
+    else if (flag === "--base-url") result.baseUrl = normalizeBaseUrl(value);
     else throw new Error(`Unknown option: ${flag}`);
   }
   return result;
+}
+
+function normalizeBaseUrl(value: string): string {
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("base URL must use http or https");
+  return url.toString().replace(/\/$/, "");
 }
 
 function parseDuration(value: string): number {
@@ -336,11 +448,15 @@ function parseDuration(value: string): number {
 function renderMarkdown(reportValue: typeof report): string {
   const rows = reportValue.steps.map((step) =>
     `| ${step.passed ? "PASS" : "FAIL"} | ${step.phase} | ${step.name} | ${step.durationMs} |`).join("\n");
-  return `# Browser extension lock matrix\n\n- Result: ${reportValue.ok ? "PASS" : "FAIL"}\n- Fixture origin: ${reportValue.fixture?.origin ?? "not started"}\n${reportValue.failure ? `- Failure: ${reportValue.failure}\n` : ""}\n| Result | Phase | Step | Duration ms |\n| --- | --- | --- | ---: |\n${rows}\n`;
+  return `# Browser extension lock matrix\n\n- Result: ${reportValue.ok ? "PASS" : "FAIL"}\n- Transport: ${reportValue.transport}\n- Fixture origin: ${reportValue.fixture?.origin ?? "not started"}\n${reportValue.failure ? `- Failure: ${reportValue.failure}\n` : ""}\n| Result | Phase | Step | Duration ms |\n| --- | --- | --- | ---: |\n${rows}\n`;
 }
 
 function safeError(error: unknown): string {
   return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
+
+function safeJson(value: unknown): string {
+  try { return JSON.stringify(value); } catch { return String(value); }
 }
 
 function sleep(ms: number): Promise<void> {

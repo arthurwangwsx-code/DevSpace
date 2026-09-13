@@ -116,8 +116,10 @@ packaging key lives outside Git under `~/.devspace/keys/`.
 4. Run `npm run doctor:browser-extension`. `installationReady` covers Chrome,
    packaged artifacts and the pinned native host; `healthy` additionally
    requires the extension to be enabled in at least one Chrome profile;
-   `bridgeConnected` reports the optional live socket state and `releaseReady`
-   reports CRX availability.
+   `bridgeSocketPresent` reports whether the local bridge endpoint exists and
+   `releaseReady` reports CRX availability. Doctor deliberately does not
+   connect to that single-client socket because doing so would evict the real
+   extension transport; the lock matrix performs the live call check.
 5. Start DevSpace with `DEVSPACE_BROWSER_EXTENSION=1`. Reload the extension or
    wait for its one-minute reconnect alarm, then query provider health and the
    capability catalog.
@@ -185,3 +187,18 @@ redacted JSON/Markdown receipt under `.build/browser-extension-matrix/`.
 - Releasing an adopted tab detaches the debugger and leaves the tab open.
 - Agent-created tabs and user/adopted tabs have different cleanup semantics.
 - Existing Chrome DevTools provider remains available for deep debugging.
+
+## 2026-09-13 real-profile validation
+
+Validated on the user's installed Chrome profile with extension ID
+`cjlpacoigfekaahbjanpckpefndmblfn`:
+
+- Native Messaging connected to the DevSpace Unix socket and `list_pages`
+  enumerated the profile's existing tabs.
+- A DevSpace-owned background fixture tab completed snapshot, click, text input,
+  button click and PNG screenshot; closing its lease removed the agent tab.
+- An existing Google Search user tab was adopted without activation/reload,
+  snapshotted, released, and remained open with ownership returned to `user`.
+- The running Chrome process had no `--remote-debugging-*` launch flag. The
+  successful path was Extension -> Native Messaging -> DevSpace, independent of
+  the external Chrome DevTools provider.

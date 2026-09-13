@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import { createHash } from "node:crypto";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -22,7 +21,11 @@ const socketPath = process.env.DEVSPACE_BROWSER_SOCKET
 
 const native = inspectNativeManifest(nativeManifestPath, extensionId);
 const profiles = inspectProfiles(userDataDir, extensionId);
-const bridgeConnected = await socketIsListening(socketPath);
+// Never probe the bridge by connecting to its Unix socket: the bridge permits
+// exactly one extension transport, so a doctor probe would evict the real
+// Chrome connection. Socket presence is useful diagnostics; live connectivity
+// is verified by the real capability E2E instead.
+const bridgeSocketPresent = fs.existsSync(socketPath);
 const checks = {
   chromeInstalled: fs.existsSync(chromeExecutable),
   nativeManifestInstalled: fs.existsSync(nativeManifestPath),
@@ -32,7 +35,7 @@ const checks = {
   crxBuild: fs.existsSync(path.join(releaseDir, `devspace-browser-bridge-${manifest.version}.crx`)),
   configuredProfileCount: profiles.configured,
   enabledProfileCount: profiles.enabled,
-  bridgeConnected,
+  bridgeSocketPresent,
 };
 const installationReady = checks.chromeInstalled
   && checks.nativeManifestInstalled
@@ -72,16 +75,36 @@ function inspectNativeManifest(manifestPath, expectedExtensionId) {
 function inspectProfiles(directory, targetId) {
   let configured = 0;
   let enabled = 0;
-  let entries = [];
-  try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch { return { configured, enabled }; }
-  for (const entry of entries) {
-    if (!entry.isDirectory() || (entry.name !== "Default" && !entry.name.startsWith("Profile "))) continue;
-    const setting = readExtensionSetting(path.join(directory, entry.name), targetId);
+  for (const profileName of profileDirectoryNames(directory)) {
+    const setting = readExtensionSetting(path.join(directory, profileName), targetId);
     if (!setting) continue;
     configured += 1;
-    if (setting.state === 1) enabled += 1;
+    if (extensionSettingIsEnabled(setting)) enabled += 1;
   }
   return { configured, enabled };
+}
+
+function profileDirectoryNames(directory) {
+  const names = new Set();
+  try {
+    const localState = JSON.parse(fs.readFileSync(path.join(directory, "Local State"), "utf8"));
+    for (const name of Object.keys(localState?.profile?.info_cache ?? {})) {
+      if (name && path.basename(name) === name && name !== "." && name !== "..") names.add(name);
+    }
+  } catch {}
+  try {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const candidate = path.join(directory, entry.name);
+      if (fs.existsSync(path.join(candidate, "Preferences")) || fs.existsSync(path.join(candidate, "Secure Preferences"))) names.add(entry.name);
+    }
+  } catch {}
+  return [...names].sort();
+}
+
+function extensionSettingIsEnabled(setting) {
+  if (setting.state !== undefined) return setting.state === 1;
+  return !Array.isArray(setting.disable_reasons) || setting.disable_reasons.length === 0;
 }
 
 function readExtensionSetting(profileDirectory, targetId) {
@@ -93,20 +116,4 @@ function readExtensionSetting(profileDirectory, targetId) {
     } catch {}
   }
   return undefined;
-}
-
-function socketIsListening(socket) {
-  return new Promise((resolve) => {
-    const connection = net.createConnection(socket);
-    let finished = false;
-    const finish = (value) => {
-      if (finished) return;
-      finished = true;
-      connection.destroy();
-      resolve(value);
-    };
-    connection.setTimeout(300, () => finish(false));
-    connection.once("connect", () => finish(true));
-    connection.once("error", () => finish(false));
-  });
 }

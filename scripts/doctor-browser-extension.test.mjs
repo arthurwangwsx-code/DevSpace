@@ -34,17 +34,32 @@ assert.equal(installationOnly.output.installationReady, true);
 assert.equal(installationOnly.output.healthy, false);
 assert.equal(installationOnly.output.enabledProfileCount, 0);
 
-const profile = path.join(userData, "Default");
+const profile = path.join(userData, "agent");
 fs.mkdirSync(profile, { recursive: true });
+fs.writeFileSync(path.join(userData, "Local State"), JSON.stringify({
+  profile: { info_cache: { agent: { name: "User 1" } } },
+}));
 fs.writeFileSync(path.join(profile, "Secure Preferences"), JSON.stringify({
-  extensions: { settings: { [extensionId]: { state: 1 } } },
+  extensions: { settings: { [extensionId]: { location: 4 } } },
 }));
 const healthy = runDoctor();
 assert.equal(healthy.status, 0);
 assert.equal(healthy.output.healthy, true);
 assert.equal(healthy.output.releaseReady, true);
 assert.equal(healthy.output.enabledProfileCount, 1);
-assert.equal(healthy.output.bridgeConnected, false);
+assert.equal(healthy.output.bridgeSocketPresent, false);
+
+fs.writeFileSync(path.join(profile, "Secure Preferences"), JSON.stringify({
+  extensions: { settings: { [extensionId]: { disable_reasons: [1], location: 4 } } },
+}));
+const disabled = runDoctor();
+assert.equal(disabled.status, 1);
+assert.equal(disabled.output.configuredProfileCount, 1);
+assert.equal(disabled.output.enabledProfileCount, 0);
+
+fs.writeFileSync(path.join(profile, "Secure Preferences"), JSON.stringify({
+  extensions: { settings: { [extensionId]: { location: 4 } } },
+}));
 
 writeNativeManifest("chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/");
 const wrongOrigin = runDoctor();
@@ -52,7 +67,7 @@ assert.equal(wrongOrigin.status, 1);
 assert.equal(wrongOrigin.output.nativeManifestValid, false);
 
 fs.rmSync(root, { recursive: true, force: true });
-console.log("browser extension doctor tests passed: install, profile enablement, pinned origin");
+console.log("browser extension doctor tests passed: install, arbitrary profile enablement, disabled state, pinned origin");
 
 function runDoctor() {
   const result = spawnSync(process.execPath, [path.join(projectRoot, "scripts", "doctor-browser-extension.mjs")], {
