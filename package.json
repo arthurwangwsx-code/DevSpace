@@ -59,6 +59,7 @@
     "doctor:desktop-host": "node scripts/doctor-desktop-host.mjs",
     "test:current-chrome": "tsx scripts/test-current-chrome-provider.ts",
     "test:browser-extension": "tsx scripts/test-browser-extension-matrix.ts",
+    "test:browser-control:real": "tsx scripts/test-browser-control-real.ts",
     "test:real-mcp-mount": "tsx scripts/test-real-mcp-mount.ts",
     "test:session-state": "tsx src/capabilities/session-state.test.ts",
     "test:mcp-contract": "tsx src/mcp-contract.test.ts",

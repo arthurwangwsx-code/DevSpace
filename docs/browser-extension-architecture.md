@@ -208,6 +208,38 @@ redacted JSON/Markdown receipt under `.build/browser-extension-matrix/`.
 - Semantic snapshots and element lookup traverse open Shadow DOM and
   same-origin iframes so click/select/upload can keep using one stable element
   index model.
+## Real-browser verification
+
+The repository provides an opt-in real Chrome smoke test:
+
+```bash
+npm run test:browser-control:real
+```
+
+It intentionally does not run in ordinary CI because it requires an installed
+DevSpace Browser Bridge extension, the native host, and a live Chrome profile.
+The test uses only canonical `browser.*` capabilities through the running
+Capability REST/runtime, and verifies that implementation-specific legacy IDs
+do not leak into default capability search.
+
+The v0.3.0 validation matrix on 2026-09-13 covered:
+
+- Extension connection to the existing signed-in Chrome profile.
+- Agent-owned tab acquisition and lease cleanup.
+- Open Shadow DOM discovery and interaction.
+- Same-origin iframe discovery and interaction.
+- Real file upload from an allowed DevSpace root.
+- Network-idle and URL wait conditions.
+- Browser download start, completion wait, status and downloaded content.
+- DevSpace process restart followed by automatic Native Host/extension
+  reconnection without reloading the Chrome extension.
+
+The canonical Browser Capability descriptor version is `2.1.0`. Any future
+change to a public capability input/output/effect contract must bump the
+descriptor version. The persisted registry deliberately rejects same-version
+schema drift on restart; this prevents silent API changes behind the fixed MCP
+surface.
+
 - Legacy persisted `browser.extension.*` catalog entries are hidden from the
   default second-level index; they remain visible only through explicit legacy
   provider diagnostics.

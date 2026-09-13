@@ -67,6 +67,8 @@ extension.on("data", (chunk) => {
 
 const capabilities = await provider.discover(lifetime.signal);
 assert.equal(capabilities.length, 27);
+assert.equal(new Set(capabilities.map(({ descriptor }) => descriptor.version)).size, 1);
+assert.equal(capabilities[0]?.descriptor.version, "2.1.0");
 assert.equal(capabilities.every(({ descriptor }) => descriptor.id.startsWith("browser.")), true);
 assert.equal(capabilities.some(({ descriptor }) => descriptor.id.includes(".extension.")), false);
 assert.equal(capabilities.some(({ descriptor }) => descriptor.id.includes(".chrome.")), false);
