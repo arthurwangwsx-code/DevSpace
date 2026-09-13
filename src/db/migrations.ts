@@ -27,6 +27,11 @@ const migrations: Migration[] = [
     name: "single-active-checkout-workspace",
     up: migrateSingleActiveCheckoutWorkspace,
   },
+  {
+    version: 5,
+    name: "capability-runtime-catalog",
+    up: migrateCapabilityRuntimeCatalog,
+  },
 ];
 
 export function migrateDatabase(sqlite: Database.Database): void {
@@ -208,6 +213,113 @@ function migrateSingleActiveCheckoutWorkspace(sqlite: Database.Database): void {
     create unique index if not exists workspace_sessions_active_checkout_root_unique
       on workspace_sessions(root)
       where mode = 'checkout' and status = 'active';
+  `);
+}
+
+function migrateCapabilityRuntimeCatalog(sqlite: Database.Database): void {
+  sqlite.exec(`
+    create table if not exists capability_providers (
+      provider_id text primary key,
+      kind text not null,
+      enabled integer not null default 0,
+      manifest_digest text,
+      state text not null,
+      last_seen_at text,
+      last_error_code text,
+      created_at text not null,
+      updated_at text not null
+    );
+
+    create index if not exists capability_providers_state_idx
+      on capability_providers(state, updated_at desc);
+
+    create table if not exists capability_descriptors (
+      capability_id text primary key,
+      version text not null,
+      provider_id text not null,
+      descriptor_json text not null,
+      descriptor_digest text not null,
+      catalog_revision integer not null,
+      discovered_at text not null,
+      retired_at text,
+      foreign key (provider_id) references capability_providers(provider_id) on delete cascade
+    );
+
+    create index if not exists capability_descriptors_provider_idx
+      on capability_descriptors(provider_id, retired_at);
+
+    create index if not exists capability_descriptors_revision_idx
+      on capability_descriptors(catalog_revision);
+
+    create table if not exists capability_catalog_state (
+      singleton integer primary key check (singleton = 1),
+      revision integer not null,
+      updated_at text not null
+    );
+
+    insert into capability_catalog_state (singleton, revision, updated_at)
+    values (1, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    on conflict(singleton) do nothing;
+
+    create table if not exists capability_grants (
+      grant_id text primary key,
+      principal_id text not null,
+      capability_pattern text not null,
+      provider_pattern text not null,
+      resource_type text,
+      target_constraint_json text,
+      allowed_effects_json text not null,
+      expires_at text,
+      created_by text not null,
+      created_at text not null,
+      revoked_at text
+    );
+
+    create index if not exists capability_grants_principal_idx
+      on capability_grants(principal_id, revoked_at);
+
+    create index if not exists capability_grants_expiry_idx
+      on capability_grants(expires_at);
+
+    create table if not exists capability_invocations (
+      invocation_id text primary key,
+      principal_id text not null,
+      capability_id text not null,
+      provider_id text not null,
+      lease_id text,
+      status text not null,
+      arguments_digest text not null,
+      result_digest text,
+      error_code text,
+      queued_at text not null,
+      started_at text,
+      finished_at text,
+      expires_at text not null
+    );
+
+    create index if not exists capability_invocations_principal_idx
+      on capability_invocations(principal_id, queued_at desc);
+
+    create index if not exists capability_invocations_status_idx
+      on capability_invocations(status, queued_at desc);
+
+    create table if not exists capability_audit_events (
+      event_id text primary key,
+      request_id text not null,
+      principal_id text not null,
+      event_type text not null,
+      capability_id text,
+      provider_id text,
+      decision text,
+      redacted_summary_json text not null,
+      created_at text not null
+    );
+
+    create index if not exists capability_audit_events_created_idx
+      on capability_audit_events(created_at desc);
+
+    create index if not exists capability_audit_events_principal_idx
+      on capability_audit_events(principal_id, created_at desc);
   `);
 }
 

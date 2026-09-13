@@ -1131,7 +1131,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | --- | --- | --- | --- | --- | --- |
 | 0 | 完成（2026-09-13） | 本提交 | typecheck、完整 test、build、三种 tool mode 契约快照 | 不适用 | 生产能力代码尚未开始 |
 | 1 | 完成（2026-09-13） | 本批提交 | Descriptor JSON Schema、错误映射、递归脱敏单测 | 不适用 | Runtime 尚未接线 |
-| 2 | 待实施 | — | — | 不适用 | — |
+| 2 | 完成（2026-09-13） | 本批提交 | SQLite v5、原子 Catalog、revision/cursor、冲突与 BM25 搜索测试 | 不适用 | Provider binding 重启后按设计需重新发现 |
 | 3 | 待实施 | — | — | Fake Provider | — |
 | 4 | 待实施 | — | — | Fake Provider | — |
 | 5 | 待实施 | — | — | OAuth client | — |
