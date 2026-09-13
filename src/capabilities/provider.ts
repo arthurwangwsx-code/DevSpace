@@ -16,10 +16,21 @@ export interface ProviderInvocation {
   descriptor: CapabilityDescriptor;
   binding: JsonObject;
   arguments: JsonValue;
+  lease?: ProviderLease;
 }
 
 export interface ProviderInvocationContext {
   signal: AbortSignal;
+}
+
+export interface ProviderOpenRequest {
+  resourceType: string;
+  selector: JsonObject;
+}
+
+export interface ProviderLease {
+  handle: JsonObject;
+  display: JsonObject;
 }
 
 export interface ProviderContext {
@@ -38,8 +49,10 @@ export interface CapabilityProvider {
   stop(reason: string): Promise<void>;
   health(signal: AbortSignal): Promise<ProviderHealth>;
   discover(signal: AbortSignal): Promise<ProviderCapability[]>;
+  open?(request: ProviderOpenRequest, context: ProviderInvocationContext): Promise<ProviderLease>;
   invoke(request: ProviderInvocation, context: ProviderInvocationContext): Promise<JsonValue>;
   cancel?(providerInvocationId: string): Promise<void>;
+  close?(lease: ProviderLease, context: ProviderInvocationContext): Promise<void>;
 }
 
 export interface ProviderRegistration {

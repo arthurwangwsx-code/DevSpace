@@ -5,6 +5,8 @@ import type {
   ProviderContext,
   ProviderInvocation,
   ProviderInvocationContext,
+  ProviderLease,
+  ProviderOpenRequest,
 } from "./provider.js";
 import type { CapabilityDescriptor, JsonValue, ProviderHealth } from "./types.js";
 
@@ -14,8 +16,11 @@ export class FakeCapabilityProvider implements CapabilityProvider {
   startCount = 0;
   stopCount = 0;
   invokeCount = 0;
+  closeCount = 0;
   failStartTimes = 0;
   permissionRequired = false;
+  invokeBarrier?: Promise<void>;
+  invokeResult?: JsonValue;
   private context?: ProviderContext;
   private ready = false;
 
@@ -56,13 +61,30 @@ export class FakeCapabilityProvider implements CapabilityProvider {
     return this.capabilities;
   }
 
+  async open(
+    request: ProviderOpenRequest,
+    context: ProviderInvocationContext,
+  ): Promise<ProviderLease> {
+    if (context.signal.aborted) throw new CapabilityError("cancelled", "Fake open cancelled.");
+    return {
+      handle: { ...request.selector, resourceType: request.resourceType },
+      display: { label: String(request.selector.label ?? "fake resource") },
+    };
+  }
+
   async invoke(
     request: ProviderInvocation,
     context: ProviderInvocationContext,
   ): Promise<JsonValue> {
     this.invokeCount += 1;
     if (context.signal.aborted) throw new CapabilityError("cancelled", "Fake call cancelled.");
-    return { capabilityId: request.capabilityId, arguments: request.arguments };
+    if (this.invokeBarrier) await this.invokeBarrier;
+    if (context.signal.aborted) throw new CapabilityError("cancelled", "Fake call cancelled.");
+    return this.invokeResult ?? { capabilityId: request.capabilityId, arguments: request.arguments };
+  }
+
+  async close(): Promise<void> {
+    this.closeCount += 1;
   }
 
   crash(error: unknown = new Error("fake crash")): void {

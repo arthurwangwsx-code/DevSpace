@@ -52,7 +52,7 @@ try {
   assert.deepEqual(
     await runtime.registry.getBinding("test.fake.echo").invoke(
       { hello: "world" },
-      new AbortController().signal,
+      { signal: new AbortController().signal },
     ),
     { capabilityId: "test.fake.echo", arguments: { hello: "world" } },
   );

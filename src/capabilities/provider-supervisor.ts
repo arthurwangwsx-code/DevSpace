@@ -1,5 +1,11 @@
 import { CapabilityError, normalizeCapabilityError } from "./errors.js";
-import type { CapabilityProvider, ProviderContext, ProviderRegistration } from "./provider.js";
+import type {
+  CapabilityProvider,
+  ProviderContext,
+  ProviderLease,
+  ProviderOpenRequest,
+  ProviderRegistration,
+} from "./provider.js";
 import type { CapabilityRegistry } from "./registry.js";
 import type { JsonObject, ProviderHealth, ProviderState } from "./types.js";
 
@@ -91,6 +97,38 @@ export class ProviderSupervisor {
   getHealth(providerId: string): ProviderHealth | undefined {
     const health = this.providers.get(providerId)?.health;
     return health ? { ...health } : undefined;
+  }
+
+  async openResource(
+    providerId: string,
+    request: ProviderOpenRequest,
+    signal: AbortSignal,
+  ): Promise<ProviderLease> {
+    const managed = this.requireReady(providerId);
+    if (!managed.provider.open) {
+      return { handle: request.selector, display: request.selector };
+    }
+    return withTimeout(
+      managed.provider.open(request, { signal }),
+      this.options.discoveryTimeoutMs,
+      "Provider resource selection timed out.",
+      signal,
+    );
+  }
+
+  async closeResource(
+    providerId: string,
+    lease: ProviderLease,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const managed = this.get(providerId);
+    if (!managed.provider.close) return;
+    await withTimeout(
+      managed.provider.close(lease, { signal }),
+      this.options.discoveryTimeoutMs,
+      "Provider resource release timed out.",
+      signal,
+    );
   }
 
   async startAll(): Promise<void> {
@@ -200,12 +238,13 @@ export class ProviderSupervisor {
           descriptor: capability.descriptor,
           aliases: capability.aliases,
           binding: {
-            invoke: (argumentsValue, signal) => managed.provider.invoke({
+            invoke: (argumentsValue, context) => managed.provider.invoke({
               capabilityId: capability.descriptor.id,
               descriptor: capability.descriptor,
               binding: capability.binding,
               arguments: argumentsValue,
-            }, { signal }),
+              lease: context.lease,
+            }, { signal: context.signal }),
           },
         })),
       });
@@ -294,6 +333,19 @@ export class ProviderSupervisor {
   private get(providerId: string): ManagedProvider {
     const managed = this.providers.get(providerId);
     if (!managed) throw new CapabilityError("provider_unavailable", `Unknown provider: ${providerId}`);
+    return managed;
+  }
+
+  private requireReady(providerId: string): ManagedProvider {
+    const managed = this.get(providerId);
+    if (managed.health.state === "needs_user_action") {
+      throw new CapabilityError("permission_required", "The provider requires user approval.", {
+        details: managed.health.userAction ? { action: managed.health.userAction } : undefined,
+      });
+    }
+    if (managed.health.state !== "ready" && managed.health.state !== "degraded") {
+      throw new CapabilityError("provider_unavailable", `Provider is ${managed.health.state}.`);
+    }
     return managed;
   }
 }

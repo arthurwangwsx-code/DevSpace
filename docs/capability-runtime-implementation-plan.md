@@ -717,9 +717,82 @@ capability.invocation.cancelled
 capability.policy.denied
 ```
 
-## 10. 第一 Provider：当前 Chrome
+## 10. 通用外部 MCP Provider
 
-### 10.1 连接策略
+DevSpace 必须像 Codex/Claude 等 MCP Host 一样挂载外部 MCP Server，并把经过管理员批准的
+下游 tools 注册进统一 Catalog，再通过固定 REST/MCP/CLI 元接口暴露。这不是 Chrome 特例，
+而是所有 MCP Provider 的基础适配层。
+
+首版支持两种传输：
+
+```text
+mcp-stdio
+  command: 绝对可执行路径
+  args: 字符串数组
+  env: allowlist + secret reference
+
+mcp-streamable-http
+  url: 固定 https/受控 loopback URL
+  headers: secret reference
+  oauth: 后续增加独立凭据代理，不复用 DevSpace client token
+```
+
+`McpClientProvider` 持有长期 MCP Client/Transport，启动后执行 `initialize` 和 `tools/list`。
+每个下游 tool 经过管理员映射或明确 allowlist 后生成稳定 Capability ID；原始 tool name、
+inputSchema、annotations 和 server/version 只作为 binding/metadata。`tools/list_changed` 通知触发
+原子 rediscover 和 Catalog revision，不能直接修改正在执行的 registration map。
+
+自动 ID 建议为 `mcp.<provider-slug>.<tool-name>`，但生产 Manifest 应允许显式固定 ID 和
+version。不同 Provider 的同名 tool 不冲突；同一稳定 ID 被另一 Provider 占用时整次刷新失败。
+上游 Schema digest 改变后能力进入 `incompatible`，必须管理员审阅更新映射，不能静默扩大
+参数或 effect。
+
+安全要求：
+
+- stdio 只允许 `shell=false` 的绝对 executable + argv，继承最小 env。
+- HTTP 默认只允许 HTTPS；loopback 例外必须显式配置。解析后的 IP、redirect 和 DNS rebinding
+  都要受 SSRF 策略约束。
+- 下游 Server instructions、description、tool result 和 resource 内容全部视为不可信数据，
+  不能成为 DevSpace 管理指令。
+- MCP annotations 只是风险提示，最终 readOnly/destructive/openWorld 和权限由本地 Manifest
+  mapping 决定。
+- Provider 注册/启停仍是本机管理员动作；普通 Agent 只能查询和调用已批准 Capability。
+- v1 必须完整支持 tool discovery/call。resources、resource templates 和 prompts 在后续小批次
+  映射为只读资产/固定元调用，但不能为了它们改变现有 `/mcp`。
+- 一个下游 MCP 断线只影响该 Provider，不能拖垮现有 workspace MCP 或其他 Providers。
+
+Manifest 增加映射示例：
+
+```json
+{
+  "id": "mcp.example.server",
+  "kind": "mcp-stdio",
+  "command": "/absolute/path/to/example-mcp",
+  "args": [],
+  "tools": {
+    "allow": ["search", "read_item"],
+    "mappings": {
+      "search": {
+        "capabilityId": "mcp.example.search",
+        "version": "1.0.0",
+        "effects": {
+          "readOnly": true,
+          "destructive": false,
+          "idempotent": true,
+          "openWorld": true
+        }
+      }
+    }
+  }
+}
+```
+
+这使内置 Provider 和外部 MCP 使用完全相同的 Policy、Lease、Invocation、Audit、并发与测试
+框架；Chrome DevTools MCP 只是带预置安全映射的 `McpClientProvider` 专用配置/子类。
+
+## 11. 第一内置 Provider：当前 Chrome
+
+### 11.1 连接策略
 
 `ChromeDevToolsProvider` 优先直接启动长连接 stdio MCP child：
 
@@ -739,7 +812,7 @@ daemon/CLI 仍可作为 `doctor` 诊断和迁移 fallback，但不应成为核�
 Native Messaging Extension Provider。它必须沿用相同 Capability ID，Provider ID 改为
 `browser.chrome.extension`，并实现标签页 ownership；不能静默退化为隔离 Profile。
 
-### 10.2 Capability 映射
+### 11.2 Capability 映射
 
 MCP tool 发现后使用显式映射表，不要把所有未知工具自动暴露。建议分批允许：
 
@@ -769,7 +842,7 @@ browser.chrome.scroll
 lease 要求。上游升级新增/改变工具时，digest mismatch 应让该项进入 incompatible 状态，
 而不是自动扩大能力。
 
-### 10.3 页面选择与所有权
+### 11.3 页面选择与所有权
 
 - `list_pages` 不需要页面 lease，但返回最小必要的 page selector、title 和安全 URL 摘要。
 - 除 `list_pages` 外，所有页面能力需要 lease。
@@ -780,7 +853,7 @@ lease 要求。上游升级新增/改变工具时，digest mismatch 应让该项
 - 多 principal 并发 adopt 同一页面默认冲突；管理员策略可允许只读共享，mutation 仍需独占。
 - Provider 的 CDP 能访问整个 Profile 不代表调用者获得整个 Profile 的授权。
 
-### 10.4 首次权限和常驻
+### 11.4 首次权限和常驻
 
 首次 `--autoConnect` 通常需要用户在 Chrome 中确认连接。正确流程：
 
@@ -795,7 +868,7 @@ lease 要求。上游升级新增/改变工具时，digest mismatch 应让该项
 更稳定的 current-Chrome 连接，Native Messaging 扩展是可控路径，但它仍需要一次扩展安装、
 Native Host 注册和高权限告知。
 
-### 10.5 锁屏支持矩阵
+### 11.5 锁屏支持矩阵
 
 锁屏不是一个布尔“支持/不支持”，要按能力分类和真实验证：
 
@@ -817,9 +890,9 @@ Runtime 需要一个 `SessionStateProbe`，至少输出 `awake`、`loggedIn`、`
 目标不是尝试绕过锁屏，而是让不需要前台 UI 的浏览器协议操作在系统允许时继续，并对其他
 能力给出确定、可恢复的错误。
 
-## 11. 第二 Provider：电脑 UI 自动化
+## 12. 第二内置 Provider：电脑 UI 自动化
 
-### 11.1 macOS Helper 边界
+### 12.1 macOS Helper 边界
 
 建议独立实现签名稳定的 Swift Helper，以便 Accessibility 和 Screen Recording 权限绑定到
 稳定二进制身份，而不是每次由不同 Node/npm 临时进程申请 TCC。
@@ -837,7 +910,7 @@ Socket 要求：父目录 `0700`、socket/状态文件仅当前用户、检查 o
 socket、握手带随机 challenge 和 protocol version。Helper 默认只接受本机当前用户，不监听
 公网端口。
 
-### 11.2 初始能力
+### 12.2 初始能力
 
 ```text
 desktop.apps.list
@@ -857,12 +930,12 @@ snapshot，UI 变化后返回 stale handle，而不是点击旧坐标。
 必须识别 AX secure text field 并默认拒绝读取/填写。用户活跃输入检测、前台 App 改变、
 锁屏、显示睡眠或目标窗口消失时，Provider 应中止或让出控制，不与用户抢鼠标键盘。
 
-### 11.3 跨平台预留
+### 12.3 跨平台预留
 
 未来 Windows UIA、Linux AT-SPI Provider 复用核心 ID 和 Schema。平台差异放在 Descriptor
 availability 和 namespaced metadata，不能让同一动作在不同平台具有完全不同参数语义。
 
-## 12. 并发、资源和可靠性
+## 13. 并发、资源和可靠性
 
 Capability 调用不能占满现有 workspace 命令的资源。建议使用独立 request gate：
 
@@ -879,7 +952,7 @@ Capability 调用不能占满现有 workspace 命令的资源。建议使用独�
 Provider health 不应调用破坏性工具。连续健康失败才重启；一次调用业务错误不能重启整个
 Provider。Chrome 导航失败、目标关闭、协议断开和 child crash 必须有不同错误分类。
 
-## 13. 分批实施计划
+## 14. 分批实施计划
 
 每一批都要独立可审阅、可回滚，只 stage 本批明确 pathspec。不得 `git add -A`、reset、rebase
 或清理无关 worktree。每批完成后在本文“实施记录”补充 commit、测试和未决项。
@@ -989,7 +1062,9 @@ Provider。Chrome 导航失败、目标关闭、协议断开和 child crash 必�
 
 ### Batch 7：Chrome Provider 只读路径
 
-实现 `McpClientProvider` 和 `ChromeDevToolsProvider`，只启用只读映射。
+先以独立提交实现并集成通用 `McpClientProvider`（stdio + Streamable HTTP）、Manifest 校验、
+tool allowlist/mapping、list-changed 刷新和 fake downstream MCP contract tests；再实现
+`ChromeDevToolsProvider` 预置，只启用只读映射。
 
 验收必须使用用户当前 Chrome：
 
@@ -1028,12 +1103,12 @@ Provider。Chrome 导航失败、目标关闭、协议断开和 child crash 必�
 
 完成 fuzz/soak、资源上限、故障注入、升级兼容、operator runbook 和威胁模型复审。
 
-只有满足第 15 节完成定义后，才考虑把 `DEVSPACE_CAPABILITIES` 默认改为 1。Chrome mutation
+只有满足第 16 节完成定义后，才考虑把 `DEVSPACE_CAPABILITIES` 默认改为 1。Chrome mutation
 和 Desktop Provider 可继续各自默认 disabled，即使 Catalog/只读 Runtime 已默认启用。
 
-## 14. 测试与验收证据矩阵
+## 15. 测试与验收证据矩阵
 
-### 14.1 自动化测试
+### 15.1 自动化测试
 
 | 层级 | 重点 |
 | --- | --- |
@@ -1045,7 +1120,7 @@ Provider。Chrome 导航失败、目标关闭、协议断开和 child crash 必�
 | Real Chrome | current profile、页面 lease、snapshot、mutation、重启、锁屏 |
 | Real macOS | TCC、AX fixture、ScreenCapture、用户活跃、锁屏、Helper restart |
 
-### 14.2 每批必须报告的证据
+### 15.2 每批必须报告的证据
 
 - `git status --short` 和本批完整 diff。
 - 实际运行的 typecheck/test/build 命令及退出码。
@@ -1055,13 +1130,13 @@ Provider。Chrome 导航失败、目标关闭、协议断开和 child crash 必�
 - 权限状态、锁屏状态和用户控制步骤；不能把“已有权限”描述成“代码自动获得权限”。
 - 失败项、日志路径、可重试步骤和安全回滚方式。
 
-### 14.3 真实 Chrome fixture
+### 15.3 真实 Chrome fixture
 
 建立本地静态测试页，包含：按钮、文本框、secure input、滚动区、弹窗、新标签、网络请求、
 可访问性标签和动态 DOM。测试不得依赖公网网页 UI。需要另设一个明确的外部只读页面验证
 openWorld 策略，但不得登录、提交表单或修改真实数据。
 
-### 14.4 Soak 建议
+### 15.4 Soak 建议
 
 - 2 小时：每 5 秒 list/status，每 30 秒 snapshot；周期性创建/释放 lease。
 - 8 小时：Chrome 正常运行，包含显示睡眠/唤醒但不锁屏的阶段。
@@ -1069,12 +1144,14 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 - 故障注入：杀 Provider child、关闭页面、退出 Chrome、断开 MCP transport、使输出超限。
 - 记录峰值 RSS、child 数、FD、listener、队列、P50/P95/P99 和恢复时长。
 
-## 15. 完成定义（Definition of Done）
+## 16. 完成定义（Definition of Done）
 
 整体方案只有同时满足以下条件才算落地：
 
 - 现有 `/mcp` tools/list 和关键 Schema 与基线一致，现有测试全部通过。
 - 固定 REST v1、固定 MCP 元工具和 CLI 对同一 Runtime contract tests 通过。
+- 通用 stdio/Streamable HTTP MCP 能挂载、筛选、注册和调用工具；下游变更只更新 Catalog
+  revision，不能改变固定元 API，也不能把 Provider instructions 当作可信指令。
 - Catalog 能列出、搜索、描述 Provider 能力，动态变化只增加 revision，不改变元 API。
 - OAuth audience/scope、policy、lease ownership、并发、超时、取消和审计均有负向测试。
 - Provider 配置不能由普通远程 Agent 修改，任意 shell 不可通过 Manifest 注入。
@@ -1086,7 +1163,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 - 文档包含安装、授权、doctor、调用、故障恢复、禁用和卸载步骤。
 - feature flag 和 Provider 默认开关符合最小权限；尚未通过的 Provider 保持 disabled。
 
-## 16. 风险与缓解
+## 17. 风险与缓解
 
 | 风险 | 后果 | 缓解 |
 | --- | --- | --- |
@@ -1101,7 +1178,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | Provider 升级悄悄扩大工具 | 越权能力出现 | 显式 allowlist 映射、Schema digest、管理员审阅后启用 |
 | 把 DevSpace token 当作 OS 权限 | 反复提示或错误安全假设 | OAuth/Grant/OS permission 三层独立状态和文档 |
 
-## 17. 给后续实施 Agent 的交接指令
+## 18. 给后续实施 Agent 的交接指令
 
 1. 先读根目录 `AGENTS.md`、本文、[`参考工程/README.md`](../参考工程/README.md)、
    `docs/security.md`、`docs/mcp-resource-control.md` 和 `docs/workspace-control-plane.md`。
@@ -1123,7 +1200,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 10. 若必须改变本文的外部 API、信任模型或不变量，先新增 ADR 并请求审阅；不要在代码中
     悄悄改变。
 
-## 18. 实施记录
+## 19. 实施记录
 
 后续 Agent 按批追加，不覆盖历史：
 
@@ -1133,7 +1210,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 1 | 完成（2026-09-13） | 本批提交 | Descriptor JSON Schema、错误映射、递归脱敏单测 | 不适用 | Runtime 尚未接线 |
 | 2 | 完成（2026-09-13） | 本批提交 | SQLite v5、原子 Catalog、revision/cursor、冲突与 BM25 搜索测试 | 不适用 | Provider binding 重启后按设计需重新发现 |
 | 3 | 完成（2026-09-13） | 本批提交 | 单实例、发现、崩溃退避恢复、权限门、禁用与关闭测试 | Fake Provider | 周期 health polling 留待硬化批次 |
-| 4 | 待实施 | — | — | Fake Provider | — |
+| 4 | 完成（2026-09-13） | 本批提交 | Grant、lease 越权、Schema、队列、幂等、取消、超时、输出上限和脱敏审计 | Fake Provider | Grant 持久化管理入口留待 API/CLI 批次 |
 | 5 | 待实施 | — | — | OAuth client | — |
 | 6 | 待实施 | — | — | MCP/REST/CLI | — |
 | 7 | 待实施 | — | — | 当前 Chrome | — |
@@ -1141,7 +1218,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 9 | 待实施 | — | — | macOS UI + TCC | — |
 | 10 | 待实施 | — | — | 综合 soak | — |
 
-## 19. 推荐阅读顺序
+## 20. 推荐阅读顺序
 
 落地前按最短路径阅读参考实现：
 

@@ -2,6 +2,7 @@ import { CapabilityError } from "./errors.js";
 import { parseCapabilityDescriptor } from "./descriptor-schema.js";
 import { searchCapabilityCandidates, type CapabilitySearchResult } from "./search.js";
 import type { SqliteCapabilityCatalogStore } from "./catalog-store.js";
+import type { ProviderLease } from "./provider.js";
 import type {
   CapabilityDescriptor,
   CapabilityListQuery,
@@ -12,7 +13,10 @@ import type {
 } from "./types.js";
 
 export interface CapabilityBinding {
-  invoke(argumentsValue: JsonValue, signal: AbortSignal): Promise<JsonValue>;
+  invoke(
+    argumentsValue: JsonValue,
+    context: { signal: AbortSignal; lease?: ProviderLease },
+  ): Promise<JsonValue>;
 }
 
 export interface DiscoveredCapability {
@@ -179,7 +183,7 @@ export class CapabilityRegistry {
     const health = this.providerHealth.get(entry.descriptor.providerId);
     let state: CapabilitySummary["availability"]["state"] = "unavailable";
     if (entry.persistedOnly) state = "unavailable";
-    else if (health?.state === "ready") state = "ready";
+    else if (health?.state === "ready" || health?.state === "degraded") state = "ready";
     else if (health?.state === "needs_user_action") state = "permission_required";
     else if (health?.state === "starting" || health?.state === "backoff") {
       state = "temporarily_unavailable";
