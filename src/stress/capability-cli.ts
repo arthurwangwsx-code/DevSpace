@@ -44,6 +44,13 @@ interface PersistentStateSummary {
   auditEventRows: number;
 }
 
+interface SourceMetadata {
+  commit?: string;
+  dirtyPaths: string[];
+  runtimeSourceDirtyPaths: string[];
+  error?: string;
+}
+
 class BoundedOutput {
   private text = "";
   append(chunk: Buffer | string): void {
@@ -57,6 +64,7 @@ class BoundedOutput {
 const execFileAsync = promisify(execFile);
 const cli = parseArgs(process.argv.slice(2));
 const options = { ...profileDefaults(cli.profile), ...definedOverrides(cli) };
+const source = await sourceMetadata();
 const runId = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
 const artifactDir = resolve(cli.outputRoot, runId);
 const fixtureRoot = await mkdtemp(join(tmpdir(), "devspace-capability-stress-"));
@@ -136,6 +144,7 @@ try {
     serverOutput.value,
     orphanDescendants,
     persistentState,
+    source,
   );
   await writeFile(join(artifactDir, "summary.json"), `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(join(artifactDir, "summary.md"), renderMarkdown(report));
@@ -177,11 +186,21 @@ function buildReport(
   serverLog: string,
   orphanDescendants: number,
   persistentState: PersistentStateSummary,
+  sourceMetadataValue: SourceMetadata,
 ) {
   const memory = summarizeMemory(processSamples);
   const noFatal = !/heap out of memory|FATAL ERROR|uncaught|panic:/i.test(serverLog);
   const checks = [
     ...workload.checks,
+    {
+      name: "runtime_source_provenance",
+      passed: Boolean(sourceMetadataValue.commit)
+        && !sourceMetadataValue.error
+        && sourceMetadataValue.runtimeSourceDirtyPaths.length === 0,
+      actual: sourceMetadataValue.error
+        ?? `${sourceMetadataValue.commit ?? "unknown"}; dirty=${sourceMetadataValue.runtimeSourceDirtyPaths.length}`,
+      expected: "Git commit known and runtime source clean",
+    },
     { name: "no_fatal_runtime_error", passed: noFatal, actual: noFatal, expected: "true" },
     {
       name: "process_tree_rss_below_1_gib",
@@ -247,12 +266,44 @@ function buildReport(
       node: process.version,
       platform: `${process.platform}-${process.arch}`,
       isolatedFixture: true,
+      source: sourceMetadataValue,
     },
     workload,
     memory,
     persistentState,
     checks,
   };
+}
+
+async function sourceMetadata(): Promise<SourceMetadata> {
+  try {
+    const [{ stdout: commit }, { stdout: status }] = await Promise.all([
+      execFileAsync("git", ["rev-parse", "HEAD"], { cwd: process.cwd() }),
+      execFileAsync("git", ["status", "--short", "--untracked-files=all"], { cwd: process.cwd() }),
+    ]);
+    const dirtyPaths = status.trim().split("\n").filter(Boolean);
+    return {
+      commit: commit.trim(),
+      dirtyPaths,
+      runtimeSourceDirtyPaths: dirtyPaths.filter(isRuntimeSourceStatus),
+    };
+  } catch (error) {
+    return { dirtyPaths: [], runtimeSourceDirtyPaths: [], error: safeError(error) };
+  }
+}
+
+function isRuntimeSourceStatus(statusLine: string): boolean {
+  const porcelainPath = statusLine.slice(3).trim();
+  const path = porcelainPath.includes(" -> ") ? porcelainPath.split(" -> ").at(-1)! : porcelainPath;
+  return path === "package.json"
+    || path === "package-lock.json"
+    || path.startsWith("src/")
+    || path.startsWith("scripts/")
+    || path.startsWith("native/")
+    || path.startsWith("native-host/")
+    || path.startsWith("browser-extension/")
+    || path.startsWith("tsconfig")
+    || path.startsWith("vite.config.");
 }
 
 async function summarizePersistentState(stateDirectory: string): Promise<PersistentStateSummary> {
@@ -651,7 +702,7 @@ function renderMarkdown(report: ReturnType<typeof buildReport>): string {
     `| ${entry.passed ? "PASS" : "FAIL"} | ${entry.name} | ${entry.actual} | ${entry.expected} |`).join("\n");
   const operationRows = Object.entries(report.workload.metrics.operations).map(([name, value]) =>
     `| ${name} | ${value.count} | ${value.errors} | ${value.meanMs} | ${value.p95Ms} | ${value.p99Ms} |`).join("\n");
-  return `# DevSpace capability stress report\n\n- Result: ${report.ok ? "PASS" : "FAIL"}\n- Profile: ${report.run.profile}\n- Duration: ${report.workload.durationMs} ms\n- Concurrency: ${report.workload.options.concurrency}\n- Business invocations: ${report.workload.totals.completedInvocations}/${report.workload.totals.attemptedInvocations}\n- Max process-tree RSS: ${report.memory.maxRssMb} MiB\n- Persistent state: ${report.persistentState.mib} MiB (${report.persistentState.invocationRows} invocations, ${report.persistentState.auditEventRows} audit events)\n- Max descendant processes: ${report.memory.maxDescendantCount}\n- Max file descriptors: ${report.memory.fdSamples ? report.memory.maxFdCount : "unavailable"}\n- Max listening sockets: ${report.memory.fdSamples ? report.memory.maxListeningSocketCount : "unavailable"}\n\n## Checks\n\n| Result | Check | Actual | Expected |\n| --- | --- | --- | --- |\n${checkRows}\n\n## Latency\n\n| Operation | Count | Errors | Mean ms | p95 ms | p99 ms |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${operationRows}\n`;
+  return `# DevSpace capability stress report\n\n- Result: ${report.ok ? "PASS" : "FAIL"}\n- Profile: ${report.run.profile}\n- Source commit: ${report.run.source.commit ?? "unavailable"}\n- Runtime source dirty paths: ${report.run.source.runtimeSourceDirtyPaths.length}\n- Duration: ${report.workload.durationMs} ms\n- Concurrency: ${report.workload.options.concurrency}\n- Business invocations: ${report.workload.totals.completedInvocations}/${report.workload.totals.attemptedInvocations}\n- Max process-tree RSS: ${report.memory.maxRssMb} MiB\n- Persistent state: ${report.persistentState.mib} MiB (${report.persistentState.invocationRows} invocations, ${report.persistentState.auditEventRows} audit events)\n- Max descendant processes: ${report.memory.maxDescendantCount}\n- Max file descriptors: ${report.memory.fdSamples ? report.memory.maxFdCount : "unavailable"}\n- Max listening sockets: ${report.memory.fdSamples ? report.memory.maxListeningSocketCount : "unavailable"}\n\n## Checks\n\n| Result | Check | Actual | Expected |\n| --- | --- | --- | --- |\n${checkRows}\n\n## Latency\n\n| Operation | Count | Errors | Mean ms | p95 ms | p99 ms |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${operationRows}\n`;
 }
 
 function rounded(value: number): number {
@@ -660,4 +711,8 @@ function rounded(value: number): number {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+}
+
+function safeError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }

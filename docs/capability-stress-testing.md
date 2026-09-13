@@ -21,6 +21,11 @@ npm run test:real-mcp-mount
 npm run test:desktop-provider-performance
 npm run test:desktop-runtime-fixture
 npm run test:capability-release -- --lane locked
+npm run verify:capability-release -- \
+  --locked /path/to/locked/summary.json \
+  --unlocked /path/to/unlocked/summary.json \
+  --browser-transition /path/to/browser-transition/summary.json \
+  --soak /path/to/24h-soak/summary.json
 
 # Reproduce one dimension
 npm run stress:capabilities -- \
@@ -75,6 +80,14 @@ inventory. A release requires passing receipts from `locked`, `unlocked`,
 never treats a skipped lane, runtime-source dirty run, or precondition failure as
 release eligible. Unrelated documentation WIP remains recorded but does not invalidate
 the executable-source evidence.
+
+`verify:capability-release` is the final evidence-set gate. It requires explicit paths
+for all three lane receipts plus the 24-hour soak, validates every required sub-gate,
+checks that lane runtime implementations match current `HEAD`, enforces persistence,
+memory/slope and orphan-process soak gates, and rejects current runtime-source WIP.
+Legacy soak reports without the source-provenance gate require the explicit
+`--accept-legacy-soak` waiver, which is preserved in the final receipt rather than
+silently treated as equivalent evidence.
 
 | Profile | Clients | Calls/client | MCP session churn | Duration |
 | --- | ---: | ---: | ---: | ---: |
