@@ -23,6 +23,7 @@ writeFileSync(join(providerDir, "fake.json"), JSON.stringify({
       command: process.execPath,
       args: ["--import", "tsx", fixturePath],
     },
+    discoverAllTools: true,
     tools: [{
       tool: "echo",
       capabilityId: "test.mounted.echo",
@@ -54,6 +55,8 @@ try {
   assert.equal(catalogResponse.status, 200);
   const catalog = await catalogResponse.json() as any;
   assert.equal(catalog.data.items.some((item: any) => item.id === "test.mounted.echo"), true);
+  assert.equal(catalog.data.items.some((item: any) =>
+    item.id === "test.mounted.mcp.not_allowlisted"), true);
   assert.equal(running.capabilityRuntime!.supervisor.list().find(
     ({ id }) => id === "test.mounted.mcp",
   )?.kind, "mcp:stdio");
@@ -78,13 +81,21 @@ try {
     arguments: { providerId: "test.mounted.mcp" },
   });
   assert.equal((exposedCatalog.structuredContent as any).data.items[0].id, "test.mounted.echo");
+  assert.equal((exposedCatalog.structuredContent as any).data.items.some((item: any) =>
+    item.id === "test.mounted.mcp.not_allowlisted"), true);
   const bridged = await mcpClient.callTool({
     name: "capability_invoke",
     arguments: { capabilityId: "test.mounted.echo", arguments: { message: "bridged" } },
   });
   assert.equal((bridged.structuredContent as any).data.result.echoed, "bridged");
 
-  console.log("mounted MCP integration passed: manifest -> child -> catalog -> REST/MCP invocation");
+  const dynamicBridged = await mcpClient.callTool({
+    name: "capability_invoke",
+    arguments: { capabilityId: "test.mounted.mcp.not_allowlisted", arguments: {} },
+  });
+  assert.match(JSON.stringify((dynamicBridged.structuredContent as any).data.result), /hidden/);
+
+  console.log("mounted MCP integration passed: manifest -> discover-all child -> catalog -> REST/MCP invocation");
 } finally {
   await mcpClient?.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));

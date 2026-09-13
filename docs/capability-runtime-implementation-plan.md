@@ -729,9 +729,9 @@ capability.policy.denied
 
 ## 10. 通用外部 MCP Provider
 
-DevSpace 必须像 Codex/Claude 等 MCP Host 一样挂载外部 MCP Server，并把 Agent 显式映射的
-下游 tools 注册进统一 Catalog，再通过固定 REST/MCP/CLI 元接口暴露。这不是 Chrome 特例，
-而是所有 MCP Provider 的基础适配层。
+DevSpace 必须像 Codex/Claude 等 MCP Host 一样挂载外部 MCP Server，并把下游 tools 自动发现
+或显式映射进统一 Catalog，再通过固定 REST/MCP/CLI 元接口暴露。这不是 Chrome 特例，而是
+所有 MCP Provider 的基础适配层。
 
 首版支持两种传输：
 
@@ -748,14 +748,15 @@ mcp-streamable-http
 ```
 
 `McpClientProvider` 持有长期 MCP Client/Transport，启动后执行 `initialize` 和 `tools/list`。
-每个下游 tool 经过 Agent 显式映射后生成稳定 Capability ID；原始 tool name、
-inputSchema、annotations 和 server/version 只作为 binding/metadata。`tools/list_changed` 通知触发
-原子 rediscover 和 Catalog revision，不能直接修改正在执行的 registration map。
+`discoverAllTools=true` 时，每个下游 tool 自动生成稳定 Capability ID；显式 `tools` 映射可为
+选定工具覆盖 ID、版本和描述性 effect/availability 元数据。原始 tool name、inputSchema、
+annotations 和 server/version 只作为 binding/metadata。`tools/list_changed` 通知触发原子
+rediscover 和 Catalog revision，不能直接修改正在执行的 registration map。
 
-自动 ID 建议为 `mcp.<provider-slug>.<tool-name>`，但生产 Manifest 应允许显式固定 ID 和
-version。不同 Provider 的同名 tool 不冲突；同一稳定 ID 被另一 Provider 占用时整次刷新失败。
-上游 Schema digest 改变后能力进入 `incompatible`，必须管理员审阅更新映射，不能静默扩大
-参数或 effect。
+自动 ID 为 `<provider-id>.<normalized-tool-name>`，归一化冲突时追加稳定 hash；Manifest 的
+`discoveredToolVersion` 控制全部自动描述符版本。不同 Provider 的同名 tool 不冲突；同一稳定
+ID 被另一 Provider 占用时整次刷新失败。上游 Schema digest 改变后刷新失败，管理员需要提高
+`discoveredToolVersion` 或增加显式版本映射，不能静默扩大参数契约。
 
 安全要求：
 
@@ -828,7 +829,8 @@ Native Messaging Extension Provider。它必须沿用相同 Capability ID，Prov
 
 ### 11.2 Capability 映射
 
-MCP tool 发现后使用显式映射表，不要把所有未知工具自动暴露。建议分批允许：
+Chrome 内置 Provider 使用显式映射表保持稳定产品能力面；通用外部 MCP 则可选择
+`discoverAllTools`。Chrome 建议分批映射：
 
 第一批只读：
 
@@ -1234,6 +1236,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 9 | 核心路径完成、真实用户活跃/锁屏门待补（2026-09-13） | 本批提交 | 原生 Swift MCP Helper、稳定 identifier 签名脚本、应用 lease 绑定、AX 有界快照、应用所属 layer-zero 窗口截图、近期硬件输入让出、激活/点击/安全输入/按键、secure value 脱敏、Provider 单测 | 本机真实编译/MCP 握手；Accessibility/ScreenCapture 预检均为 true；空白 Fixture App 的 AX、Unicode 输入、限定窗口 PNG 截图真实 canary 通过 | 生产 Developer ID 签名、真实用户活跃让出与锁屏实测 |
 | 10 | 框架与 10m soak 完成、24h/实机 soak 待验收（2026-09-13） | 本批提交 | 独立临时 DevSpace + 真实 stdio MCP fixture；REST/MCP 并发、固定 8-tool、session churn、队列限流/恢复、幂等、取消、超时、输出上限、secure intent、child crash/backoff/recovery、进程树 RSS/FD/socket、关机无孤儿；最终 delegated-approval 10m 为 43,025/43,025 调用、5,000 churn、26 项门全通过、调用 p95 23 ms、峰值 RSS 603.84 MiB | 仅隔离 Fixture，不等同于 Chrome/桌面实机 soak | 24h soak 尚未运行；Chrome 授权、真实锁屏、真实用户活跃让出仍是显式验收门 |
 | 11 | 完成（2026-09-13） | 本批提交 | 固定 REST admin API；固定 MCP 的 `capability_invoke` 调用动态 `devspace.providers.*` 管理能力；默认 grantless delegated approval、enforced-policy 显式兼容开关；Manifest 安全存储；进程内 install/enable/disable/reload/remove；Catalog revision 与 8-tool 不变端到端测试 | 真实 stdio Fake MCP 子进程动态装载、重载和回收 | 包下载/供应链审批由上层管理 Agent 负责 |
+| 12 | 完成（2026-09-13） | 本批提交 | Manifest `discoverAllTools`；下游 tools/list 自动生成稳定 capability ID、Schema、描述和保守 effect 元数据；显式映射可覆盖；REST/MCP 自动发现与调用端到端测试 | 真实 stdio Fake MCP 的未映射工具自动进入 Catalog 并可由固定 `capability_invoke` 调用 | prompts/resources 暂不投影为 Capability；需要时以新资产类型扩展 Catalog |
 
 ## 20. 推荐阅读顺序
 

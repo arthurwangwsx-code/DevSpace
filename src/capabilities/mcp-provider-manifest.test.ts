@@ -25,6 +25,8 @@ const fixture = {
 };
 const parsed = parseMcpProviderManifest(fixture);
 assert.equal(parsed.spec.enabled, true);
+assert.equal(parsed.spec.discoverAllTools, false);
+assert.equal(parsed.spec.discoveredToolVersion, "1.0.0");
 assert.equal(parsed.spec.tools[0]!.defaultTimeoutMs, 30_000);
 assert.deepEqual(parsed.spec.tools[0]!.availability, {
   requiresAwake: false,
@@ -51,6 +53,22 @@ assert.throws(() => parseMcpProviderManifest({
   ...fixture,
   spec: { ...fixture.spec, tools: [{ ...fixture.spec.tools[0], requiresLease: true }] },
 }), /lease-bound tools require resourceTypes/);
+const discoveryOnly = parseMcpProviderManifest({
+  ...fixture,
+  metadata: { id: "test.discovery.mcp" },
+  spec: {
+    transport: fixture.spec.transport,
+    discoverAllTools: true,
+    discoveredToolVersion: "2.1.0",
+  },
+});
+assert.equal(discoveryOnly.spec.discoverAllTools, true);
+assert.equal(discoveryOnly.spec.discoveredToolVersion, "2.1.0");
+assert.deepEqual(discoveryOnly.spec.tools, []);
+assert.throws(() => parseMcpProviderManifest({
+  ...fixture,
+  spec: { transport: fixture.spec.transport, tools: [] },
+}), /tools must not be empty unless discoverAllTools=true/);
 
 const root = mkdtempSync(join(tmpdir(), "devspace-mcp-manifest-test-"));
 try {

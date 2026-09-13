@@ -32,7 +32,7 @@ export class CapabilityProviderAdmin {
         title: manifest.metadata.title,
         enabled: manifest.spec.enabled,
         transport: manifest.spec.transport.type,
-        capabilityCount: manifest.spec.tools.length,
+        capabilityCount: this.runtime.registry.capabilityCountForProvider(manifest.metadata.id),
         runtime: this.runtime.supervisor.list().find(({ id }) => id === manifest.metadata.id)?.health,
       })),
     });
@@ -111,6 +111,7 @@ export class CapabilityProviderAdmin {
       providerId,
       ...extra,
       health: this.runtime.supervisor.getHealth(providerId),
+      capabilityCount: this.runtime.registry.capabilityCountForProvider(providerId),
       catalogRevision: this.runtime.registry.revision,
     });
   }

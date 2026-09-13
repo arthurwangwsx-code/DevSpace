@@ -61,6 +61,14 @@ export class CapabilityRegistry {
     return this.revisionValue;
   }
 
+  capabilityCountForProvider(providerId: string): number {
+    let count = 0;
+    for (const { descriptor } of this.entries.values()) {
+      if (descriptor.providerId === providerId) count += 1;
+    }
+    return count;
+  }
+
   replaceProviderCatalog(input: {
     providerId: string;
     kind: string;

@@ -3,7 +3,7 @@
 For the built-in current-profile Chrome preset, see
 [`chrome-current-profile-provider.md`](./chrome-current-profile-provider.md).
 
-DevSpace can keep one downstream MCP client per configured provider, discover its explicitly mapped tools,
+DevSpace can keep one downstream MCP client per configured provider, discover its tools,
 register them in the shared capability catalog, and expose them through both:
 
 - `POST /capabilities/mcp` — a fixed eight-tool MCP interface.
@@ -44,8 +44,20 @@ In OAuth mode, the CLI accepts an audience-bound token through
 
 ## Manifest contract
 
-Every downstream tool is denied unless explicitly mapped. Effects and availability are declared by
-the local manifest; untrusted downstream tool annotations cannot reduce them.
+There are two registration modes:
+
+- `discoverAllTools: true` automatically projects every downstream MCP tool into the Catalog. This is the
+  recommended mode when the upstream Agent owns approval and needs a general MCP mount.
+- `tools` provides explicit stable IDs and metadata for selected tools. It can be combined with
+  `discoverAllTools`; explicit entries override the generated descriptor for those tool names.
+
+Automatically discovered IDs use `<provider-id>.<normalized-tool-name>`. Name collisions receive a stable
+eight-character hash suffix. Their default effects are `mutation + openWorld + non-idempotent`; these are
+descriptive metadata rather than an approval gate in the default delegated mode. Generated descriptors use
+`discoveredToolVersion` (default `1.0.0`). If an upstream upgrade changes a generated tool Schema, increment
+that field before reload, or add an explicit mapping with its own version.
+
+The smallest general-purpose manifest is therefore:
 
 ```json
 {
@@ -54,6 +66,27 @@ the local manifest; untrusted downstream tool annotations cannot reduce them.
   "metadata": { "id": "example.remote.mcp", "title": "Example MCP" },
   "spec": {
     "enabled": true,
+    "transport": {
+      "type": "stdio",
+      "command": "/absolute/path/to/example-mcp",
+      "args": []
+    },
+    "discoverAllTools": true,
+    "discoveredToolVersion": "1.0.0"
+  }
+}
+```
+
+Use explicit mappings when stable product-facing IDs or more precise effect/availability metadata are useful:
+
+```json
+{
+  "apiVersion": "devspace.capabilities/v1",
+  "kind": "McpProvider",
+  "metadata": { "id": "example.remote.mcp", "title": "Example MCP" },
+  "spec": {
+    "enabled": true,
+    "discoverAllTools": true,
     "transport": {
       "type": "stdio",
       "command": "/absolute/path/to/node",
@@ -99,7 +132,7 @@ Plain HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1`. Stdio comman
 directories must be absolute, no shell is involved, and only the SDK safe environment plus declared
 `envFrom` entries reaches the child process. Secrets belong in environment variables, not manifests.
 
-Capability input/output schema is learned from the explicitly mapped downstream tool. A schema change with
+Capability input/output schema is learned from the downstream tool. A schema change with
 an unchanged capability version is rejected, including after a DevSpace restart because the prior
 catalog is persisted. Bump the manifest mapping's `version` only after reviewing the new contract.
 
@@ -111,7 +144,8 @@ catalog is persisted. Bump the manifest mapping's `version` only after reviewing
 - Invocation still passes through schema, queue, timeout, output-limit, cancellation, lease ownership,
   and redacted audit enforcement. Scope/Grant checks are opt-in with
   `DEVSPACE_CAPABILITY_ENFORCE_POLICY=1`; by default approval is delegated to the connected Agent.
-- A downstream MCP's prompts, resources, instructions, and non-mapped tools are not re-exported.
+- A downstream MCP's prompts, resources, and instructions are not re-exported. Tools are all exported only
+  when `discoverAllTools=true`; otherwise only explicit mappings appear.
 - Admin API installation, enable/disable, reload, and recoverable removal update the running
   supervisor and Catalog revision atomically from the caller's perspective; the outer eight MCP tools stay fixed.
 

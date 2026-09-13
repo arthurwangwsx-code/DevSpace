@@ -54,21 +54,21 @@ try {
         command: process.execPath,
         args: ["--import", "tsx", fixturePath],
       },
-      tools: [{
-        tool: "echo",
-        capabilityId: "test.dynamic.echo",
-        effects: { readOnly: true, destructive: false, idempotent: true, openWorld: false },
-      }],
+      discoverAllTools: true,
     },
   };
   const installed = await invokeManagement(client, "devspace.providers.install", { manifest });
   assert.equal(installed.status, "succeeded");
   assert.equal((installed.result as any).providerId, "test.dynamic.mcp");
   assert.equal((installed.result as any).health.state, "ready");
+  assert.equal((installed.result as any).capabilityCount, 4);
   assert.equal(existsSync(join(providerDirectory, "test.dynamic.mcp.json")), true);
 
   const afterInstall = await getJson(`${base}/capabilities?providerId=test.dynamic.mcp`);
-  assert.equal(afterInstall.body.data.items[0].id, "test.dynamic.echo");
+  assert.equal(afterInstall.body.data.items.some((item: any) =>
+    item.id === "test.dynamic.mcp.echo"), true);
+  assert.equal(afterInstall.body.data.items.some((item: any) =>
+    item.id === "test.dynamic.mcp.not_allowlisted"), true);
   const installedRevision = afterInstall.body.meta.catalogRevision;
 
   const disabled = await postJson(`${base}/admin/providers/test.dynamic.mcp/actions`, { action: "disable" });
@@ -91,6 +91,7 @@ try {
 
   const configured = await getJson(`${base}/admin/providers`);
   assert.equal(configured.body.data.providers[0].id, "test.dynamic.mcp");
+  assert.equal(configured.body.data.providers[0].capabilityCount, 4);
   const removed = await invokeManagement(client, "devspace.providers.remove", {
     providerId: "test.dynamic.mcp",
   });

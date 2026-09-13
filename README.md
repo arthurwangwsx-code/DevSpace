@@ -143,7 +143,7 @@ DevSpace gives ChatGPT tools to:
 
 ## Capability gateway preview
 
-DevSpace can also mount explicitly mapped stdio or Streamable HTTP MCP servers as dynamic
+DevSpace can also mount stdio or Streamable HTTP MCP servers as dynamic
 capabilities while keeping its public API fixed. Set `DEVSPACE_CAPABILITIES=1`, then connect an Agent
 to `/capabilities/mcp` or use `/api/capabilities/v1` from CI. See
 [Mount external MCP servers](docs/mcp-provider-mounts.md) for the manifest format and CLI, and

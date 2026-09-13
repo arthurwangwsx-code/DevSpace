@@ -43,16 +43,8 @@ curl -X POST http://127.0.0.1:7676/api/capabilities/v1/admin/providers \
           "command": "/absolute/path/to/example-mcp",
           "args": []
         },
-        "tools": [{
-          "tool": "lookup",
-          "capabilityId": "example.dynamic.lookup",
-          "effects": {
-            "readOnly": true,
-            "destructive": false,
-            "idempotent": true,
-            "openWorld": true
-          }
-        }]
+        "discoverAllTools": true,
+        "discoveredToolVersion": "1.0.0"
       }
     }
   }'
@@ -101,8 +93,9 @@ Conceptually:
 ```
 
 `reload` constructs a new downstream client from the persisted manifest, stops
-the old child/connection, swaps the registration, rediscovers its explicitly mapped
-tools, and increments the catalog revision. It does not change the fixed eight
+the old child/connection, swaps the registration, rediscovers its tools, and
+increments the catalog revision. With `discoverAllTools=true`, downstream tool-list
+notifications also refresh generated descriptors without changing the fixed eight
 meta-tools.
 
 ## Persistence and removal

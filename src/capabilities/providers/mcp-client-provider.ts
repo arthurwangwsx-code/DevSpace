@@ -1,10 +1,11 @@
+import { createHash } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { CapabilityError } from "../errors.js";
-import type { McpProviderManifest } from "../mcp-provider-manifest.js";
+import type { McpProviderManifest, McpToolMapping } from "../mcp-provider-manifest.js";
 import type {
   CapabilityProvider,
   ProviderCapability,
@@ -20,6 +21,7 @@ export class McpClientProvider implements CapabilityProvider {
   private transport?: Transport;
   protected context?: ProviderContext;
   private tools?: Tool[];
+  private readonly bindings = new Map<string, string>();
   private startedAt?: string;
   private stopping = false;
 
@@ -88,6 +90,7 @@ export class McpClientProvider implements CapabilityProvider {
     this.client = undefined;
     this.transport = undefined;
     this.tools = undefined;
+    this.bindings.clear();
     await client?.close().catch(() => {});
     await transport?.close().catch(() => {});
   }
@@ -105,7 +108,10 @@ export class McpClientProvider implements CapabilityProvider {
     this.tools = tools;
     this.validateAllowlist(tools);
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
-    return this.manifest.spec.tools.map((mapping) => {
+    const mappings = this.resolveMappings(tools);
+    this.bindings.clear();
+    for (const mapping of mappings) this.bindings.set(mapping.tool, mapping.capabilityId);
+    return mappings.map((mapping) => {
       const tool = byName.get(mapping.tool)!;
       return {
         descriptor: {
@@ -146,9 +152,8 @@ export class McpClientProvider implements CapabilityProvider {
     context: ProviderInvocationContext,
   ): Promise<JsonValue> {
     const toolName = typeof request.binding.tool === "string" ? request.binding.tool : undefined;
-    const mapping = this.manifest.spec.tools.find((candidate) => candidate.tool === toolName);
-    if (!toolName || !mapping || mapping.capabilityId !== request.capabilityId) {
-      throw new CapabilityError("policy_denied", "The downstream MCP tool is not allowlisted.");
+    if (!toolName || this.bindings.get(toolName) !== request.capabilityId) {
+      throw new CapabilityError("policy_denied", "The downstream MCP tool is not registered in the catalog.");
     }
     if (!request.arguments || typeof request.arguments !== "object" || Array.isArray(request.arguments)) {
       throw new CapabilityError("invalid_arguments", "MCP tool arguments must be a JSON object.");
@@ -233,10 +238,69 @@ export class McpClientProvider implements CapabilityProvider {
     }
   }
 
+  private resolveMappings(tools: Tool[]): McpToolMapping[] {
+    const explicit = this.manifest.spec.tools.map((mapping) => structuredClone(mapping));
+    if (!this.manifest.spec.discoverAllTools) return explicit;
+    const explicitTools = new Set(explicit.map(({ tool }) => tool));
+    const dynamicTools = tools
+      .filter(({ name }) => !explicitTools.has(name))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    const slugs = new Map<string, string[]>();
+    for (const tool of dynamicTools) {
+      const slug = toolSlug(tool.name);
+      slugs.set(slug, [...(slugs.get(slug) ?? []), tool.name]);
+    }
+    const usedCapabilityIds = new Set(explicit.map(({ capabilityId }) => capabilityId));
+    const dynamic = dynamicTools.map((tool): McpToolMapping => {
+      const slug = toolSlug(tool.name);
+      const collides = (slugs.get(slug)?.length ?? 0) > 1;
+      const base = `${this.id}.${slug}`;
+      const hash = createHash("sha256").update(tool.name).digest("hex");
+      let capabilityId = collides || usedCapabilityIds.has(base)
+        ? `${base}_${hash.slice(0, 8)}`
+        : base;
+      let collisionIndex = 1;
+      while (usedCapabilityIds.has(capabilityId)) {
+        capabilityId = `${base}_${hash.slice(0, 8)}_${collisionIndex}`;
+        collisionIndex += 1;
+      }
+      usedCapabilityIds.add(capabilityId);
+      return {
+        tool: tool.name,
+        capabilityId,
+        version: this.manifest.spec.discoveredToolVersion,
+        tags: ["mcp", "dynamic"],
+        aliases: [],
+        effects: { readOnly: false, destructive: false, idempotent: false, openWorld: true },
+        availability: {
+          requiresAwake: false,
+          requiresLoggedInSession: false,
+          requiresUnlocked: false,
+          requiresForegroundApp: false,
+        },
+        permissions: [],
+        requiresLease: false,
+        resourceTypes: [],
+        defaultTimeoutMs: 30_000,
+        maxTimeoutMs: 120_000,
+      };
+    });
+    return [...explicit, ...dynamic];
+  }
+
   protected requireClient(): Client {
     if (!this.client) throw new CapabilityError("provider_unavailable", "Downstream MCP is not connected.");
     return this.client;
   }
+}
+
+function toolSlug(name: string): string {
+  const slug = name.toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+  if (slug) return slug;
+  return `tool_${createHash("sha256").update(name).digest("hex").slice(0, 8)}`;
 }
 
 function jsonObject(value: unknown, label: string): JsonObject {

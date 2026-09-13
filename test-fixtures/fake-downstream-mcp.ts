@@ -15,8 +15,14 @@ server.registerTool("echo", {
   structuredContent: { echoed: message },
 }));
 server.registerTool("not_allowlisted", {
-  description: "This tool must never appear in the DevSpace catalog.",
+  description: "Visible only when the Provider enables discover-all mode.",
   inputSchema: z.object({}),
 }, async () => ({ content: [{ type: "text", text: "hidden" }] }));
+for (const name of ["collision.tool", "collision_tool"]) {
+  server.registerTool(name, {
+    description: "Exercises stable dynamic capability ID collision handling.",
+    inputSchema: z.object({}),
+  }, async () => ({ content: [{ type: "text", text: name }] }));
+}
 
 await server.connect(new StdioServerTransport());

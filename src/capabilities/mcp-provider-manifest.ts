@@ -90,9 +90,20 @@ export const mcpProviderManifestSchema = z.object({
   spec: z.object({
     enabled: z.boolean().default(true),
     transport: z.discriminatedUnion("type", [stdioTransport, httpTransport]),
-    tools: z.array(toolMapping).min(1),
+    discoverAllTools: z.boolean().default(false),
+    discoveredToolVersion: z.string()
+      .regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/)
+      .default("1.0.0"),
+    tools: z.array(toolMapping).default([]),
   }).strict(),
 }).strict().superRefine((manifest, context) => {
+  if (!manifest.spec.discoverAllTools && manifest.spec.tools.length === 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["spec", "tools"],
+      message: "tools must not be empty unless discoverAllTools=true",
+    });
+  }
   const tools = new Set<string>();
   const capabilityIds = new Set<string>();
   for (const [index, mapping] of manifest.spec.tools.entries()) {

@@ -44,7 +44,7 @@ try {
     descriptor: capabilities[0]!.descriptor,
     binding: { tool: "not_allowlisted" },
     arguments: {},
-  }, { signal: new AbortController().signal }), /not allowlisted/);
+  }, { signal: new AbortController().signal }), /not registered in the catalog/);
 } finally {
   await stdio.stop("test_complete");
 }
@@ -104,7 +104,51 @@ const missing = new McpClientProvider(parseMcpProviderManifest({
 await assert.rejects(missing.start(context()), /Allowlisted downstream MCP tool is missing/);
 await missing.stop("test_complete");
 
-console.log("MCP client provider tests passed: stdio, HTTP, env headers, allowlist, schema fail-closed, user-active yield");
+const dynamic = new McpClientProvider(parseMcpProviderManifest({
+  apiVersion: "devspace.capabilities/v1",
+  kind: "McpProvider",
+  metadata: { id: "test.dynamic.mcp" },
+  spec: {
+    transport: {
+      type: "stdio",
+      command: process.execPath,
+      args: ["--import", "tsx", fixturePath],
+    },
+    discoverAllTools: true,
+    discoveredToolVersion: "2.1.0",
+  },
+}));
+await dynamic.start(context());
+try {
+  const capabilities = await dynamic.discover(new AbortController().signal);
+  const dynamicIds = capabilities.map(({ descriptor }) => descriptor.id);
+  assert.equal(dynamicIds.length, 4);
+  assert.equal(new Set(dynamicIds).size, 4);
+  assert.equal(dynamicIds.includes("test.dynamic.mcp.echo"), true);
+  assert.equal(dynamicIds.includes("test.dynamic.mcp.not_allowlisted"), true);
+  const collisionIds = dynamicIds.filter((id) => id.startsWith("test.dynamic.mcp.collision_tool_"));
+  assert.equal(collisionIds.length, 2);
+  assert.deepEqual(
+    (await dynamic.discover(new AbortController().signal)).map(({ descriptor }) => descriptor.id),
+    dynamicIds,
+  );
+  assert.equal(capabilities.every(({ descriptor }) => descriptor.tags.includes("dynamic")), true);
+  assert.equal(capabilities.every(({ descriptor }) => descriptor.version === "2.1.0"), true);
+  const hidden = capabilities.find(({ descriptor }) =>
+    descriptor.id === "test.dynamic.mcp.not_allowlisted")!;
+  assert.deepEqual(await dynamic.invoke({
+    capabilityId: hidden.descriptor.id,
+    descriptor: hidden.descriptor,
+    binding: hidden.binding,
+    arguments: {},
+  }, { signal: new AbortController().signal }), {
+    content: [{ type: "text", text: "hidden" }],
+  });
+} finally {
+  await dynamic.stop("test_complete");
+}
+
+console.log("MCP client provider tests passed: stdio, HTTP, explicit mapping, discover-all, schema fail-closed, user-active yield");
 
 function manifest(transport: Record<string, unknown>): McpProviderManifest {
   return parseMcpProviderManifest({
