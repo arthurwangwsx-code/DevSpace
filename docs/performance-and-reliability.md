@@ -99,7 +99,7 @@ AiBox launcher intentionally applies a tighter latency profile:
 | MCP queued requests | 64 |
 | tunnel requests dispatched to MCP | 16 per profile |
 | tunnel control-plane buffered commands | 32 per profile |
-| command processes | 4 global / 1 per workspace |
+| command processes | 4 global / 2 per workspace |
 | retained process sessions | 32 |
 | MCP sessions | 512 total / 128 idle |
 | workspace sleep / MCP abandoned TTL | 4 h / 12 h |

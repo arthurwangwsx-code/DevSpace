@@ -41,6 +41,7 @@ try {
   assert.match(plist, /<string>com\.devspace\.test<\/string>/);
   assert.match(plist, /DEVSPACE_CAPABILITIES/);
   assert.match(plist, /<key>DEVSPACE_TOOL_MODE<\/key>\s*<string>codex<\/string>/);
+  assert.match(plist, /<key>DEVSPACE_PROCESS_MAX_CONCURRENT_PER_WORKSPACE<\/key>\s*<string>2<\/string>/);
   assert.match(plist, /DEVSPACE_RELEASE_ID/);
   assert.match(plist, /test-release/);
   assert.match(plist, /service-supervisor\.mjs/);
