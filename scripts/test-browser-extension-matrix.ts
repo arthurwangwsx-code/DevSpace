@@ -19,6 +19,7 @@ interface Options {
   connectTimeoutMs: number;
   transitionTimeoutMs: number;
   baseUrl?: string;
+  baselineOnly: boolean;
 }
 
 interface StepResult {
@@ -90,17 +91,18 @@ try {
   });
   assert.equal(lease.display.ownership, "agent");
   await exerciseUnlocked("unlocked-baseline", "baseline");
+  if (!options.baselineOnly) {
+    process.stdout.write("Browser baseline passed. Lock the Mac now; waiting for locked continuation...\n");
+    await timed("setup", "wait_for_lock", () => waitForLockState(true, options.transitionTimeoutMs));
+    await exerciseLocked();
 
-  process.stdout.write("Browser baseline passed. Lock the Mac now; waiting for locked continuation...\n");
-  await timed("setup", "wait_for_lock", () => waitForLockState(true, options.transitionTimeoutMs));
-  await exerciseLocked();
-
-  process.stdout.write("Locked continuation passed. Unlock the Mac now; waiting for recovery...\n");
-  await timed("setup", "wait_for_unlock", () => waitForLockState(false, options.transitionTimeoutMs));
-  await timed("unlocked-recovery", "wait_for_extension_reconnect", () => options.baseUrl
-    ? waitForRemoteExtension(options.baseUrl, options.connectTimeoutMs)
-    : waitForExtension(provider, options.connectTimeoutMs));
-  await exerciseUnlocked("unlocked-recovery", "recovery");
+    process.stdout.write("Locked continuation passed. Unlock the Mac now; waiting for recovery...\n");
+    await timed("setup", "wait_for_unlock", () => waitForLockState(false, options.transitionTimeoutMs));
+    await timed("unlocked-recovery", "wait_for_extension_reconnect", () => options.baseUrl
+      ? waitForRemoteExtension(options.baseUrl, options.connectTimeoutMs)
+      : waitForExtension(provider, options.connectTimeoutMs));
+    await exerciseUnlocked("unlocked-recovery", "recovery");
+  }
   assert.deepEqual(failures, [], "Provider reported a runtime failure");
 } catch (error) {
   failure = safeError(error);
@@ -120,6 +122,7 @@ const report = {
   finishedAt: new Date().toISOString(),
   fixture: fixtureUrl ? { origin: new URL(fixtureUrl).origin } : undefined,
   transport: options.baseUrl ? "runtime-rest" : "direct-provider",
+  mode: options.baselineOnly ? "baseline-only" : "lock-transition",
   steps,
   ...(failure ? { failure } : {}),
 };
@@ -422,9 +425,15 @@ function parseArgs(args: string[]): Options {
     outputRoot: ".build/browser-extension-matrix",
     connectTimeoutMs: 90_000,
     transitionTimeoutMs: 10 * 60_000,
+    baselineOnly: false,
   };
-  for (let index = 0; index < args.length; index += 2) {
+  for (let index = 0; index < args.length;) {
     const flag = args[index];
+    if (flag === "--baseline-only") {
+      result.baselineOnly = true;
+      index += 1;
+      continue;
+    }
     const value = args[index + 1];
     if (!flag || value === undefined) throw new Error(`Missing value for ${flag ?? "argument"}`);
     if (flag === "--output") result.outputRoot = value;
@@ -432,6 +441,7 @@ function parseArgs(args: string[]): Options {
     else if (flag === "--transition-timeout") result.transitionTimeoutMs = parseDuration(value);
     else if (flag === "--base-url") result.baseUrl = normalizeBaseUrl(value);
     else throw new Error(`Unknown option: ${flag}`);
+    index += 2;
   }
   return result;
 }
@@ -451,7 +461,7 @@ function parseDuration(value: string): number {
 function renderMarkdown(reportValue: typeof report): string {
   const rows = reportValue.steps.map((step) =>
     `| ${step.passed ? "PASS" : "FAIL"} | ${step.phase} | ${step.name} | ${step.durationMs} |`).join("\n");
-  return `# Browser extension lock matrix\n\n- Result: ${reportValue.ok ? "PASS" : "FAIL"}\n- Transport: ${reportValue.transport}\n- Fixture origin: ${reportValue.fixture?.origin ?? "not started"}\n${reportValue.failure ? `- Failure: ${reportValue.failure}\n` : ""}\n| Result | Phase | Step | Duration ms |\n| --- | --- | --- | ---: |\n${rows}\n`;
+  return `# Browser extension verification\n\n- Result: ${reportValue.ok ? "PASS" : "FAIL"}\n- Mode: ${reportValue.mode}\n- Transport: ${reportValue.transport}\n- Fixture origin: ${reportValue.fixture?.origin ?? "not started"}\n${reportValue.failure ? `- Failure: ${reportValue.failure}\n` : ""}\n| Result | Phase | Step | Duration ms |\n| --- | --- | --- | ---: |\n${rows}\n`;
 }
 
 function safeError(error: unknown): string {
