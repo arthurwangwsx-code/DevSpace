@@ -3,11 +3,43 @@ import ApplicationServices
 import Foundation
 import ScreenCaptureKit
 
-let helperVersion = "0.3.0"
+let helperVersion = "0.4.0"
 let userActivityYieldSeconds = 1.0
+let snapshotMaxAgeSeconds = 30.0
+let snapshotCacheLimit = 16
 
 struct HelperError: Error {
     let message: String
+}
+
+struct SnapshotEntry {
+    let bundleId: String
+    let processId: pid_t
+    let createdAt: Date
+    let elements: [String: AXUIElement]
+}
+
+var snapshotCache: [String: SnapshotEntry] = [:]
+
+if CommandLine.arguments.contains("--permission-status") {
+    print(jsonString(desktopStatus()))
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--request-permissions") {
+    let accessibilityOptions = [
+        kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true,
+    ] as CFDictionary
+    let accessibilityTrusted = AXIsProcessTrustedWithOptions(accessibilityOptions)
+    let screenCaptureGranted = CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
+    print(jsonString([
+        "platform": "macOS",
+        "accessibilityTrusted": accessibilityTrusted,
+        "screenCaptureGranted": screenCaptureGranted,
+        "requested": true,
+        "version": helperVersion,
+    ]))
+    exit(accessibilityTrusted && screenCaptureGranted ? 0 : 2)
 }
 
 while let line = readLine() {
@@ -47,6 +79,10 @@ func toolDefinitions() -> [[String: Any]] {
     return [
         tool("desktop_status", "Read macOS automation permission state.", [:], []),
         tool("desktop_list_apps", "List running GUI applications without window titles.", [:], []),
+        tool("desktop_list_windows", "List visible windows owned by the leased application process.", [
+            "bundleId": stringSchema(),
+            "processId": integerSchema(1, Int(Int32.max)),
+        ], ["bundleId"]),
         tool("desktop_snapshot_app", "Read a bounded accessibility tree for one application.", [
             "bundleId": stringSchema(),
             "processId": integerSchema(1, Int(Int32.max)),
@@ -59,6 +95,13 @@ func toolDefinitions() -> [[String: Any]] {
             "maxWidth": integerSchema(64, 4_096),
             "maxHeight": integerSchema(64, 4_096),
         ], ["bundleId"]),
+        tool("desktop_screenshot_window", "Capture one exact visible window owned by the leased application.", [
+            "bundleId": stringSchema(),
+            "processId": integerSchema(1, Int(Int32.max)),
+            "windowId": integerSchema(1, Int(Int32.max)),
+            "maxWidth": integerSchema(64, 4_096),
+            "maxHeight": integerSchema(64, 4_096),
+        ], ["bundleId", "windowId"]),
         tool("desktop_activate_app", "Bring the leased application to the foreground.", [
             "bundleId": stringSchema(),
             "processId": integerSchema(1, Int(Int32.max)),
@@ -66,14 +109,34 @@ func toolDefinitions() -> [[String: Any]] {
         tool("desktop_click_point", "Click a point when the leased app is frontmost.", [
             "bundleId": stringSchema(), "processId": integerSchema(1, Int(Int32.max)),
             "x": numberSchema(), "y": numberSchema(),
+            "button": stringSchema(), "clickCount": integerSchema(1, 2),
         ], ["bundleId", "x", "y"]),
+        tool("desktop_click_element", "Press a versioned accessibility element from the latest application snapshot.", [
+            "bundleId": stringSchema(), "processId": integerSchema(1, Int(Int32.max)),
+            "snapshotId": stringSchema(), "elementId": stringSchema(),
+        ], ["bundleId", "snapshotId", "elementId"]),
+        tool("desktop_focus_element", "Focus a versioned accessibility element from the latest application snapshot.", [
+            "bundleId": stringSchema(), "processId": integerSchema(1, Int(Int32.max)),
+            "snapshotId": stringSchema(), "elementId": stringSchema(),
+        ], ["bundleId", "snapshotId", "elementId"]),
+        tool("desktop_scroll", "Scroll at a point inside the leased application window.", [
+            "bundleId": stringSchema(), "processId": integerSchema(1, Int(Int32.max)),
+            "x": numberSchema(), "y": numberSchema(),
+            "deltaX": numberSchema(), "deltaY": numberSchema(),
+        ], ["bundleId", "x", "y", "deltaY"]),
+        tool("desktop_drag", "Drag between two points inside the leased application's windows.", [
+            "bundleId": stringSchema(), "processId": integerSchema(1, Int(Int32.max)),
+            "fromX": numberSchema(), "fromY": numberSchema(),
+            "toX": numberSchema(), "toY": numberSchema(),
+            "durationMs": integerSchema(50, 5_000),
+        ], ["bundleId", "fromX", "fromY", "toX", "toY"]),
         tool("desktop_type_text", "Type into the leased application's focused field.", [
             "bundleId": stringSchema(), "processId": integerSchema(1, Int(Int32.max)),
             "text": stringSchema(),
         ], ["bundleId", "text"]),
         tool("desktop_press_key", "Press an allowlisted key in the frontmost leased app.", [
             "bundleId": stringSchema(), "processId": integerSchema(1, Int(Int32.max)),
-            "key": stringSchema(),
+            "key": stringSchema(), "modifiers": stringArraySchema(),
         ], ["bundleId", "key"]),
     ]
 }
@@ -93,6 +156,7 @@ func tool(_ name: String, _ description: String, _ properties: [String: Any], _ 
 
 func stringSchema() -> [String: Any] { ["type": "string", "minLength": 1] }
 func numberSchema() -> [String: Any] { ["type": "number"] }
+func stringArraySchema() -> [String: Any] { ["type": "array", "items": stringSchema(), "maxItems": 4] }
 func integerSchema(_ minimum: Int, _ maximum: Int) -> [String: Any] {
     ["type": "integer", "minimum": minimum, "maximum": maximum]
 }
@@ -103,6 +167,14 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         return desktopStatus()
     case "desktop_list_apps":
         return ["apps": listApps()]
+    case "desktop_list_windows":
+        let bundleId = try requiredString(arguments, "bundleId")
+        let app = try runningApplication(bundleId, expectedProcessId(arguments))
+        return [
+            "bundleId": bundleId,
+            "processId": app.processIdentifier,
+            "windows": windowList(app.processIdentifier),
+        ]
     case "desktop_snapshot_app":
         try requireAccessibility()
         let bundleId = try requiredString(arguments, "bundleId")
@@ -110,8 +182,32 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         let maxDepth = boundedInt(arguments["maxDepth"], 6, 1, 12)
         let maxNodes = boundedInt(arguments["maxNodes"], 500, 1, 2_000)
         var count = 0
-        let tree = snapshot(AXUIElementCreateApplication(app.processIdentifier), 0, maxDepth, maxNodes, &count)
-        return ["bundleId": bundleId, "processId": app.processIdentifier, "nodeCount": count, "tree": tree]
+        var elements: [String: AXUIElement] = [:]
+        let snapshotId = UUID().uuidString.lowercased()
+        let tree = snapshot(
+            AXUIElementCreateApplication(app.processIdentifier),
+            "0",
+            0,
+            maxDepth,
+            maxNodes,
+            &count,
+            &elements
+        )
+        pruneSnapshotCache()
+        snapshotCache[snapshotId] = SnapshotEntry(
+            bundleId: bundleId,
+            processId: app.processIdentifier,
+            createdAt: Date(),
+            elements: elements
+        )
+        return [
+            "bundleId": bundleId,
+            "processId": app.processIdentifier,
+            "snapshotId": snapshotId,
+            "snapshotExpiresInSeconds": Int(snapshotMaxAgeSeconds),
+            "nodeCount": count,
+            "tree": tree,
+        ]
     case "desktop_screenshot_app":
         try requireScreenCapture()
         let bundleId = try requiredString(arguments, "bundleId")
@@ -119,6 +215,18 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         return try screenshotApplication(
             app,
             bundleId,
+            boundedInt(arguments["maxWidth"], 1_280, 64, 4_096),
+            boundedInt(arguments["maxHeight"], 900, 64, 4_096)
+        )
+    case "desktop_screenshot_window":
+        try requireScreenCapture()
+        let bundleId = try requiredString(arguments, "bundleId")
+        let app = try runningApplication(bundleId, expectedProcessId(arguments))
+        let windowId = try requiredInt(arguments, "windowId", 1, Int(Int32.max))
+        return try screenshotWindow(
+            app,
+            bundleId,
+            CGWindowID(windowId),
             boundedInt(arguments["maxWidth"], 1_280, 64, 4_096),
             boundedInt(arguments["maxHeight"], 900, 64, 4_096)
         )
@@ -138,12 +246,109 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         try requireFrontmost(app)
         let point = CGPoint(x: try requiredNumber(arguments, "x"), y: try requiredNumber(arguments, "y"))
         try requirePointInApplicationWindow(app, point)
-        guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
-              let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
-        else { throw HelperError(message: "Could not create mouse events.") }
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
-        return ["clicked": true, "bundleId": bundleId, "processId": app.processIdentifier]
+        let button = optionalString(arguments, "button") ?? "left"
+        let clickCount = boundedInt(arguments["clickCount"], 1, 1, 2)
+        try postMouseClick(point, button, clickCount)
+        return [
+            "clicked": true,
+            "button": button,
+            "clickCount": clickCount,
+            "bundleId": bundleId,
+            "processId": app.processIdentifier,
+        ]
+    case "desktop_click_element":
+        try requireAccessibility()
+        try requireUserIdle()
+        let bundleId = try requiredString(arguments, "bundleId")
+        let app = try runningApplication(bundleId, expectedProcessId(arguments))
+        try requireFrontmost(app)
+        let (snapshotId, elementId, element) = try cachedElement(arguments, app, bundleId)
+        var actions: CFArray?
+        let actionStatus = AXUIElementCopyActionNames(element, &actions)
+        let actionNames = actionStatus == .success ? (actions as? [String] ?? []) : []
+        if actionNames.contains(kAXPressAction as String) {
+            guard AXUIElementPerformAction(element, kAXPressAction as CFString) == .success else {
+                throw HelperError(message: "The accessibility element rejected AXPress.")
+            }
+            return [
+                "clicked": true, "verified": true, "method": "AXPress",
+                "snapshotId": snapshotId, "elementId": elementId,
+                "bundleId": bundleId, "processId": app.processIdentifier,
+            ]
+        }
+        guard let position = pointAttribute(element, kAXPositionAttribute as CFString),
+              let size = sizeAttribute(element, kAXSizeAttribute as CFString) else {
+            throw HelperError(message: "The accessibility element has no actionable position.")
+        }
+        let point = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
+        try requirePointInApplicationWindow(app, point)
+        try postMouseClick(point, "left", 1)
+        return [
+            "clicked": true, "verified": false, "method": "coordinate-fallback",
+            "snapshotId": snapshotId, "elementId": elementId,
+            "bundleId": bundleId, "processId": app.processIdentifier,
+        ]
+    case "desktop_focus_element":
+        try requireAccessibility()
+        try requireUserIdle()
+        let bundleId = try requiredString(arguments, "bundleId")
+        let app = try runningApplication(bundleId, expectedProcessId(arguments))
+        try requireFrontmost(app)
+        let (snapshotId, elementId, element) = try cachedElement(arguments, app, bundleId)
+        guard AXUIElementSetAttributeValue(
+            element,
+            kAXFocusedAttribute as CFString,
+            kCFBooleanTrue
+        ) == .success else {
+            throw HelperError(message: "The accessibility element could not be focused.")
+        }
+        try requireFocusedElementOwnedByProcess(app.processIdentifier)
+        return [
+            "focused": true, "verified": true,
+            "snapshotId": snapshotId, "elementId": elementId,
+            "bundleId": bundleId, "processId": app.processIdentifier,
+        ]
+    case "desktop_scroll":
+        try requireAccessibility()
+        try requireUserIdle()
+        let bundleId = try requiredString(arguments, "bundleId")
+        let app = try runningApplication(bundleId, expectedProcessId(arguments))
+        try requireFrontmost(app)
+        let point = CGPoint(x: try requiredNumber(arguments, "x"), y: try requiredNumber(arguments, "y"))
+        try requirePointInApplicationWindow(app, point)
+        let deltaX = try boundedNumber(arguments["deltaX"] ?? 0, "deltaX", -2_000, 2_000)
+        let deltaY = try boundedNumber(arguments["deltaY"], "deltaY", -2_000, 2_000)
+        CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?
+            .post(tap: .cghidEventTap)
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 2,
+            wheel1: Int32(deltaY.rounded()),
+            wheel2: Int32(deltaX.rounded()),
+            wheel3: 0
+        ) else { throw HelperError(message: "Could not create scroll event.") }
+        event.post(tap: .cghidEventTap)
+        return [
+            "scrolled": true, "deltaX": deltaX, "deltaY": deltaY,
+            "bundleId": bundleId, "processId": app.processIdentifier,
+        ]
+    case "desktop_drag":
+        try requireAccessibility()
+        try requireUserIdle()
+        let bundleId = try requiredString(arguments, "bundleId")
+        let app = try runningApplication(bundleId, expectedProcessId(arguments))
+        try requireFrontmost(app)
+        let start = CGPoint(x: try requiredNumber(arguments, "fromX"), y: try requiredNumber(arguments, "fromY"))
+        let end = CGPoint(x: try requiredNumber(arguments, "toX"), y: try requiredNumber(arguments, "toY"))
+        try requirePointInApplicationWindow(app, start)
+        try requirePointInApplicationWindow(app, end)
+        let durationMs = boundedInt(arguments["durationMs"], 300, 50, 5_000)
+        try postDrag(start, end, durationMs)
+        return [
+            "dragged": true, "durationMs": durationMs,
+            "bundleId": bundleId, "processId": app.processIdentifier,
+        ]
     case "desktop_type_text":
         try requireAccessibility()
         try requireUserIdle()
@@ -199,6 +404,35 @@ func listApps() -> [[String: Any]] {
         .sorted { ($0["bundleId"] as? String ?? "") < ($1["bundleId"] as? String ?? "") }
 }
 
+func windowList(_ processId: pid_t) -> [[String: Any]] {
+    guard let entries = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements],
+        kCGNullWindowID
+    ) as? [[String: Any]] else { return [] }
+    return entries.compactMap { entry in
+        guard let owner = entry[kCGWindowOwnerPID as String] as? NSNumber,
+              owner.int32Value == processId,
+              let windowNumber = entry[kCGWindowNumber as String] as? NSNumber,
+              let bounds = entry[kCGWindowBounds as String] as? NSDictionary,
+              let frame = CGRect(dictionaryRepresentation: bounds),
+              frame.width > 1,
+              frame.height > 1 else { return nil }
+        let layer = (entry[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0
+        guard layer == 0 else { return nil }
+        var result: [String: Any] = [
+            "windowId": windowNumber.intValue,
+            "frame": rectDictionary(frame),
+            "layer": layer,
+        ]
+        if let name = entry[kCGWindowName as String] as? String, !name.isEmpty {
+            result["title"] = String(name.prefix(1_000))
+        }
+        return result
+    }.sorted {
+        (($0["windowId"] as? Int) ?? 0) < (($1["windowId"] as? Int) ?? 0)
+    }
+}
+
 func pressKey(_ arguments: [String: Any]) throws -> [String: Any] {
     try requireAccessibility()
     try requireUserIdle()
@@ -207,14 +441,20 @@ func pressKey(_ arguments: [String: Any]) throws -> [String: Any] {
     try requireFrontmost(app)
     try requireFocusedElementOwnedByProcess(app.processIdentifier)
     let key = try requiredString(arguments, "key")
-    let codes: [String: CGKeyCode] = [
-        "Return": 36, "Tab": 48, "Space": 49, "Delete": 51, "Escape": 53,
-        "Left": 123, "Right": 124, "Down": 125, "Up": 126,
+    guard let code = keyCode(key) else { throw HelperError(message: "Key is not allowlisted.") }
+    let modifiers = try optionalStringArray(arguments, "modifiers")
+    let flags = try modifierFlags(modifiers)
+    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true),
+          let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false)
+    else { throw HelperError(message: "Could not create keyboard events.") }
+    down.flags = flags
+    up.flags = flags
+    down.post(tap: .cghidEventTap)
+    up.post(tap: .cghidEventTap)
+    return [
+        "pressed": key, "modifiers": modifiers,
+        "bundleId": bundleId, "processId": app.processIdentifier,
     ]
-    guard let code = codes[key] else { throw HelperError(message: "Key is not allowlisted.") }
-    CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true)?.post(tap: .cghidEventTap)
-    CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false)?.post(tap: .cghidEventTap)
-    return ["pressed": key, "bundleId": bundleId, "processId": app.processIdentifier]
 }
 
 func requireAccessibility() throws {
@@ -266,6 +506,37 @@ func screenshotApplication(
     }) else {
         throw HelperError(message: "The leased application has no visible capturable window.")
     }
+    return try screenshotWindow(app, bundleId, selected, maxWidth, maxHeight)
+}
+
+func screenshotWindow(
+    _ app: NSRunningApplication,
+    _ bundleId: String,
+    _ windowId: CGWindowID,
+    _ maxWidth: Int,
+    _ maxHeight: Int
+) throws -> [String: Any] {
+    let shareable = try shareableContent()
+    guard let selected = shareable.windows.first(where: {
+        $0.windowID == windowId
+            && $0.owningApplication?.processID == app.processIdentifier
+            && $0.windowLayer == 0
+            && $0.isOnScreen
+            && $0.frame.width > 1
+            && $0.frame.height > 1
+    }) else {
+        throw HelperError(message: "The selected window is not a visible window of the leased application.")
+    }
+    return try screenshotWindow(app, bundleId, selected, maxWidth, maxHeight)
+}
+
+func screenshotWindow(
+    _ app: NSRunningApplication,
+    _ bundleId: String,
+    _ selected: SCWindow,
+    _ maxWidth: Int,
+    _ maxHeight: Int
+) throws -> [String: Any] {
     let scale = min(
         1,
         min(Double(maxWidth) / selected.frame.width, Double(maxHeight) / selected.frame.height)
@@ -291,6 +562,8 @@ func screenshotApplication(
         "mimeType": "image/png",
         "width": width,
         "height": height,
+        "sourceFrame": rectDictionary(selected.frame),
+        "scale": scale,
         "data": png.base64EncodedString(),
     ]
 }
@@ -399,18 +672,165 @@ func requireFocusedElementOwnedByProcess(_ processId: pid_t) throws {
     }
 }
 
+func cachedElement(
+    _ arguments: [String: Any],
+    _ app: NSRunningApplication,
+    _ bundleId: String
+) throws -> (String, String, AXUIElement) {
+    pruneSnapshotCache()
+    let snapshotId = try requiredString(arguments, "snapshotId")
+    let elementId = try requiredString(arguments, "elementId")
+    guard let snapshot = snapshotCache[snapshotId] else {
+        throw HelperError(message: "The accessibility snapshot expired or is unknown; take a new snapshot.")
+    }
+    guard snapshot.bundleId == bundleId, snapshot.processId == app.processIdentifier else {
+        throw HelperError(message: "The accessibility snapshot does not belong to the leased application process.")
+    }
+    guard Date().timeIntervalSince(snapshot.createdAt) <= snapshotMaxAgeSeconds else {
+        snapshotCache.removeValue(forKey: snapshotId)
+        throw HelperError(message: "The accessibility snapshot expired; take a new snapshot.")
+    }
+    guard let element = snapshot.elements[elementId] else {
+        throw HelperError(message: "The accessibility element is not part of this snapshot.")
+    }
+    var elementProcessId: pid_t = 0
+    guard AXUIElementGetPid(element, &elementProcessId) == .success,
+          elementProcessId == app.processIdentifier else {
+        throw HelperError(message: "The accessibility element is stale; take a new snapshot.")
+    }
+    return (snapshotId, elementId, element)
+}
+
+func pruneSnapshotCache() {
+    let now = Date()
+    snapshotCache = snapshotCache.filter {
+        now.timeIntervalSince($0.value.createdAt) <= snapshotMaxAgeSeconds
+    }
+    if snapshotCache.count >= snapshotCacheLimit {
+        let excess = snapshotCache.count - snapshotCacheLimit + 1
+        let oldest = snapshotCache.sorted { $0.value.createdAt < $1.value.createdAt }.prefix(excess)
+        for entry in oldest { snapshotCache.removeValue(forKey: entry.key) }
+    }
+}
+
+func postMouseClick(_ point: CGPoint, _ buttonName: String, _ clickCount: Int) throws {
+    let button: CGMouseButton
+    let downType: CGEventType
+    let upType: CGEventType
+    switch buttonName.lowercased() {
+    case "left":
+        button = .left
+        downType = .leftMouseDown
+        upType = .leftMouseUp
+    case "right":
+        button = .right
+        downType = .rightMouseDown
+        upType = .rightMouseUp
+    default:
+        throw HelperError(message: "button must be left or right.")
+    }
+    for index in 1...clickCount {
+        guard let down = CGEvent(
+            mouseEventSource: nil,
+            mouseType: downType,
+            mouseCursorPosition: point,
+            mouseButton: button
+        ), let up = CGEvent(
+            mouseEventSource: nil,
+            mouseType: upType,
+            mouseCursorPosition: point,
+            mouseButton: button
+        ) else { throw HelperError(message: "Could not create mouse events.") }
+        down.setIntegerValueField(.mouseEventClickState, value: Int64(index))
+        up.setIntegerValueField(.mouseEventClickState, value: Int64(index))
+        down.post(tap: .cghidEventTap)
+        up.post(tap: .cghidEventTap)
+        if clickCount > 1 && index < clickCount { Thread.sleep(forTimeInterval: 0.08) }
+    }
+}
+
+func postDrag(_ start: CGPoint, _ end: CGPoint, _ durationMs: Int) throws {
+    guard let down = CGEvent(
+        mouseEventSource: nil,
+        mouseType: .leftMouseDown,
+        mouseCursorPosition: start,
+        mouseButton: .left
+    ) else { throw HelperError(message: "Could not create drag start event.") }
+    let steps = max(2, min(30, durationMs / 25))
+    let stepDelay = Double(durationMs) / Double(steps) / 1_000.0
+    var dragEvents: [CGEvent] = []
+    for step in 1...steps {
+        let progress = CGFloat(step) / CGFloat(steps)
+        let point = CGPoint(
+            x: start.x + (end.x - start.x) * progress,
+            y: start.y + (end.y - start.y) * progress
+        )
+        guard let drag = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .leftMouseDragged,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        ) else { throw HelperError(message: "Could not create drag event.") }
+        dragEvents.append(drag)
+    }
+    guard let up = CGEvent(
+        mouseEventSource: nil,
+        mouseType: .leftMouseUp,
+        mouseCursorPosition: end,
+        mouseButton: .left
+    ) else { throw HelperError(message: "Could not create drag end event.") }
+    down.post(tap: .cghidEventTap)
+    for drag in dragEvents {
+        drag.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: stepDelay)
+    }
+    up.post(tap: .cghidEventTap)
+}
+
+func keyCode(_ key: String) -> CGKeyCode? {
+    let common: [String: CGKeyCode] = [
+        "Return": 36, "Tab": 48, "Space": 49, "Delete": 51, "Escape": 53,
+        "Left": 123, "Right": 124, "Down": 125, "Up": 126,
+        "Home": 115, "End": 119, "PageUp": 116, "PageDown": 121,
+        "A": 0, "S": 1, "D": 2, "F": 3, "H": 4, "G": 5, "Z": 6, "X": 7,
+        "C": 8, "V": 9, "B": 11, "Q": 12, "W": 13, "E": 14, "R": 15,
+        "Y": 16, "T": 17, "O": 31, "U": 32, "I": 34, "P": 35, "L": 37,
+        "J": 38, "K": 40, "N": 45, "M": 46,
+        "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23,
+        "9": 25, "7": 26, "8": 28, "0": 29,
+    ]
+    return common[key.count == 1 ? key.uppercased() : key]
+}
+
+func modifierFlags(_ modifiers: [String]) throws -> CGEventFlags {
+    var flags: CGEventFlags = []
+    for modifier in modifiers {
+        switch modifier.lowercased() {
+        case "command", "cmd": flags.insert(.maskCommand)
+        case "shift": flags.insert(.maskShift)
+        case "option", "alt": flags.insert(.maskAlternate)
+        case "control", "ctrl": flags.insert(.maskControl)
+        default: throw HelperError(message: "Unsupported modifier: \(modifier).")
+        }
+    }
+    return flags
+}
+
 func snapshot(
     _ element: AXUIElement,
+    _ elementId: String,
     _ depth: Int,
     _ maxDepth: Int,
     _ maxNodes: Int,
-    _ count: inout Int
+    _ count: inout Int,
+    _ elements: inout [String: AXUIElement]
 ) -> [String: Any] {
     if count >= maxNodes { return ["truncated": true] }
     count += 1
+    elements[elementId] = element
     let role = attributeString(element, kAXRoleAttribute as CFString) ?? "unknown"
     let subrole = attributeString(element, kAXSubroleAttribute as CFString)
-    var node: [String: Any] = ["role": role]
+    var node: [String: Any] = ["role": role, "elementId": elementId]
     if let subrole { node["subrole"] = subrole }
     if let title = attributeString(element, kAXTitleAttribute as CFString), !title.isEmpty {
         node["title"] = title
@@ -431,8 +851,8 @@ func snapshot(
         node["size"] = ["width": size.width, "height": size.height]
     }
     if depth < maxDepth && count < maxNodes, let children = childrenAttribute(element) {
-        node["children"] = children.prefix(maxNodes - count).map {
-            snapshot($0, depth + 1, maxDepth, maxNodes, &count)
+        node["children"] = children.prefix(maxNodes - count).enumerated().map { index, child in
+            snapshot(child, "\(elementId).\(index)", depth + 1, maxDepth, maxNodes, &count, &elements)
         }
     } else if depth >= maxDepth {
         node["truncated"] = true
@@ -481,6 +901,50 @@ func requiredNumber(_ arguments: [String: Any], _ name: String) throws -> Double
         throw HelperError(message: "\(name) must be a number.")
     }
     return value.doubleValue
+}
+
+func optionalString(_ arguments: [String: Any], _ name: String) -> String? {
+    guard let value = arguments[name] else { return nil }
+    return value as? String
+}
+
+func optionalStringArray(_ arguments: [String: Any], _ name: String) throws -> [String] {
+    guard let value = arguments[name] else { return [] }
+    guard let items = value as? [String], items.count <= 4 else {
+        throw HelperError(message: "\(name) must be an array of at most four strings.")
+    }
+    return items
+}
+
+func requiredInt(
+    _ arguments: [String: Any],
+    _ name: String,
+    _ minimum: Int,
+    _ maximum: Int
+) throws -> Int {
+    guard let value = arguments[name] as? NSNumber else {
+        throw HelperError(message: "\(name) must be an integer.")
+    }
+    let number = value.intValue
+    guard value.doubleValue == Double(number), number >= minimum, number <= maximum else {
+        throw HelperError(message: "\(name) must be an integer from \(minimum) to \(maximum).")
+    }
+    return number
+}
+
+func boundedNumber(_ value: Any?, _ name: String, _ minimum: Double, _ maximum: Double) throws -> Double {
+    guard let number = value as? NSNumber else {
+        throw HelperError(message: "\(name) must be a number.")
+    }
+    let result = number.doubleValue
+    guard result.isFinite, result >= minimum, result <= maximum else {
+        throw HelperError(message: "\(name) must be from \(minimum) to \(maximum).")
+    }
+    return result
+}
+
+func rectDictionary(_ rect: CGRect) -> [String: Double] {
+    ["x": rect.origin.x, "y": rect.origin.y, "width": rect.width, "height": rect.height]
 }
 
 func boundedInt(_ value: Any?, _ fallback: Int, _ minimum: Int, _ maximum: Int) -> Int {

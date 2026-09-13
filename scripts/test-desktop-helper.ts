@@ -16,10 +16,16 @@ try {
   assert.deepEqual(tools.tools.map(({ name }) => name), [
     "desktop_status",
     "desktop_list_apps",
+    "desktop_list_windows",
     "desktop_snapshot_app",
     "desktop_screenshot_app",
+    "desktop_screenshot_window",
     "desktop_activate_app",
     "desktop_click_point",
+    "desktop_click_element",
+    "desktop_focus_element",
+    "desktop_scroll",
+    "desktop_drag",
     "desktop_type_text",
     "desktop_press_key",
   ]);
@@ -80,6 +86,19 @@ async function runFixtureCanary(client: Client, appPath: string): Promise<Record
     const input = findAxNode(beforeTree, (node) => node.value === "fixture-start");
     assert.ok(button, "fixture button is missing from the AX snapshot");
     assert.ok(input, "fixture input is missing from the AX snapshot");
+    assert.equal(typeof button.elementId, "string");
+    assert.equal(typeof input.elementId, "string");
+    const snapshotId = (beforeTree as { snapshotId?: unknown }).snapshotId;
+    assert.equal(typeof snapshotId, "string");
+    const windows = await client.callTool({
+      name: "desktop_list_windows",
+      arguments: { bundleId: "com.devspace.desktop-fixture", processId },
+    });
+    assert.equal(windows.isError, undefined);
+    const visibleWindows = (windows.structuredContent as { windows?: Array<Record<string, unknown>> }).windows ?? [];
+    assert.ok(visibleWindows.length > 0, "fixture has no visible desktop windows");
+    const windowId = visibleWindows[0]?.windowId;
+    assert.equal(typeof windowId, "number");
     const screenshot = await client.callTool({
       name: "desktop_screenshot_app",
       arguments: { bundleId: "com.devspace.desktop-fixture", maxWidth: 800, maxHeight: 600 },
@@ -90,15 +109,29 @@ async function runFixtureCanary(client: Client, appPath: string): Promise<Record
     assert.equal(typeof screenshotValue.width, "number");
     assert.equal(typeof screenshotValue.height, "number");
     assert.equal(typeof screenshotValue.data, "string");
+    assert.equal(typeof screenshotValue.sourceFrame, "object");
+    assert.equal(typeof screenshotValue.scale, "number");
     assert.deepEqual(Buffer.from(screenshotValue.data as string, "base64").subarray(0, 8),
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const exactScreenshot = await client.callTool({
+      name: "desktop_screenshot_window",
+      arguments: { bundleId: "com.devspace.desktop-fixture", processId, windowId, maxWidth: 800, maxHeight: 600 },
+    });
+    assert.equal(exactScreenshot.isError, undefined);
+    assert.equal((exactScreenshot.structuredContent as Record<string, unknown>).windowId, windowId);
 
     await waitForUserYield();
     const clicked = await client.callTool({
-      name: "desktop_click_point",
-      arguments: { bundleId: "com.devspace.desktop-fixture", ...center(button) },
+      name: "desktop_click_element",
+      arguments: {
+        bundleId: "com.devspace.desktop-fixture",
+        processId,
+        snapshotId,
+        elementId: button.elementId,
+      },
     });
     assert.equal(clicked.isError, undefined);
+    assert.equal((clicked.structuredContent as Record<string, unknown>).method, "AXPress");
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
     const afterClick = await client.callTool({
       name: "desktop_snapshot_app",
@@ -115,10 +148,21 @@ async function runFixtureCanary(client: Client, appPath: string): Promise<Record
 
     await waitForUserYield();
     const focused = await client.callTool({
-      name: "desktop_click_point",
-      arguments: { bundleId: "com.devspace.desktop-fixture", ...center(input) },
+      name: "desktop_focus_element",
+      arguments: {
+        bundleId: "com.devspace.desktop-fixture",
+        processId,
+        snapshotId,
+        elementId: input.elementId,
+      },
     });
     assert.equal(focused.isError, undefined);
+    await waitForUserYield();
+    const selectAll = await client.callTool({
+      name: "desktop_press_key",
+      arguments: { bundleId: "com.devspace.desktop-fixture", key: "A", modifiers: ["Command"] },
+    });
+    assert.equal(selectAll.isError, undefined);
     await waitForUserYield();
     const typed = await client.callTool({
       name: "desktop_type_text",
@@ -134,9 +178,29 @@ async function runFixtureCanary(client: Client, appPath: string): Promise<Record
     await waitForUserYield();
     const rejectedKey = await client.callTool({
       name: "desktop_press_key",
-      arguments: { bundleId: "com.devspace.desktop-fixture", key: "A" },
+      arguments: { bundleId: "com.devspace.desktop-fixture", key: "F20" },
     });
     assert.equal(rejectedKey.isError, true);
+    await waitForUserYield();
+    const inputCenter = center(input);
+    const scrolled = await client.callTool({
+      name: "desktop_scroll",
+      arguments: { bundleId: "com.devspace.desktop-fixture", ...inputCenter, deltaY: -20 },
+    });
+    assert.equal(scrolled.isError, undefined);
+    await waitForUserYield();
+    const dragged = await client.callTool({
+      name: "desktop_drag",
+      arguments: {
+        bundleId: "com.devspace.desktop-fixture",
+        fromX: inputCenter.x,
+        fromY: inputCenter.y,
+        toX: inputCenter.x + 12,
+        toY: inputCenter.y,
+        durationMs: 80,
+      },
+    });
+    assert.equal(dragged.isError, undefined);
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
     const after = await client.callTool({
       name: "desktop_snapshot_app",
@@ -150,6 +214,7 @@ async function runFixtureCanary(client: Client, appPath: string): Promise<Record
 }
 
 type AxNode = {
+  elementId?: unknown;
   title?: unknown;
   value?: unknown;
   position?: { x?: unknown; y?: unknown };

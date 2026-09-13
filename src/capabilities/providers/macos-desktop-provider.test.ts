@@ -8,12 +8,14 @@ import { createMacosDesktopManifest, MacosDesktopProvider } from "./macos-deskto
 assert.throws(() => createMacosDesktopManifest(process.execPath, "linux"), /requires macOS/);
 const generated = createMacosDesktopManifest(process.execPath, "darwin");
 assert.equal(generated.metadata.id, "desktop.macos.accessibility");
-assert.equal(generated.spec.tools.length, 8);
-assert.equal(generated.spec.tools[2]!.requiresLease, true);
-assert.equal(generated.spec.tools[2]!.version, "2.0.0");
-assert.equal(generated.spec.tools[3]!.effects.readOnly, true);
-assert.equal(generated.spec.tools[3]!.permissions[0]!.id, "macos.screen-capture");
-assert.equal(generated.spec.tools[4]!.effects.readOnly, false);
+assert.equal(generated.spec.tools.length, 14);
+const generatedById = new Map(generated.spec.tools.map((tool) => [tool.capabilityId, tool]));
+assert.equal(generatedById.get("desktop.macos.list_windows")!.requiresLease, true);
+assert.equal(generatedById.get("desktop.macos.list_windows")!.permissions.length, 0);
+assert.equal(generatedById.get("desktop.macos.snapshot_app")!.version, "2.0.0");
+assert.equal(generatedById.get("desktop.macos.screenshot_window")!.effects.readOnly, true);
+assert.equal(generatedById.get("desktop.macos.screenshot_window")!.permissions[0]!.id, "macos.screen-capture");
+assert.equal(generatedById.get("desktop.macos.click_element")!.effects.readOnly, false);
 
 const fixture = fileURLToPath(new URL("../../../test-fixtures/fake-desktop-helper-mcp.ts", import.meta.url));
 const manifest = parseMcpProviderManifest({
@@ -40,7 +42,24 @@ try {
     binding: snapshot.binding,
     arguments: { maxDepth: 2 },
     lease,
-  }, signal()), { tool: "snapshot", bundleId: "com.example.fixture", processId: 4242 });
+  }, signal()), {
+    tool: "snapshot",
+    bundleId: "com.example.fixture",
+    processId: 4242,
+    snapshotId: "fixture-snapshot",
+  });
+  const listWindows = discovered.find(({ descriptor }) => descriptor.id === "desktop.macos.list_windows")!;
+  assert.deepEqual(await provider.invoke({
+    capabilityId: listWindows.descriptor.id,
+    descriptor: listWindows.descriptor,
+    binding: listWindows.binding,
+    arguments: {},
+    lease,
+  }, signal()), {
+    bundleId: "com.example.fixture",
+    processId: 4242,
+    windows: [{ windowId: 77, frame: { x: 10, y: 20, width: 400, height: 300 } }],
+  });
   const screenshot = discovered.find(({ descriptor }) => descriptor.id === "desktop.macos.screenshot_app")!;
   assert.deepEqual(await provider.invoke({
     capabilityId: screenshot.descriptor.id,

@@ -128,10 +128,16 @@ export function createMacosDesktopManifest(
       tools: [
         mapping("desktop_status", "desktop.macos.status", "读取桌面 Helper 权限状态", false, READ_ONLY, STATUS_REQUIREMENTS),
         mapping("desktop_list_apps", "desktop.macos.list_apps", "列出正在运行的 GUI 应用", false, READ_ONLY, LOCKED_REQUIREMENTS),
+        mapping("desktop_list_windows", "desktop.macos.list_windows", "列出租约应用的可见窗口", true, READ_ONLY, LOCKED_REQUIREMENTS),
         mapping("desktop_snapshot_app", "desktop.macos.snapshot_app", "读取应用可访问性树", true, READ_ONLY, LOCKED_REQUIREMENTS),
         mapping("desktop_screenshot_app", "desktop.macos.screenshot_app", "截取应用的可见窗口", true, READ_ONLY, LOCKED_REQUIREMENTS),
+        mapping("desktop_screenshot_window", "desktop.macos.screenshot_window", "截取租约应用的指定窗口", true, READ_ONLY, LOCKED_REQUIREMENTS),
         mapping("desktop_activate_app", "desktop.macos.activate_app", "激活应用窗口", true, MUTATION, LOCKED_REQUIREMENTS),
         mapping("desktop_click_point", "desktop.macos.click_point", "点击应用内坐标", true, MUTATION, LOCKED_REQUIREMENTS),
+        mapping("desktop_click_element", "desktop.macos.click_element", "点击版本化可访问性元素", true, MUTATION, LOCKED_REQUIREMENTS),
+        mapping("desktop_focus_element", "desktop.macos.focus_element", "聚焦版本化可访问性元素", true, MUTATION, LOCKED_REQUIREMENTS),
+        mapping("desktop_scroll", "desktop.macos.scroll", "在租约应用内滚动", true, MUTATION, LOCKED_REQUIREMENTS),
+        mapping("desktop_drag", "desktop.macos.drag", "在租约应用内拖拽", true, MUTATION, LOCKED_REQUIREMENTS),
         mapping("desktop_type_text", "desktop.macos.type_text", "向应用安全焦点输入文本", true, MUTATION, LOCKED_REQUIREMENTS),
         mapping("desktop_press_key", "desktop.macos.press_key", "向应用发送允许的按键", true, MUTATION, LOCKED_REQUIREMENTS),
       ],
@@ -165,8 +171,8 @@ function mapping(
 }
 
 function permissionsFor(tool: string) {
-  if (tool === "desktop_status" || tool === "desktop_list_apps") return [];
-  if (tool === "desktop_screenshot_app") return [{
+  if (tool === "desktop_status" || tool === "desktop_list_apps" || tool === "desktop_list_windows") return [];
+  if (tool === "desktop_screenshot_app" || tool === "desktop_screenshot_window") return [{
     id: "macos.screen-capture",
     required: true,
     description: "The stable DevSpace desktop helper must be trusted in macOS Screen Recording settings.",

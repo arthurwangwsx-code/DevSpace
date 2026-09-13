@@ -11,6 +11,7 @@ DEVSPACE_DESKTOP_SIGNING_IDENTITY='<codesign identity>' \
   npm run build:desktop-host
 sh scripts/install-desktop-host.sh
 node scripts/doctor-desktop-host.mjs "$HOME/Applications/DevSpaceDesktopHost.app"
+node scripts/doctor-desktop-host.mjs "$HOME/Applications/DevSpaceDesktopHost.app" --request-permissions
 devspace providers add-desktop \
   --command "$HOME/Applications/DevSpaceDesktopHost.app/Contents/MacOS/devspace-desktop-helper"
 ```
@@ -32,7 +33,10 @@ App Bundle with the fixed identifier `com.devspace.desktop-host`. Set
 and granting TCC permissions; the default ad-hoc build is only for deterministic packaging tests. The
 installer uses the fixed current-user path, verifies the signature, and moves an existing installation into
 a timestamped backup instead of deleting it. `doctor-desktop-host.mjs` reports whether the installed bundle
-has a valid, non-ad-hoc identity. Compatible upgrades must use the same team and identifier.
+has a valid, non-ad-hoc identity and silently probes the two TCC permissions. `--request-permissions` is the
+only project-provided path that intentionally asks macOS to present the Accessibility and Screen Recording
+authorization UI. Normal service start, Provider restart and health checks never request permissions.
+Compatible upgrades must use the same team and identifier.
 
 After updating the installed executable path, use `devspace.providers.control` through the fixed Capability
 MCP or the REST admin action to reload the Provider without restarting DevSpace. Runtime permission truth is
@@ -47,12 +51,19 @@ alive by the same supervisor used for Chrome and external MCP servers.
 
 - `desktop.macos.status` reads Accessibility and Screen Capture preflight state.
 - `desktop.macos.list_apps` lists regular running apps without window titles.
-- `desktop.macos.snapshot_app` returns a depth/node/field-length bounded AX tree.
-- `desktop.macos.screenshot_app` captures only the leased app's largest visible window, scales it to bounded dimensions, and returns PNG data.
+- `desktop.macos.list_windows` lists visible layer-zero windows for the exact leased process.
+- `desktop.macos.snapshot_app` returns a depth/node/field-length bounded AX tree with a short-lived `snapshotId`
+  and per-node `elementId`. Handles are process-bound, kept for at most 30 seconds and never persisted.
+- `desktop.macos.screenshot_app` captures only the leased app's largest visible window, scales it to bounded dimensions, and returns PNG data plus source-frame/scale metadata.
+- `desktop.macos.screenshot_window` captures an exact visible `windowId` owned by the leased process.
 - `desktop.macos.activate_app` brings only the leased bundle to the foreground.
-- `desktop.macos.click_point` clicks only while the leased bundle is frontmost.
+- `desktop.macos.click_point` clicks only while the leased process is frontmost and supports left/right and single/double click.
+- `desktop.macos.click_element` prefers the public AXPress action for a current snapshot element and uses an in-window coordinate fallback only when required.
+- `desktop.macos.focus_element` focuses a current snapshot element and verifies the resulting focus belongs to the leased process.
+- `desktop.macos.scroll` posts bounded pixel scrolling only at a point inside a leased application window.
+- `desktop.macos.drag` performs a bounded left-button drag whose start and end are both inside leased application windows.
 - `desktop.macos.type_text` types only into a focused element owned by the leased app.
-- `desktop.macos.press_key` accepts only Return, Tab, Space, Delete, Escape and arrow keys.
+- `desktop.macos.press_key` accepts a bounded keyboard allowlist plus Command/Shift/Option/Control modifiers.
 
 All operations except status and app listing require an `app_window` lease. The specialized Provider binds
 the lease to both the app's `bundleId` and exact process ID, revalidates the process before every call, and
@@ -63,6 +74,31 @@ identity are rejected. In the default delegated-
 approval mode, mutation and secure-field input do not require a DevSpace Grant; the upper Agent approves
 them. The Helper yields mutations while recent hardware input indicates that the local user is active, and
 the Router rejects all desktop operations while the macOS session is locked.
+
+Snapshot element handles are intentionally ephemeral. An expired snapshot, a restarted app or an element
+owned by a different PID is rejected; clients take a fresh snapshot rather than replaying a stale semantic
+action. This gives computer-use clients a semantic-first path while preserving bounded coordinate actions as
+a fallback.
+
+## DevSpace-owned login service
+
+The repository includes its own macOS LaunchAgent installer so production startup does not need to be
+implemented by a sibling application repository:
+
+```bash
+npm run install:macos-service -- --label com.devspace.$(id -u).7676
+npm run doctor:macos-service -- --label com.devspace.$(id -u).7676
+```
+
+The installer copies the watchdog into `~/Library/Application Support/DevSpace/runtime`, writes a
+`RunAtLoad` + `KeepAlive` LaunchAgent with `ProcessType=Standard`, keeps the bounded production resource
+profile, and records `DEVSPACE_RELEASE_ID` / `DEVSPACE_SOURCE_COMMIT`. It does not place owner tokens,
+tunnel keys or other secrets in the plist. Pass `--activate` only when an immediate service cutover is
+intended; without it the launch configuration is safely staged for the next launch/restart.
+
+`doctor:macos-service` checks launchd state, the DevSpace-owned supervisor path, `/healthz`, and whether the
+running release matches the plist release. A release mismatch is reported as `restartRequired` rather than
+silently claiming newly installed code is already running.
 
 ## Permissions and boundaries
 

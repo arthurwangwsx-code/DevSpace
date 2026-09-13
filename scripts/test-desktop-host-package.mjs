@@ -43,7 +43,7 @@ try {
     }
     const status = await client.callTool({ name: "desktop_status", arguments: {} });
     assert.equal(status.isError, undefined);
-    assert.equal(status.structuredContent?.version, "0.3.0");
+    assert.equal(status.structuredContent?.version, "0.4.0");
   } finally {
     await client.close().catch(() => {});
     await transport.close().catch(() => {});

@@ -17,8 +17,10 @@ const FIXED_TOOLS = [
   "capability_invoke", "capability_status", "capability_cancel", "capability_close",
 ].sort();
 const DESKTOP_CAPABILITIES = [
-  "desktop.macos.activate_app", "desktop.macos.click_point", "desktop.macos.list_apps",
-  "desktop.macos.press_key", "desktop.macos.screenshot_app", "desktop.macos.snapshot_app",
+  "desktop.macos.activate_app", "desktop.macos.click_element", "desktop.macos.click_point",
+  "desktop.macos.drag", "desktop.macos.focus_element", "desktop.macos.list_apps",
+  "desktop.macos.list_windows", "desktop.macos.press_key", "desktop.macos.screenshot_app",
+  "desktop.macos.screenshot_window", "desktop.macos.scroll", "desktop.macos.snapshot_app",
   "desktop.macos.status", "desktop.macos.type_text",
 ].sort();
 

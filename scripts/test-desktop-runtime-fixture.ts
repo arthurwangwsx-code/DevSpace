@@ -26,7 +26,7 @@ try {
     const status = object(await invoke("desktop.macos.status", {}));
     assert.equal(status.accessibilityTrusted, true, "signed production Host lacks Accessibility permission");
     assert.equal(status.screenCaptureGranted, true, "signed production Host lacks Screen Recording permission");
-    assert.equal(status.version, "0.3.0");
+    assert.equal(status.version, "0.4.0");
     return { processId: status.processId, version: status.version };
   });
 
@@ -46,6 +46,19 @@ try {
   const input = findAxNode(before, (node) => node.value === "fixture-start");
   assert.ok(button, "fixture button is missing from the production AX snapshot");
   assert.ok(input, "fixture input is missing from the production AX snapshot");
+  assert.equal(typeof button.elementId, "string");
+  assert.equal(typeof input.elementId, "string");
+  const snapshotId = object(before).snapshotId;
+  assert.equal(typeof snapshotId, "string");
+
+  const windows = await timed("list_fixture_windows", async () => {
+    const listed = object(await invoke("desktop.macos.list_windows", {}, firstLease));
+    const visible = Array.isArray(listed.windows) ? listed.windows.map(object) : [];
+    assert.ok(visible.length > 0, "production fixture has no visible windows");
+    assert.equal(typeof visible[0]!.windowId, "number");
+    return { windowId: visible[0]!.windowId };
+  });
+  const windowId = windows.windowId as number;
 
   await timed("screenshot_fixture", async () => {
     const screenshot = object(await invoke("desktop.macos.screenshot_app", {
@@ -54,23 +67,60 @@ try {
     }, firstLease));
     assert.equal(screenshot.mimeType, "image/png");
     assert.equal(typeof screenshot.data, "string");
+    assert.equal(typeof screenshot.sourceFrame, "object");
+    assert.equal(typeof screenshot.scale, "number");
     assert.deepEqual(Buffer.from(screenshot.data as string, "base64").subarray(0, 8),
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     return { width: screenshot.width, height: screenshot.height };
   });
+  await timed("screenshot_exact_window", async () => {
+    const screenshot = object(await invoke("desktop.macos.screenshot_window", {
+      windowId,
+      maxWidth: 800,
+      maxHeight: 600,
+    }, firstLease));
+    assert.equal(screenshot.windowId, windowId);
+    assert.equal(screenshot.mimeType, "image/png");
+    return { width: screenshot.width, height: screenshot.height, windowId };
+  });
 
   await waitForUserYield();
-  await timed("click_fixture_button", () => invoke("desktop.macos.click_point", center(button), firstLease));
+  await timed("click_fixture_button_semantically", () => invoke("desktop.macos.click_element", {
+    snapshotId,
+    elementId: button.elementId,
+  }, firstLease));
   await timed("verify_click", () => waitForSnapshot(firstLease, "Clicked 1"));
 
   await waitForUserYield();
-  await timed("focus_fixture_input", () => invoke("desktop.macos.click_point", center(input), firstLease));
+  await timed("focus_fixture_input_semantically", () => invoke("desktop.macos.focus_element", {
+    snapshotId,
+    elementId: input.elementId,
+  }, firstLease));
+  await waitForUserYield();
+  await timed("select_fixture_input_with_modifier_key", () => invoke("desktop.macos.press_key", {
+    key: "A",
+    modifiers: ["Command"],
+  }, firstLease));
   await waitForUserYield();
   await timed("type_fixture_text", () => invoke("desktop.macos.type_text", {
     text: "typed-through-production-runtime",
   }, firstLease));
   await waitForUserYield();
   await timed("press_allowed_key", () => invoke("desktop.macos.press_key", { key: "Left" }, firstLease));
+  await waitForUserYield();
+  const inputCenter = center(input);
+  await timed("scroll_fixture", () => invoke("desktop.macos.scroll", {
+    ...inputCenter,
+    deltaY: -20,
+  }, firstLease));
+  await waitForUserYield();
+  await timed("drag_fixture", () => invoke("desktop.macos.drag", {
+    fromX: inputCenter.x,
+    fromY: inputCenter.y,
+    toX: inputCenter.x + 12,
+    toY: inputCenter.y,
+    durationMs: 80,
+  }, firstLease));
   await timed("verify_text", () => waitForSnapshot(firstLease, "typed-through-production-runtime"));
 
   await timed("terminate_fixture_generation_1", () => terminateProcess(firstPid));
@@ -117,6 +167,7 @@ interface Step {
 }
 
 type AxNode = {
+  elementId?: unknown;
   title?: unknown;
   value?: unknown;
   position?: { x?: unknown; y?: unknown };
