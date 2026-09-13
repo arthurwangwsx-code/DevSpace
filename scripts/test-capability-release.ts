@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { SystemSessionStateProbe } from "../src/capabilities/session-state.js";
 
-type Lane = "core" | "locked" | "unlocked" | "browser-transition";
+type Lane = "core" | "locked" | "unlocked" | "browser-transition" | "service-transition";
 type Gate = { name: string; command: string; args: string[]; state?: "locked" | "unlocked" };
 type GateResult = {
   name: string;
@@ -156,6 +156,16 @@ function allGates(): Record<Lane, Gate[]> {
       ]),
       state: "unlocked",
     }],
+    "service-transition": [
+      productionService,
+      productionWorkspaceMcp,
+      npmGate("production_service_self_activation", [
+        "run", "test:macos-service-self-activation", "--",
+        "--mcp-url", new URL("/mcp", options.baseUrl).toString(),
+        "--health-url", new URL("/healthz", options.baseUrl).toString(),
+        "--output", join(childOutputRoot, "macos-service-self-activation"),
+      ]),
+    ],
   };
 }
 
@@ -248,7 +258,11 @@ function parseOptions(args: string[]) {
     const value = args[++index];
     if (!value) throw new Error(`missing value for ${key}`);
     if (key === "--lane") {
-      assert.equal(["core", "locked", "unlocked", "browser-transition"].includes(value), true, `unknown lane: ${value}`);
+      assert.equal(
+        ["core", "locked", "unlocked", "browser-transition", "service-transition"].includes(value),
+        true,
+        `unknown lane: ${value}`,
+      );
       lane = value as Lane;
     } else if (key === "--output") outputRoot = resolve(value);
     else if (key === "--base-url") baseUrl = normalizeBaseUrl(value);

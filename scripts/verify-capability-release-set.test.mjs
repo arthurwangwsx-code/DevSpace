@@ -25,6 +25,7 @@ try {
       "production_desktop_fixture", "production_desktop_reload",
     ],
     "browser-transition": ["production_service_identity", "production_workspace_mcp_canary", "production_browser_lock_matrix"],
+    "service-transition": ["production_service_identity", "production_workspace_mcp_canary", "production_service_self_activation"],
   };
 
   for (const [lane, required] of Object.entries(expected)) {
@@ -81,6 +82,7 @@ try {
     "--locked", paths.locked,
     "--unlocked", paths.unlocked,
     "--browser-transition", paths["browser-transition"],
+    "--service-transition", paths["service-transition"],
     "--soak", soak,
     "--output", output,
   ], { cwd: root, encoding: "utf8" });

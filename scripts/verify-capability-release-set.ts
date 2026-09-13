@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-type Lane = "locked" | "unlocked" | "browser-transition";
+type Lane = "locked" | "unlocked" | "browser-transition" | "service-transition";
 type Check = { name: string; passed: boolean; actual: unknown; expected: string };
 type Component = { name: string; path: string; checks: Check[]; passed: boolean };
 
@@ -40,6 +40,11 @@ const EXPECTED_LANE_GATES: Record<Lane, string[]> = {
     "production_workspace_mcp_canary",
     "production_browser_lock_matrix",
   ],
+  "service-transition": [
+    "production_service_identity",
+    "production_workspace_mcp_canary",
+    "production_service_self_activation",
+  ],
 };
 
 const execFileAsync = promisify(execFile);
@@ -52,6 +57,7 @@ const components = await Promise.all([
   validateLane("locked", options.locked),
   validateLane("unlocked", options.unlocked),
   validateLane("browser-transition", options.browserTransition),
+  validateLane("service-transition", options.serviceTransition),
   validateSoak(options.soak, options.acceptLegacySoak),
 ]);
 const source = await sourceMetadata();
@@ -193,6 +199,7 @@ function parseOptions(args: string[]) {
   let locked = "";
   let unlocked = "";
   let browserTransition = "";
+  let serviceTransition = "";
   let soak = "";
   let outputRoot = resolve(".build/capability-release-set");
   let acceptLegacySoak = false;
@@ -204,14 +211,15 @@ function parseOptions(args: string[]) {
     if (key === "--locked") locked = value;
     else if (key === "--unlocked") unlocked = value;
     else if (key === "--browser-transition") browserTransition = value;
+    else if (key === "--service-transition") serviceTransition = value;
     else if (key === "--soak") soak = value;
     else if (key === "--output") outputRoot = resolve(value);
     else throw new Error(`unknown option: ${key}`);
   }
-  for (const [name, value] of Object.entries({ locked, unlocked, browserTransition, soak })) {
+  for (const [name, value] of Object.entries({ locked, unlocked, browserTransition, serviceTransition, soak })) {
     if (!value) throw new Error(`--${name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)} is required`);
   }
-  return { locked, unlocked, browserTransition, soak, outputRoot, acceptLegacySoak };
+  return { locked, unlocked, browserTransition, serviceTransition, soak, outputRoot, acceptLegacySoak };
 }
 
 function isRuntimeSourceStatus(statusLine: string): boolean {

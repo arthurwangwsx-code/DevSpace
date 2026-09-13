@@ -60,6 +60,7 @@
     "request:desktop-permissions": "node scripts/doctor-desktop-host.mjs --request-permissions",
     "install:macos-service": "node scripts/macos/install-service.mjs",
     "doctor:macos-service": "node scripts/macos/doctor-service.mjs",
+    "test:macos-service-self-activation": "tsx scripts/test-macos-service-self-activation.ts",
     "test:current-chrome": "tsx scripts/test-current-chrome-provider.ts",
     "test:browser-extension": "tsx scripts/test-browser-extension-matrix.ts",
     "test:browser-control:real": "tsx scripts/test-browser-control-real.ts",
