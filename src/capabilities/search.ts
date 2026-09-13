@@ -3,6 +3,7 @@ import type { CapabilitySummary } from "./types.js";
 export interface CapabilitySearchCandidate {
   summary: CapabilitySummary;
   aliases?: string[];
+  metadataTerms?: string[];
 }
 
 export interface CapabilitySearchResult {
@@ -57,6 +58,7 @@ function weightedTerms(candidate: CapabilitySearchCandidate): string[] {
     ...repeat(tokenize(candidate.summary.providerId), 4),
     ...repeat(tokenize(candidate.summary.title), 3),
     ...repeat(candidate.summary.tags.flatMap(tokenize), 3),
+    ...repeat((candidate.metadataTerms ?? []).flatMap(tokenize), 3),
     ...repeat((candidate.aliases ?? []).flatMap(tokenize), 2),
     ...tokenize(candidate.summary.description),
   ];

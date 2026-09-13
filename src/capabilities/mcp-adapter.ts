@@ -5,6 +5,9 @@ import { CapabilityError, capabilityErrorEnvelope, normalizeCapabilityError } fr
 import type { CapabilityRuntime } from "./runtime.js";
 import type { CapabilityPrincipal, JsonObject, JsonValue } from "./types.js";
 
+// Project-level compatibility boundary. Domain features MUST be added through
+// the second-level Capability Registry, never by adding a domain-specific MCP
+// tool here. See docs/capability-api-principles.md.
 export const CAPABILITY_MCP_TOOL_NAMES = [
   "capability_list",
   "capability_search",
@@ -23,7 +26,7 @@ export function createCapabilityMcpServer(
   const server = new McpServer({ name: "devspace-capabilities", version: "1.0.0" });
   server.registerTool("capability_list", {
     title: "List capabilities",
-    description: "List dynamically registered capabilities using stable filters and pagination.",
+    description: "Enumerate second-level capabilities using stable filters and pagination. Prefer capability_search for task-oriented discovery so the model does not load the full catalog into context.",
     inputSchema: z.object({
       providerId: z.string().optional(),
       tag: z.string().optional(),
@@ -34,7 +37,7 @@ export function createCapabilityMcpServer(
   }, async (input) => result(() => runtime.registry.list(input, canDiscover(runtime, principal))));
   server.registerTool("capability_search", {
     title: "Search capabilities",
-    description: "Search registered capability names, descriptions, tags, and aliases.",
+    description: "Primary second-level capability discovery API. Search canonical IDs, descriptions, domain/resource/action metadata, intents, tags, and compatibility aliases without expanding the fixed first-level MCP surface.",
     inputSchema: z.object({
       query: z.string().min(1),
       providerIds: z.array(z.string()).optional(),

@@ -10,6 +10,22 @@ import { createServer } from "../server.js";
 import { FakeCapabilityProvider } from "./fake-provider.test-support.js";
 import { CAPABILITY_MCP_TOOL_NAMES } from "./mcp-adapter.js";
 
+const FIXED_CAPABILITY_MCP_CONTRACT = [
+  "capability_list",
+  "capability_search",
+  "capability_describe",
+  "capability_open",
+  "capability_invoke",
+  "capability_status",
+  "capability_cancel",
+  "capability_close",
+] as const;
+
+// Deliberately duplicate the literal public contract instead of deriving this
+// assertion from CAPABILITY_MCP_TOOL_NAMES. This catches replacement/renaming
+// drift even when the tool count remains eight.
+assert.deepEqual(CAPABILITY_MCP_TOOL_NAMES, FIXED_CAPABILITY_MCP_CONTRACT);
+
 const root = mkdtempSync(join(tmpdir(), "devspace-capability-mcp-test-"));
 const config = loadConfig({
   DEVSPACE_CONFIG_DIR: join(root, "config"),
@@ -39,7 +55,7 @@ try {
   const listed = await client.listTools();
   assert.deepEqual(
     listed.tools.map(({ name }) => name).sort(),
-    [...CAPABILITY_MCP_TOOL_NAMES].sort(),
+    [...FIXED_CAPABILITY_MCP_CONTRACT].sort(),
   );
   assert.equal(listed.tools.length, 8);
 

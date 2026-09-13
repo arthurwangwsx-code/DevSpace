@@ -39,6 +39,24 @@ try {
   assert.equal(registry.search({ query: "点击页面", availableOnly: true }).items[0]?.capability.id,
     "browser.chrome.click");
 
+  const semantic = capability("browser.page.activate", "Activate page", ["browser"], false);
+  semantic.descriptor.metadata = {
+    domain: "browser",
+    resource: "page",
+    action: "activate",
+    intents: ["bring tab to foreground", "focus browser page"],
+  };
+  registry.replaceProviderCatalog({
+    providerId: "browser.chrome.devtools",
+    kind: "mcp-stdio",
+    health: ready,
+    capabilities: [snapshot, click, semantic],
+  });
+  assert.equal(
+    registry.search({ query: "foreground", availableOnly: true }).items[0]?.capability.id,
+    "browser.page.activate",
+  );
+
   const previousRevision = registry.revision;
   assert.throws(
     () => registry.replaceProviderCatalog({
@@ -86,7 +104,7 @@ try {
 
   const restoredStore = new SqliteCapabilityCatalogStore(root);
   const restored = new CapabilityRegistry(restoredStore);
-  assert.equal(restored.revision, 2);
+  assert.equal(restored.revision, 3);
   assert.equal(restored.list().items.length, 1);
   assert.equal(restored.list().items[0]?.availability.state, "unavailable");
   assert.throws(
@@ -108,6 +126,24 @@ try {
   } finally {
     database.close();
   }
+
+  const visibility = new CapabilityRegistry();
+  const publicCapability = capability("browser.page.snapshot", "Canonical browser snapshot", ["browser", "page"]);
+  const internalCapability = capability("browser.chrome.take_snapshot", "Legacy backend snapshot", ["browser", "internal-backend"]);
+  visibility.replaceProviderCatalog({
+    providerId: "browser.chrome.devtools",
+    kind: "test-internal-backend",
+    health: ready,
+    capabilities: [publicCapability, internalCapability],
+  });
+  assert.deepEqual(visibility.list().items.map(({ id }) => id), ["browser.page.snapshot"]);
+  assert.deepEqual(visibility.list({ tag: "browser" }).items.map(({ id }) => id), ["browser.page.snapshot"]);
+  assert.equal(visibility.search({ query: "legacy backend" }).items.length, 0);
+  assert.equal(visibility.list({ providerId: "browser.chrome.devtools" }).items.length, 2);
+  assert.equal(visibility.search({
+    query: "legacy backend",
+    providerIds: ["browser.chrome.devtools"],
+  }).items[0]?.capability.id, "browser.chrome.take_snapshot");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

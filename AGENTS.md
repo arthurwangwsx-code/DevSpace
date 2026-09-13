@@ -34,6 +34,12 @@ Core constraints:
 
 - Treat this as remote access to the local machine; security is part of the
   core design, not a later add-on.
+- The public Capability MCP API is fixed. Do not add new first-level MCP tools
+  for browser, device, desktop, app, or future domains. New functionality must
+  be registered as second-level capabilities and reached through the existing
+  `capability_list/search/describe/open/invoke/status/cancel/close` tools. A
+  proposal that adds a domain-specific MCP tool is an architecture regression
+  unless the user explicitly changes this project-level invariant.
 - Start with a narrow filesystem allowlist.
 - Prefer explicit, inspectable tool calls over autonomous local agent loops.
 - Keep the first version small enough to validate with real ChatGPT/Claude MCP

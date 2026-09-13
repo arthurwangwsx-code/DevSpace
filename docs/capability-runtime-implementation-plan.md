@@ -823,35 +823,40 @@ stdio child；它直接实现 daemon 的 NUL framed request/response protocol。
 call cancellation；DevSpace 在调用跨 socket 后即使上游超时，也会保持该 downstream operation
 占位，直到真实响应或有界 daemon deadline，避免连续叠加请求。
 
-如果 `--autoConnect` 在目标 Chrome 版本或环境中不可用，第二路径是 DevSpace 管理一个本机
-Native Messaging Extension Provider。它必须沿用相同 Capability ID，Provider ID 改为
-`browser.chrome.extension`，并实现标签页 ownership；不能静默退化为隔离 Profile。
+当前推荐路径已经调整为 Extension-first：Native Messaging Extension 是日常浏览器控制的
+默认 backend，Chrome DevTools 保留为深度调试 backend。二者都位于 `browser.control` 内部
+路由之后，不向模型暴露实现型 Capability ID；不能静默退化为隔离 Profile。
+
+一级 Capability MCP API 固定为
+`capability_list/search/describe/open/invoke/status/cancel/close` 八个工具。Browser 新增能力只能
+作为二级 Capability 注册，禁止新增 `browser_*` 一级 MCP tool。详见
+`docs/capability-api-principles.md`。
 
 ### 11.2 Capability 映射
 
-Chrome 内置 Provider 使用显式映射表保持稳定产品能力面；通用外部 MCP 则可选择
-`discoverAllTools`。Chrome 建议分批映射：
+Browser Control Provider 使用显式 canonical 映射表保持稳定产品能力面；通用外部 MCP 则可
+选择 `discoverAllTools`。Capability ID 描述业务意图，而不是 Chrome/Extension/CDP 实现：
 
 第一批只读：
 
 ```text
-browser.chrome.list_pages
-browser.chrome.get_page
-browser.chrome.take_snapshot
-browser.chrome.take_screenshot
-browser.chrome.get_console_messages
-browser.chrome.get_network_requests
+browser.profile.list
+browser.tab.list
+browser.page.snapshot
+browser.page.screenshot
+browser.debug.console
+browser.debug.network
 ```
 
 第二批 mutation：
 
 ```text
-browser.chrome.navigate
-browser.chrome.click
-browser.chrome.type_text
-browser.chrome.fill
-browser.chrome.press_key
-browser.chrome.scroll
+browser.page.navigate
+browser.page.click
+browser.page.type
+browser.page.select
+browser.page.press
+browser.page.scroll
 ```
 
 每项映射固定：上游 tool name、输入 Schema 版本、输出归一化、effect、权限、默认超时和

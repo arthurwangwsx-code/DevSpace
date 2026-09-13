@@ -11,6 +11,7 @@ import type {
   CapabilitySearchQuery,
   CapabilitySummary,
   CapabilityRuntimeRequirements,
+  JsonObject,
   JsonValue,
   ProviderHealth,
 } from "./types.js";
@@ -180,6 +181,8 @@ export class CapabilityRegistry {
     }
     const items = [...this.entries.values()]
       .filter(({ descriptor }) => canDiscover(descriptor))
+      .filter(({ descriptor }) => query.providerId || query.tag === "internal-backend"
+        || !descriptor.tags.includes("internal-backend"))
       .filter(({ descriptor }) => !query.providerId || descriptor.providerId === query.providerId)
       .filter(({ descriptor }) => !query.tag || descriptor.tags.includes(query.tag))
       .map((entry) => this.toSummary(entry))
@@ -205,9 +208,15 @@ export class CapabilityRegistry {
     const requiredTags = new Set(query.tags ?? []);
     const candidates = [...this.entries.values()]
       .filter(({ descriptor }) => canDiscover(descriptor))
+      .filter(({ descriptor }) => providerIds.size > 0 || requiredTags.has("internal-backend")
+        || !descriptor.tags.includes("internal-backend"))
       .filter(({ descriptor }) => providerIds.size === 0 || providerIds.has(descriptor.providerId))
       .filter(({ descriptor }) => [...requiredTags].every((tag) => descriptor.tags.includes(tag)))
-      .map((entry) => ({ summary: this.toSummary(entry), aliases: entry.aliases }))
+      .map((entry) => ({
+        summary: this.toSummary(entry),
+        aliases: entry.aliases,
+        metadataTerms: capabilityMetadataSearchTerms(entry.descriptor.metadata),
+      }))
       .filter(({ summary }) => !query.availableOnly || summary.availability.state === "ready");
     return {
       items: searchCapabilityCandidates(candidates, query.query, boundedLimit(query.limit)),
@@ -238,6 +247,19 @@ export class CapabilityRegistry {
       },
     };
   }
+}
+
+function capabilityMetadataSearchTerms(metadata: JsonObject | undefined): string[] {
+  if (!metadata) return [];
+  const values: string[] = [];
+  for (const key of ["domain", "resource", "action", "intent", "intents", "searchTerms", "relatedCapabilities"]) {
+    const value = metadata[key];
+    if (typeof value === "string") values.push(value);
+    else if (Array.isArray(value)) {
+      for (const item of value) if (typeof item === "string") values.push(item);
+    }
+  }
+  return values;
 }
 
 const unavailableBinding: CapabilityBinding = {
