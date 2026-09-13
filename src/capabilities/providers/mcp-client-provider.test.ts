@@ -8,6 +8,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express from "express";
 import * as z from "zod/v4";
+import { CapabilityError } from "../errors.js";
 import { parseMcpProviderManifest, type McpProviderManifest } from "../mcp-provider-manifest.js";
 import type { ProviderContext } from "../provider.js";
 import { McpClientProvider } from "./mcp-client-provider.js";
@@ -31,6 +32,13 @@ try {
     arguments: { message: "stdio" },
   }, { signal: new AbortController().signal });
   assert.deepEqual(value, { echoed: "stdio" });
+  await assert.rejects(stdio.invoke({
+    capabilityId: "test.external.echo",
+    descriptor: capabilities[0]!.descriptor,
+    binding: capabilities[0]!.binding,
+    arguments: { message: "__simulate_user_active__" },
+  }, { signal: new AbortController().signal }), (error) =>
+    error instanceof CapabilityError && error.code === "temporarily_unavailable");
   await assert.rejects(stdio.invoke({
     capabilityId: "test.external.hidden",
     descriptor: capabilities[0]!.descriptor,
@@ -96,7 +104,7 @@ const missing = new McpClientProvider(parseMcpProviderManifest({
 await assert.rejects(missing.start(context()), /Allowlisted downstream MCP tool is missing/);
 await missing.stop("test_complete");
 
-console.log("MCP client provider tests passed: stdio, HTTP, env headers, allowlist, schema fail-closed");
+console.log("MCP client provider tests passed: stdio, HTTP, env headers, allowlist, schema fail-closed, user-active yield");
 
 function manifest(transport: Record<string, unknown>): McpProviderManifest {
   return parseMcpProviderManifest({

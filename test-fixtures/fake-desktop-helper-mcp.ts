@@ -10,6 +10,9 @@ server.registerTool("desktop_list_apps", { inputSchema: z.object({}) }, async ()
 server.registerTool("desktop_snapshot_app", {
   inputSchema: z.object({ bundleId: z.string(), maxDepth: z.number().optional(), maxNodes: z.number().optional() }),
 }, async ({ bundleId }) => result({ tool: "snapshot", bundleId }));
+server.registerTool("desktop_screenshot_app", {
+  inputSchema: z.object({ bundleId: z.string(), maxWidth: z.number().optional(), maxHeight: z.number().optional() }),
+}, async ({ bundleId }) => result({ tool: "screenshot", bundleId, mimeType: "image/png", data: "fixture" }));
 server.registerTool("desktop_activate_app", {
   inputSchema: z.object({ bundleId: z.string() }),
 }, async ({ bundleId }) => result({ tool: "activate", bundleId }));

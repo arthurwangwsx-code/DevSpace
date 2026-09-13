@@ -181,6 +181,11 @@ export class McpClientProvider implements CapabilityProvider {
           details: { action: "Grant the requested permission to the stable provider executable, then restart it." },
         });
       }
+      if (/user input is active; desktop automation is yielding/i.test(text)) {
+        throw new CapabilityError("temporarily_unavailable", "Desktop automation yielded to recent user input.", {
+          details: { action: "Retry after the local user has been idle." },
+        });
+      }
       throw new CapabilityError("internal_error", "The downstream MCP tool returned an error.");
     }
     return result.structuredContent

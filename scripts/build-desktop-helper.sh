@@ -12,6 +12,7 @@ xcrun swiftc \
   -O \
   -framework AppKit \
   -framework ApplicationServices \
+  -framework ScreenCaptureKit \
   "$PWD/native/desktop-helper/main.swift" \
   -o "$output_path"
 chmod 0755 "$output_path"

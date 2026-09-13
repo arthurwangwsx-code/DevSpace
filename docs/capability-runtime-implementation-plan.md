@@ -1217,7 +1217,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 6 | 完成（2026-09-13） | 本批提交 | 固定 8-tool MCP contract、共享 policy/invocation、CLI JSON stdout/退出码、旧 MCP 契约 | Fake Provider 经 MCP、REST 与 CLI | CLI 通过本机 REST；OAuth 模式需 `DEVSPACE_CAPABILITY_BEARER_TOKEN` |
 | 7 | 代码完成、实机授权待验收（2026-09-13） | 本批提交 | 通用 MCP Manifest、stdio+HTTP、env 引用、allowlist、schema-version fail-closed；Chrome 当前 Profile 预置、只读固定映射、页面 lease、串行目标选择和 CLI 注册测试 | Fake Chrome MCP 已贯通；本机 Chrome 152 已确认 `DevToolsActivePort` 与授权提示，尚未由用户批准 | 批准 Chrome 提示后执行 fixture snapshot/screenshot、重启与异常页验证 |
 | 8 | 代码完成、实机锁屏待验收（2026-09-13） | 本批提交 | Chrome mutation 显式映射、secure/unverified field fail-closed、持久 Grant admin API/CLI、macOS session probe、调用与 lease 前运行条件门 | Fake Chrome/locked session；本机当前会话探针 | Chrome 授权后执行 mutation fixture；真实锁屏仍需用户安排解锁窗口 |
-| 9 | 核心路径完成、截图/用户活跃门待补（2026-09-13） | 本批提交 | 原生 Swift MCP Helper、稳定 identifier 签名脚本、应用 lease 绑定、AX 有界快照、激活/点击/安全输入/按键、secure value 脱敏、Provider 单测 | 本机真实编译/MCP 握手；空白 Fixture App 的 AX + Unicode 输入通过；TCC 预检 Accessibility/ScreenCapture=true | 生产 Developer ID 签名、app-scoped screenshot、真实用户活跃让出与锁屏实测 |
+| 9 | 核心路径完成、真实用户活跃/锁屏门待补（2026-09-13） | 本批提交 | 原生 Swift MCP Helper、稳定 identifier 签名脚本、应用 lease 绑定、AX 有界快照、应用所属 layer-zero 窗口截图、近期硬件输入让出、激活/点击/安全输入/按键、secure value 脱敏、Provider 单测 | 本机真实编译/MCP 握手；Accessibility/ScreenCapture 预检均为 true；空白 Fixture App 的 AX、Unicode 输入、限定窗口 PNG 截图真实 canary 通过 | 生产 Developer ID 签名、真实用户活跃让出与锁屏实测 |
 | 10 | 框架完成、长时/实机 soak 待验收（2026-09-13） | 本批提交 | 独立临时 DevSpace + 真实 stdio MCP fixture；REST/MCP 并发、固定 8-tool、session churn、队列限流/恢复、幂等、取消、超时、输出上限、secure intent、child crash/backoff/recovery、进程树 RSS/FD/socket、关机无孤儿；smoke/local/1m soak 与 2,000 条历史回收边界通过 | 仅隔离 Fixture，不等同于 Chrome/桌面实机 soak | 10m/24h soak 尚未运行；Chrome 授权、真实锁屏、桌面 screenshot/用户活跃让出仍是显式验收门 |
 
 ## 20. 推荐阅读顺序

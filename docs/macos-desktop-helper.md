@@ -23,6 +23,7 @@ alive by the same supervisor used for Chrome and external MCP servers.
 - `desktop.macos.status` reads Accessibility and Screen Capture preflight state.
 - `desktop.macos.list_apps` lists regular running apps without window titles.
 - `desktop.macos.snapshot_app` returns a depth/node/field-length bounded AX tree.
+- `desktop.macos.screenshot_app` captures only the leased app's largest visible window, scales it to bounded dimensions, and returns PNG data.
 - `desktop.macos.activate_app` brings only the leased bundle to the foreground.
 - `desktop.macos.click_point` clicks only while the leased bundle is frontmost.
 - `desktop.macos.type_text` types only into a verified non-secure focused element.
@@ -30,18 +31,20 @@ alive by the same supervisor used for Chrome and external MCP servers.
 
 All operations except status and app listing require an `app_window` lease. The specialized Provider injects
 the lease's `bundleId` and rejects argument attempts to target a different app. Mutation still requires an
-explicit `mutation` grant. The Router rejects all desktop operations while the macOS session is locked.
+explicit `mutation` grant. The Helper yields mutations while recent hardware input indicates that the local
+user is active, and the Router rejects all desktop operations while the macOS session is locked.
 
 ## Permissions and boundaries
 
 Snapshot and input require macOS Accessibility permission for the exact helper binary. The helper reports a
 generic MCP error which DevSpace maps to `permission_required` and `needs_user_action`; it never attempts to
-click System Settings or bypass TCC.
+click System Settings or bypass TCC. Application screenshots separately require Screen Recording permission.
 
-The first implementation intentionally does not expose whole-screen capture, arbitrary key chords, app
+The implementation intentionally does not expose whole-screen capture, arbitrary key chords, app
 activation, secure-field values, clipboard access, login-window control, passwords, Touch ID or FileVault.
-Screen capture remains a separate follow-up because an app-scoped capture needs a stable window selector and
-real Screen Recording/TCC acceptance evidence.
+App capture selects only an on-screen, layer-zero window owned by the leased app process and never falls back
+to a whole-screen image. Its Screen Recording permission, bounded dimensions, and PNG signature are covered
+by the fixture canary.
 
 Lock-screen support is fail-closed: every AX and input capability declares `requiresUnlocked=true`. This
 helper does not and must not attempt to unlock the Mac. Background protocol providers such as Chrome may be

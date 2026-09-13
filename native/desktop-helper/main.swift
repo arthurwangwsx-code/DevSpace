@@ -1,8 +1,10 @@
 import AppKit
 import ApplicationServices
 import Foundation
+import ScreenCaptureKit
 
-let helperVersion = "0.1.0"
+let helperVersion = "0.2.0"
+let userActivityYieldSeconds = 1.0
 
 struct HelperError: Error {
     let message: String
@@ -49,6 +51,11 @@ func toolDefinitions() -> [[String: Any]] {
             "bundleId": stringSchema(),
             "maxDepth": integerSchema(1, 12),
             "maxNodes": integerSchema(1, 2_000),
+        ], ["bundleId"]),
+        tool("desktop_screenshot_app", "Capture only the largest visible window of one application.", [
+            "bundleId": stringSchema(),
+            "maxWidth": integerSchema(64, 4_096),
+            "maxHeight": integerSchema(64, 4_096),
         ], ["bundleId"]),
         tool("desktop_activate_app", "Bring the leased application to the foreground.", [
             "bundleId": stringSchema(),
@@ -99,7 +106,18 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         var count = 0
         let tree = snapshot(AXUIElementCreateApplication(app.processIdentifier), 0, maxDepth, maxNodes, &count)
         return ["bundleId": bundleId, "processId": app.processIdentifier, "nodeCount": count, "tree": tree]
+    case "desktop_screenshot_app":
+        try requireScreenCapture()
+        let bundleId = try requiredString(arguments, "bundleId")
+        let app = try runningApplication(bundleId)
+        return try screenshotApplication(
+            app,
+            bundleId,
+            boundedInt(arguments["maxWidth"], 1_280, 64, 4_096),
+            boundedInt(arguments["maxHeight"], 900, 64, 4_096)
+        )
     case "desktop_activate_app":
+        try requireUserIdle()
         let bundleId = try requiredString(arguments, "bundleId")
         let app = try runningApplication(bundleId)
         guard app.activate(options: [.activateAllWindows]) else {
@@ -108,9 +126,12 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         return ["activated": true, "bundleId": bundleId]
     case "desktop_click_point":
         try requireAccessibility()
+        try requireUserIdle()
         let bundleId = try requiredString(arguments, "bundleId")
+        let app = try runningApplication(bundleId)
         try requireFrontmost(bundleId)
         let point = CGPoint(x: try requiredNumber(arguments, "x"), y: try requiredNumber(arguments, "y"))
+        try requirePointInApplicationWindow(app, point)
         guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
               let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
         else { throw HelperError(message: "Could not create mouse events.") }
@@ -119,9 +140,11 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         return ["clicked": true, "bundleId": bundleId]
     case "desktop_type_text":
         try requireAccessibility()
+        try requireUserIdle()
         let bundleId = try requiredString(arguments, "bundleId")
+        let app = try runningApplication(bundleId)
         try requireFrontmost(bundleId)
-        try requireNonSecureFocusedElement()
+        try requireNonSecureFocusedElement(app.processIdentifier)
         var units = Array(try requiredString(arguments, "text").utf16)
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
@@ -143,6 +166,8 @@ func desktopStatus() -> [String: Any] {
         "platform": "macOS",
         "accessibilityTrusted": AXIsProcessTrusted(),
         "screenCaptureGranted": CGPreflightScreenCaptureAccess(),
+        "userIdleSeconds": userIdleSeconds(),
+        "userActivityYieldSeconds": userActivityYieldSeconds,
         "processId": ProcessInfo.processInfo.processIdentifier,
         "version": helperVersion,
     ]
@@ -165,9 +190,11 @@ func listApps() -> [[String: Any]] {
 
 func pressKey(_ arguments: [String: Any]) throws -> [String: Any] {
     try requireAccessibility()
+    try requireUserIdle()
     let bundleId = try requiredString(arguments, "bundleId")
+    let app = try runningApplication(bundleId)
     try requireFrontmost(bundleId)
-    try requireNonSecureFocusedElement()
+    try requireNonSecureFocusedElement(app.processIdentifier)
     let key = try requiredString(arguments, "key")
     let codes: [String: CGKeyCode] = [
         "Return": 36, "Tab": 48, "Space": 49, "Delete": 51, "Escape": 53,
@@ -185,6 +212,119 @@ func requireAccessibility() throws {
     }
 }
 
+func requireScreenCapture() throws {
+    if !CGPreflightScreenCaptureAccess() {
+        throw HelperError(message: "Screen capture permission is required for this helper binary.")
+    }
+}
+
+func userIdleSeconds() -> Double {
+    let inputEvents: [CGEventType] = [
+        .keyDown, .keyUp,
+        .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp,
+        .otherMouseDown, .otherMouseUp, .mouseMoved,
+        .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .scrollWheel,
+    ]
+    return inputEvents
+        .map { CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: $0) }
+        .min() ?? .infinity
+}
+
+func requireUserIdle() throws {
+    if userIdleSeconds() < userActivityYieldSeconds {
+        throw HelperError(message: "User input is active; desktop automation is yielding.")
+    }
+}
+
+func screenshotApplication(
+    _ app: NSRunningApplication,
+    _ bundleId: String,
+    _ maxWidth: Int,
+    _ maxHeight: Int
+) throws -> [String: Any] {
+    let shareable = try shareableContent()
+    let candidates = shareable.windows.filter { window in
+        window.owningApplication?.processID == app.processIdentifier
+            && window.windowLayer == 0
+            && window.isOnScreen
+            && window.frame.width > 1
+            && window.frame.height > 1
+    }
+    guard let selected = candidates.max(by: {
+        $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height
+    }) else {
+        throw HelperError(message: "The leased application has no visible capturable window.")
+    }
+    let scale = min(
+        1,
+        min(Double(maxWidth) / selected.frame.width, Double(maxHeight) / selected.frame.height)
+    )
+    let width = max(1, Int((selected.frame.width * scale).rounded(.down)))
+    let height = max(1, Int((selected.frame.height * scale).rounded(.down)))
+    let configuration = SCStreamConfiguration()
+    configuration.width = width
+    configuration.height = height
+    configuration.showsCursor = false
+    configuration.capturesAudio = false
+    let image = try captureImage(SCContentFilter(desktopIndependentWindow: selected), configuration)
+    guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
+        throw HelperError(message: "The screenshot could not be encoded.")
+    }
+    if png.count > 2_500_000 {
+        throw HelperError(message: "The screenshot output is too large; use smaller maximum dimensions.")
+    }
+    return [
+        "bundleId": bundleId,
+        "windowId": selected.windowID,
+        "mimeType": "image/png",
+        "width": width,
+        "height": height,
+        "data": png.base64EncodedString(),
+    ]
+}
+
+func shareableContent() throws -> SCShareableContent {
+    let semaphore = DispatchSemaphore(value: 0)
+    var captured: SCShareableContent?
+    var capturedError: Error?
+    SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { content, error in
+        captured = content
+        capturedError = error
+        semaphore.signal()
+    }
+    guard semaphore.wait(timeout: .now() + 15) == .success else {
+        throw HelperError(message: "Timed out while enumerating capturable application windows.")
+    }
+    if capturedError != nil {
+        throw HelperError(message: "Visible application windows could not be enumerated.")
+    }
+    guard let captured else {
+        throw HelperError(message: "Visible application windows could not be enumerated.")
+    }
+    return captured
+}
+
+func captureImage(_ filter: SCContentFilter, _ configuration: SCStreamConfiguration) throws -> CGImage {
+    let semaphore = DispatchSemaphore(value: 0)
+    var captured: CGImage?
+    var capturedError: Error?
+    SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
+        captured = image
+        capturedError = error
+        semaphore.signal()
+    }
+    guard semaphore.wait(timeout: .now() + 15) == .success else {
+        throw HelperError(message: "Timed out while capturing the leased application window.")
+    }
+    if capturedError != nil {
+        throw HelperError(message: "The leased application window could not be captured.")
+    }
+    guard let captured else {
+        throw HelperError(message: "The leased application window could not be captured.")
+    }
+    return captured
+}
+
 func runningApplication(_ bundleId: String) throws -> NSRunningApplication {
     guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first,
           !app.isTerminated else {
@@ -199,7 +339,19 @@ func requireFrontmost(_ bundleId: String) throws {
     }
 }
 
-func requireNonSecureFocusedElement() throws {
+func requirePointInApplicationWindow(_ app: NSRunningApplication, _ point: CGPoint) throws {
+    let application = AXUIElementCreateApplication(app.processIdentifier)
+    guard let windows = attribute(application, kAXWindowsAttribute as CFString) as? [AXUIElement],
+          windows.contains(where: { window in
+              guard let position = pointAttribute(window, kAXPositionAttribute as CFString),
+                    let size = sizeAttribute(window, kAXSizeAttribute as CFString) else { return false }
+              return CGRect(origin: position, size: size).contains(point)
+          }) else {
+        throw HelperError(message: "The click point is outside the leased application's windows.")
+    }
+}
+
+func requireNonSecureFocusedElement(_ processId: pid_t) throws {
     let system = AXUIElementCreateSystemWide()
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(
@@ -210,6 +362,11 @@ func requireNonSecureFocusedElement() throws {
         throw HelperError(message: "The focused field cannot be verified.")
     }
     let element = unsafeBitCast(focused, to: AXUIElement.self)
+    var focusedProcessId: pid_t = 0
+    guard AXUIElementGetPid(element, &focusedProcessId) == .success,
+          focusedProcessId == processId else {
+        throw HelperError(message: "The focused element does not belong to the leased application.")
+    }
     let role = attributeString(element, kAXRoleAttribute as CFString) ?? ""
     let subrole = attributeString(element, kAXSubroleAttribute as CFString) ?? ""
     if role.localizedCaseInsensitiveContains("secure")

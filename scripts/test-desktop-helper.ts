@@ -17,6 +17,7 @@ try {
     "desktop_status",
     "desktop_list_apps",
     "desktop_snapshot_app",
+    "desktop_screenshot_app",
     "desktop_activate_app",
     "desktop_click_point",
     "desktop_type_text",
@@ -73,6 +74,19 @@ async function runFixtureCanary(client: Client, appPath: string): Promise<Record
     }
     assert.match(beforeJson, /DevSpace Fixture Label/);
     assert.doesNotMatch(beforeJson, /DO_NOT_LEAK_SECURE_VALUE/);
+    const screenshot = await client.callTool({
+      name: "desktop_screenshot_app",
+      arguments: { bundleId: "com.devspace.desktop-fixture", maxWidth: 800, maxHeight: 600 },
+    });
+    assert.equal(screenshot.isError, undefined);
+    const screenshotValue = screenshot.structuredContent as Record<string, unknown>;
+    assert.equal(screenshotValue.mimeType, "image/png");
+    assert.equal(typeof screenshotValue.width, "number");
+    assert.equal(typeof screenshotValue.height, "number");
+    assert.equal(typeof screenshotValue.data, "string");
+    assert.deepEqual(Buffer.from(screenshotValue.data as string, "base64").subarray(0, 8),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 1_100));
     const typed = await client.callTool({
       name: "desktop_type_text",
       arguments: { bundleId: "com.devspace.desktop-fixture", text: "typed-by-devspace-helper" },
@@ -84,7 +98,7 @@ async function runFixtureCanary(client: Client, appPath: string): Promise<Record
       arguments: { bundleId: "com.devspace.desktop-fixture", maxDepth: 8, maxNodes: 500 },
     });
     assert.match(JSON.stringify(after.structuredContent), /typed-by-devspace-helper/);
-    return { fixtureAxAndInputPassed: true };
+    return { fixtureAxInputAndScreenshotPassed: true };
   } finally {
     if (processId !== undefined) process.kill(processId, "SIGTERM");
   }

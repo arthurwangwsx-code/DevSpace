@@ -99,6 +99,7 @@ export function createMacosDesktopManifest(
         mapping("desktop_status", "desktop.macos.status", "读取桌面 Helper 权限状态", false, READ_ONLY, STATUS_REQUIREMENTS),
         mapping("desktop_list_apps", "desktop.macos.list_apps", "列出正在运行的 GUI 应用", false, READ_ONLY, LOCKED_REQUIREMENTS),
         mapping("desktop_snapshot_app", "desktop.macos.snapshot_app", "读取应用可访问性树", true, READ_ONLY, LOCKED_REQUIREMENTS),
+        mapping("desktop_screenshot_app", "desktop.macos.screenshot_app", "截取应用的可见窗口", true, READ_ONLY, LOCKED_REQUIREMENTS),
         mapping("desktop_activate_app", "desktop.macos.activate_app", "激活应用窗口", true, MUTATION, LOCKED_REQUIREMENTS),
         mapping("desktop_click_point", "desktop.macos.click_point", "点击应用内坐标", true, MUTATION, LOCKED_REQUIREMENTS),
         mapping("desktop_type_text", "desktop.macos.type_text", "向应用安全焦点输入文本", true, MUTATION, LOCKED_REQUIREMENTS),
@@ -125,16 +126,26 @@ function mapping(
     aliases: [],
     effects,
     availability,
-    permissions: tool === "desktop_status" || tool === "desktop_list_apps" ? [] : [{
-      id: "macos.accessibility",
-      required: true,
-      description: "The stable DevSpace desktop helper must be trusted in macOS Accessibility settings.",
-    }],
+    permissions: permissionsFor(tool),
     requiresLease,
     resourceTypes: requiresLease ? ["app_window"] : [],
     defaultTimeoutMs: 15_000,
     maxTimeoutMs: 60_000,
   };
+}
+
+function permissionsFor(tool: string) {
+  if (tool === "desktop_status" || tool === "desktop_list_apps") return [];
+  if (tool === "desktop_screenshot_app") return [{
+    id: "macos.screen-capture",
+    required: true,
+    description: "The stable DevSpace desktop helper must be trusted in macOS Screen Recording settings.",
+  }];
+  return [{
+    id: "macos.accessibility",
+    required: true,
+    description: "The stable DevSpace desktop helper must be trusted in macOS Accessibility settings.",
+  }];
 }
 
 function desktopExecutable(command: string): string {

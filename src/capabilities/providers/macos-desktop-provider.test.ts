@@ -8,9 +8,11 @@ import { createMacosDesktopManifest, MacosDesktopProvider } from "./macos-deskto
 assert.throws(() => createMacosDesktopManifest(process.execPath, "linux"), /requires macOS/);
 const generated = createMacosDesktopManifest(process.execPath, "darwin");
 assert.equal(generated.metadata.id, "desktop.macos.accessibility");
-assert.equal(generated.spec.tools.length, 7);
+assert.equal(generated.spec.tools.length, 8);
 assert.equal(generated.spec.tools[2]!.requiresLease, true);
-assert.equal(generated.spec.tools[3]!.effects.readOnly, false);
+assert.equal(generated.spec.tools[3]!.effects.readOnly, true);
+assert.equal(generated.spec.tools[3]!.permissions[0]!.id, "macos.screen-capture");
+assert.equal(generated.spec.tools[4]!.effects.readOnly, false);
 
 const fixture = fileURLToPath(new URL("../../../test-fixtures/fake-desktop-helper-mcp.ts", import.meta.url));
 const manifest = parseMcpProviderManifest({
@@ -37,6 +39,14 @@ try {
     arguments: { maxDepth: 2 },
     lease,
   }, signal()), { tool: "snapshot", bundleId: "com.example.fixture" });
+  const screenshot = discovered.find(({ descriptor }) => descriptor.id === "desktop.macos.screenshot_app")!;
+  assert.deepEqual(await provider.invoke({
+    capabilityId: screenshot.descriptor.id,
+    descriptor: screenshot.descriptor,
+    binding: screenshot.binding,
+    arguments: { maxWidth: 800 },
+    lease,
+  }, signal()), { tool: "screenshot", bundleId: "com.example.fixture", mimeType: "image/png", data: "fixture" });
   await assert.rejects(provider.invoke({
     capabilityId: snapshot.descriptor.id,
     descriptor: snapshot.descriptor,

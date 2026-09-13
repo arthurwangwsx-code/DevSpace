@@ -7,7 +7,10 @@ server.registerTool("echo", {
   description: "Echo a message through the fake downstream MCP.",
   inputSchema: z.object({ message: z.string() }),
   outputSchema: z.object({ echoed: z.string() }),
-}, async ({ message }) => ({
+}, async ({ message }) => message === "__simulate_user_active__" ? ({
+  isError: true,
+  content: [{ type: "text", text: "User input is active; desktop automation is yielding." }],
+}) : ({
   content: [{ type: "text", text: message }],
   structuredContent: { echoed: message },
 }));
