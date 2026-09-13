@@ -4,6 +4,37 @@ const clients = new Map();
 const tabOwner = new Map();
 const attached = new Set();
 let port = null;
+let stateReady = null;
+
+async function persistState() {
+  const serialized = {};
+  for (const [clientId, value] of clients) {
+    serialized[clientId] = { tabs: [...value.tabs], adopted: [...value.adopted] };
+  }
+  try { await chrome.storage.session.set({ devspaceOwnedTabs: serialized }); } catch {}
+}
+
+async function restoreState() {
+  try {
+    const stored = (await chrome.storage.session.get("devspaceOwnedTabs"))?.devspaceOwnedTabs || {};
+    for (const [clientId, value] of Object.entries(stored)) {
+      if (!value || typeof value !== "object") continue;
+      const owned = state(clientId);
+      for (const tabId of Array.isArray(value.tabs) ? value.tabs : []) {
+        if (!Number.isInteger(tabId)) continue;
+        try { await chrome.tabs.get(tabId); owned.tabs.add(tabId); tabOwner.set(tabId, clientId); } catch {}
+      }
+      for (const tabId of Array.isArray(value.adopted) ? value.adopted : []) {
+        if (owned.tabs.has(tabId)) owned.adopted.add(tabId);
+      }
+    }
+  } catch {}
+}
+
+function ensureStateReady() {
+  if (!stateReady) stateReady = restoreState();
+  return stateReady;
+}
 
 function state(clientId) {
   if (!clientId) throw new Error("clientId is required");
@@ -40,11 +71,13 @@ async function useTab(clientId, tabId) {
     return { tabId, ownership: owned.adopted.has(tabId) ? "adopted" : "agent" };
   }
   owned.tabs.add(tabId); owned.adopted.add(tabId); tabOwner.set(tabId, clientId);
+  await persistState();
   return { tabId, ownership: "adopted" };
 }
 async function releaseTab(clientId, tabId) {
   assertOwned(clientId, tabId); await detach(tabId);
   const owned = state(clientId); owned.tabs.delete(tabId); owned.adopted.delete(tabId); tabOwner.delete(tabId);
+  await persistState();
   return { tabId, released: true };
 }
 async function closeTab(clientId, tabId) {
@@ -52,12 +85,15 @@ async function closeTab(clientId, tabId) {
   if (state(clientId).adopted.has(tabId)) throw new Error(`adopted tab ${tabId} cannot be closed by lease cleanup`);
   await detach(tabId);
   await chrome.tabs.remove(tabId);
+  const owned = state(clientId); owned.tabs.delete(tabId); owned.adopted.delete(tabId); tabOwner.delete(tabId);
+  await persistState();
   return { tabId, closed: true };
 }
 async function openTab(clientId, url = "about:blank") {
   const tab = await chrome.tabs.create({ url, active: false });
   if (tab.id === undefined) throw new Error("Chrome did not return a tab id");
   state(clientId).tabs.add(tab.id); tabOwner.set(tab.id, clientId);
+  await persistState();
   return { tabId: tab.id, windowId: tab.windowId, ownership: "agent" };
 }
 
@@ -103,6 +139,7 @@ const handlers = {
   screenshot: async (p) => { assertOwned(p.clientId, p.tabId); const r = await send(p.tabId, "Page.captureScreenshot", { format: "png" }); return { data: r.data, mimeType: "image/png" }; },
 };
 async function handle(message, replyPort) {
+  await ensureStateReady();
   const { id, protocol, command, params = {} } = message || {};
   if (protocol !== PROTOCOL) return replyPort.postMessage({ protocol: PROTOCOL, id, ok: false, error: `unsupported protocol: ${protocol}` });
   const handler = handlers[command]; if (!handler) return replyPort.postMessage({ protocol: PROTOCOL, id, ok: false, error: `unknown command: ${command}` });
@@ -114,7 +151,18 @@ function connect() {
   const current = port; current.onMessage.addListener((message) => void handle(message, current));
   current.onDisconnect.addListener(() => { void chrome.runtime.lastError; if (port === current) port = null; });
 }
-chrome.tabs.onRemoved.addListener((tabId) => { const clientId = tabOwner.get(tabId); if (clientId) { state(clientId).tabs.delete(tabId); state(clientId).adopted.delete(tabId); tabOwner.delete(tabId); } attached.delete(tabId); });
+chrome.tabs.onRemoved.addListener((tabId) => {
+  const clientId = tabOwner.get(tabId);
+  if (clientId) {
+    state(clientId).tabs.delete(tabId); state(clientId).adopted.delete(tabId); tabOwner.delete(tabId);
+    void persistState();
+  }
+  attached.delete(tabId);
+});
 chrome.alarms.create("devspace-reconnect", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "devspace-reconnect") connect(); });
+// Establish Native Messaging immediately. Commands still await restored
+// ownership state in handle(), so reconnect does not need to wait for storage
+// I/O before Chrome can attach the native port.
 connect();
+void ensureStateReady();

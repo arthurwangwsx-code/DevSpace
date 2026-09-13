@@ -34,6 +34,22 @@ assert.match(launcherText, /devspace-browser-native-host\.mjs/);
 assert.equal((await stat(launcher)).mode & 0o777, 0o700);
 assert.equal((await stat(manifestPath)).mode & 0o777, 0o600);
 
+const derived = spawnSync(process.execPath, [new URL("./install.mjs", import.meta.url).pathname], {
+  env: {
+    ...process.env,
+    DEVSPACE_BROWSER_NATIVE_HOST_DIR: installRoot,
+    DEVSPACE_CHROME_NATIVE_HOSTS_DIR: manifests,
+  },
+  encoding: "utf8",
+});
+assert.equal(derived.status, 0, derived.stderr);
+const derivedOutput = JSON.parse(derived.stdout);
+assert.match(derivedOutput.extensionId, /^[a-p]{32}$/);
+assert.deepEqual(
+  JSON.parse(await readFile(manifestPath, "utf8")).allowed_origins,
+  [`chrome-extension://${derivedOutput.extensionId}/`],
+);
+
 const invalid = spawnSync(process.execPath, [new URL("./install.mjs", import.meta.url).pathname, "not-an-extension-id"], {
   env: process.env,
   encoding: "utf8",

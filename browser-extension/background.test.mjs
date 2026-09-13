@@ -7,6 +7,8 @@ let nativeMessageListener;
 let createdOptions;
 const removed = [];
 const responseWaiters = new Map();
+const sessionStorage = {};
+let tabRemovedListener;
 const port = {
   onMessage: { addListener(listener) { nativeMessageListener = listener; } },
   onDisconnect: { addListener() {} },
@@ -39,7 +41,7 @@ const chrome = {
     },
     async remove(tabId) { removed.push(tabId); tabs.delete(tabId); },
     async update() {},
-    onRemoved: { addListener() {} },
+    onRemoved: { addListener(listener) { tabRemovedListener = listener; } },
   },
   debugger: {
     async attach() {},
@@ -49,6 +51,12 @@ const chrome = {
   alarms: {
     create() {},
     onAlarm: { addListener() {} },
+  },
+  storage: {
+    session: {
+      async get(key) { return { [key]: sessionStorage[key] }; },
+      async set(value) { Object.assign(sessionStorage, structuredClone(value)); },
+    },
   },
 };
 
@@ -69,13 +77,21 @@ const opened = await request("open_tab", { clientId: "devspace", url: "https://f
 assert.equal(opened.result.ownership, "agent");
 assert.equal(createdOptions.url, "https://fixture.test/");
 assert.equal(createdOptions.active, false);
+assert.deepEqual(sessionStorage.devspaceOwnedTabs.devspace.tabs, [8]);
+
+// A Manifest V3 service-worker restart must retain the distinction between an
+// Agent-created tab and an adopted user tab.
+vm.runInNewContext(source, { chrome, console, Map, Set, Number, String, Error }, { filename: "background-restarted.js" });
 const reacquired = await request("use_tab", { clientId: "devspace", tabId: 8 });
 assert.equal(reacquired.result.ownership, "agent");
 await request("close_tab", { clientId: "devspace", tabId: 8 });
 assert.deepEqual(removed, [8]);
 assert.equal(tabs.has(8), false);
 
-console.log("browser extension tests passed: current tabs, adoption safety, background agent-tab cleanup");
+assert.deepEqual(sessionStorage.devspaceOwnedTabs.devspace.tabs, []);
+assert.equal(typeof tabRemovedListener, "function");
+
+console.log("browser extension tests passed: adoption safety, persisted ownership, agent-tab cleanup");
 
 function request(command, params) {
   return new Promise((resolve) => {

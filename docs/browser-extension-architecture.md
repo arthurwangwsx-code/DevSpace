@@ -98,13 +98,27 @@ During phase 1 the provider is opt-in with `DEVSPACE_BROWSER_EXTENSION=1`, so a
 machine that has not installed the extension/native host remains healthy and
 the existing DevTools provider behavior is unchanged.
 
+The extension manifest contains a stable development public key. This gives the
+unpacked build a deterministic ID, so Native Messaging can be installed before
+the first manual Chrome load and does not need a copy/paste ID step. The private
+packaging key lives outside Git under `~/.devspace/keys/`.
+
 ## Development installation on macOS
 
-1. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**,
-   and select this repository's `browser-extension/` directory.
-2. Copy the 32-character extension ID shown by Chrome, then run
-   `node native-host/install.mjs <extension-id>`.
-3. Start DevSpace with `DEVSPACE_BROWSER_EXTENSION=1`. Reload the extension or
+1. Run `npm run build:browser-extension`. The unpacked build, ZIP, installation
+   instructions and stable extension ID are written under
+   `releases/browser-extension-<version>/`.
+2. Run `npm run install:browser-native-host`. The installer derives the stable
+   extension ID from the public manifest key; an explicit ID remains supported
+   as `npm run install:browser-native-host -- <extension-id>`.
+3. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**,
+   and select `releases/browser-extension-<version>/unpacked/`.
+4. Run `npm run doctor:browser-extension`. `installationReady` covers Chrome,
+   packaged artifacts and the pinned native host; `healthy` additionally
+   requires the extension to be enabled in at least one Chrome profile;
+   `bridgeConnected` reports the optional live socket state and `releaseReady`
+   reports CRX availability.
+5. Start DevSpace with `DEVSPACE_BROWSER_EXTENSION=1`. Reload the extension or
    wait for its one-minute reconnect alarm, then query provider health and the
    capability catalog.
 
@@ -113,6 +127,10 @@ pinned to the absolute Node executable used at install time. This matters
 because GUI-launched Chrome does not normally inherit an nvm-managed shell
 `PATH`. Re-run the installer after changing the Node installation used by
 DevSpace.
+
+The manifest contains only the stable public key. The matching private packing
+key stays outside Git under `~/.devspace/keys/` (or the path named by
+`DEVSPACE_BROWSER_EXTENSION_KEY`) and is used only to produce the optional CRX.
 
 No DevSpace Grant or per-operation approval is used in the default
 delegated-approval mode. Installing the extension and Chrome's `debugger`

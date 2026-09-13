@@ -1,23 +1,22 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const extensionId = process.argv[2]?.trim();
-if (!extensionId) {
-  console.error("Usage: node native-host/install.mjs <chrome-extension-id>");
-  process.exit(2);
-}
-if (!/^[a-p]{32}$/.test(extensionId)) {
-  console.error("Chrome extension id must be 32 lowercase letters in the range a-p.");
-  process.exit(2);
-}
 if (process.platform !== "darwin") {
   console.error("The initial installer currently supports macOS only.");
   process.exit(2);
 }
 const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, "..");
+const extensionManifest = JSON.parse(fs.readFileSync(path.join(root, "browser-extension", "manifest.json"), "utf8"));
+const extensionId = process.argv[2]?.trim() || extensionIdFromKey(extensionManifest.key);
+if (!/^[a-p]{32}$/.test(extensionId)) {
+  console.error("Chrome extension id must be 32 lowercase letters in the range a-p.");
+  process.exit(2);
+}
 const host = path.join(here, "devspace-browser-native-host.mjs");
 const installRoot = process.env.DEVSPACE_BROWSER_NATIVE_HOST_DIR
   || path.join(os.homedir(), "Library", "Application Support", "DevSpace", "native-host");
@@ -43,8 +42,13 @@ fs.writeFileSync(target, JSON.stringify({
   type: "stdio",
   allowed_origins: [`chrome-extension://${extensionId}/`],
 }, null, 2) + "\n", { mode: 0o600 });
-console.log(target);
+console.log(JSON.stringify({ extensionId, manifest: target, launcher }, null, 2));
 
 function shellQuote(value) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function extensionIdFromKey(key) {
+  const digest = createHash("sha256").update(Buffer.from(key, "base64")).digest().subarray(0, 16);
+  return [...digest].map((byte) => String.fromCharCode(97 + (byte >> 4), 97 + (byte & 15))).join("");
 }
