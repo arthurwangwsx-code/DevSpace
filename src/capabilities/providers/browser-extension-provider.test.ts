@@ -5,7 +5,11 @@ import net from "node:net";
 import os from "node:os";
 import { join } from "node:path";
 import { CapabilityRegistry } from "../registry.js";
-import { BrowserExtensionProvider, browserExtensionShouldEnable } from "./browser-extension-provider.js";
+import {
+  BrowserExtensionProvider,
+  browserExtensionShouldEnable,
+  normalizeBrowserExtensionBridgeError,
+} from "./browser-extension-provider.js";
 
 const root = await mkdtemp(join(os.tmpdir(), "devspace-browser-provider-"));
 const uploadFile = join(root, "upload.txt");
@@ -14,11 +18,13 @@ const autoManifest = join(root, "native-host.json");
 await writeFile(autoManifest, "{}\n");
 assert.equal(browserExtensionShouldEnable({ DEVSPACE_CHROME_NATIVE_HOST_MANIFEST: autoManifest }), true);
 assert.equal(browserExtensionShouldEnable({ DEVSPACE_BROWSER_EXTENSION: "0", DEVSPACE_CHROME_NATIVE_HOST_MANIFEST: autoManifest }), false);
+assert.equal(normalizeBrowserExtensionBridgeError(new Error("browser extension request timed out: use_tab")).code, "timeout");
+assert.equal(normalizeBrowserExtensionBridgeError(new Error("browser extension request aborted")).code, "cancelled");
 const socketPath = join(root, "bridge.sock");
 const provider = new BrowserExtensionProvider({
   ...process.env,
   DEVSPACE_BROWSER_SOCKET: socketPath,
-});
+}, 25);
 const lifetime = new AbortController();
 await provider.start({
   signal: lifetime.signal,
@@ -56,6 +62,7 @@ extension.on("data", (chunk) => {
     };
     input = input.slice(newline + 1);
     seen.push({ command: request.command, params: request.params });
+    if (request.command === "use_tab" && request.params.tabId === 9) continue;
     const result = request.command === "use_tab"
       ? { tabId: request.params.tabId, ownership: request.params.tabId === 8 ? "agent" : "adopted" }
       : request.command === "snapshot"
@@ -185,7 +192,17 @@ assert.equal(agentLease.display.ownership, "agent");
 await provider.close(agentLease, invocationContext);
 assert.equal(seen.at(-1)?.command, "close_tab");
 
+await assert.rejects(
+  provider.open({ resourceType: "browser_page", selector: { tabId: 9 } }, invocationContext),
+  (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "timeout"),
+);
+
 extension.destroy();
+await new Promise((resolve) => setTimeout(resolve, 10));
+await assert.rejects(
+  provider.open({ resourceType: "browser_page", selector: { tabId: 9 } }, invocationContext),
+  (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "provider_unavailable"),
+);
 await provider.stop("test complete");
 await rm(root, { recursive: true, force: true });
-console.log("browser extension provider tests passed: discovery, lease routing, adopted release, agent cleanup");
+console.log("browser extension provider tests passed: discovery, lease routing, bridge error mapping, adopted release, agent cleanup");

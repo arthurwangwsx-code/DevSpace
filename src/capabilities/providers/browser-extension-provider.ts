@@ -25,7 +25,10 @@ export class BrowserControlProvider implements CapabilityProvider {
   readonly id = BROWSER_EXTENSION_PROVIDER_ID;
   private readonly bridge: BrowserExtensionBridge;
   private readySince?: string;
-  constructor(environment: NodeJS.ProcessEnv = process.env) {
+  constructor(
+    environment: NodeJS.ProcessEnv = process.env,
+    private readonly leaseBridgeTimeoutMs = 10_000,
+  ) {
     this.bridge = new BrowserExtensionBridge(environment.DEVSPACE_BROWSER_SOCKET || join(os.homedir(), ".devspace", "browser-extension.sock"));
   }
   async start(_context: ProviderContext): Promise<void> { await this.bridge.start(); this.readySince = new Date().toISOString(); }
@@ -86,7 +89,13 @@ export class BrowserControlProvider implements CapabilityProvider {
     const tabId = request.selector.tabId;
     const profileId = typeof request.selector.profileId === "string" ? request.selector.profileId : undefined;
     if (!Number.isInteger(tabId) || (tabId as number) < 0) throw new CapabilityError("invalid_arguments", "selector.tabId must be a non-negative integer.");
-    const result = await this.bridge.call("use_tab", { clientId: CLIENT_ID, tabId: tabId as number }, context.signal, 10_000, profileId);
+    const result = await this.callBridge(
+      "use_tab",
+      { clientId: CLIENT_ID, tabId: tabId as number },
+      context.signal,
+      this.leaseBridgeTimeoutMs,
+      profileId,
+    );
     return {
       handle: { tabId: tabId as number, ...(profileId ? { profileId } : {}) },
       display: { ...asObject(result), ...(profileId ? { profileId } : {}) },
@@ -97,7 +106,13 @@ export class BrowserControlProvider implements CapabilityProvider {
     if (Number.isInteger(tabId)) {
       const command = lease.display.ownership === "agent" ? "close_tab" : "release_tab";
       const profileId = typeof lease.handle.profileId === "string" ? lease.handle.profileId : undefined;
-      await this.bridge.call(command, { clientId: CLIENT_ID, tabId: tabId as number }, context.signal, 10_000, profileId);
+      await this.callBridge(
+        command,
+        { clientId: CLIENT_ID, tabId: tabId as number },
+        context.signal,
+        this.leaseBridgeTimeoutMs,
+        profileId,
+      );
     }
   }
   async invoke(request: ProviderInvocation, context: ProviderInvocationContext): Promise<JsonValue> {
@@ -120,26 +135,26 @@ export class BrowserControlProvider implements CapabilityProvider {
     }
     const leaseProfileId = typeof request.lease?.handle.profileId === "string" ? request.lease.handle.profileId : undefined;
     const profileId = leaseProfileId ?? requestedProfileId;
+    return this.callBridge(
+      command,
+      params,
+      context.signal,
+      request.descriptor.execution.defaultTimeoutMs,
+      profileId,
+    );
+  }
+
+  private async callBridge(
+    command: string,
+    params: JsonObject,
+    signal: AbortSignal,
+    timeoutMs: number,
+    profileId?: string,
+  ): Promise<JsonValue> {
     try {
-      return await this.bridge.call(
-        command,
-        params,
-        context.signal,
-        request.descriptor.execution.defaultTimeoutMs,
-        profileId,
-      );
-    }
-    catch (error) {
-      if (/not connected|disconnected|connection (?:failed|was replaced)|bridge stopped/i.test(String(error))) {
-        throw new CapabilityError("provider_unavailable", "DevSpace Browser Bridge extension is not connected.", { cause: error });
-      }
-      if (/timed out/i.test(String(error))) {
-        throw new CapabilityError("timeout", "The browser extension request timed out.", { cause: error });
-      }
-      if (/exceeds the bridge limit/i.test(String(error))) {
-        throw new CapabilityError("output_too_large", "The browser extension response exceeds the configured limit.", { cause: error });
-      }
-      throw error;
+      return await this.bridge.call(command, params, signal, timeoutMs, profileId);
+    } catch (error) {
+      throw normalizeBrowserExtensionBridgeError(error);
     }
   }
 
@@ -156,6 +171,28 @@ export class BrowserControlProvider implements CapabilityProvider {
 
 /** @deprecated Use BrowserControlProvider. Kept for internal test/import compatibility. */
 export class BrowserExtensionProvider extends BrowserControlProvider {}
+
+export function normalizeBrowserExtensionBridgeError(error: unknown): CapabilityError {
+  if (error instanceof CapabilityError) return error;
+  const message = String(error);
+  if (/not connected|disconnected|connection (?:failed|was replaced)|bridge stopped/i.test(message)) {
+    return new CapabilityError("provider_unavailable", "DevSpace Browser Bridge extension is not connected.", {
+      cause: error,
+    });
+  }
+  if (/timed out/i.test(message)) {
+    return new CapabilityError("timeout", "The browser extension request timed out.", { cause: error });
+  }
+  if (/request aborted/i.test(message)) {
+    return new CapabilityError("cancelled", "The browser extension request was cancelled.", { cause: error });
+  }
+  if (/exceeds the bridge limit/i.test(message)) {
+    return new CapabilityError("output_too_large", "The browser extension response exceeds the configured limit.", {
+      cause: error,
+    });
+  }
+  return new CapabilityError("internal_error", "The browser extension request failed.", { cause: error });
+}
 
 function capability(
   id: string,
