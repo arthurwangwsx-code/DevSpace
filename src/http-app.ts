@@ -18,7 +18,7 @@ export function createHttpApp(config: ServerConfig) {
     + config.resources.mcpMaxQueuedRequests;
   let activeBodies = 0;
   let activeBodyBytes = 0;
-  app.use("/mcp", (req, res, next) => {
+  app.use(["/mcp", "/capabilities/mcp"], (req, res, next) => {
     if (req.method !== "POST") return next();
     const declaredLength = requestContentLength(req.header("content-length"));
     const reservedBytes = declaredLength === undefined

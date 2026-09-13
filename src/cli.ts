@@ -41,7 +41,7 @@ import { expandHomePath } from "./roots.js";
 import { shutdownHttpServer } from "./server-shutdown.js";
 import { runMcpCanary } from "./mcp-canary.js";
 
-type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "help" | "version";
+type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "help" | "version";
 const require = createRequire(import.meta.url);
 const SUPPORTED_NODE_RANGE = ">=20.12 <27";
 
@@ -71,6 +71,12 @@ async function main(argv: string[]): Promise<void> {
     case "agents":
       await runAgentsCommand(args);
       return;
+    case "capabilities":
+      await runCapabilitiesCommand(args);
+      return;
+    case "providers":
+      await runProvidersCommand(args);
+      return;
     case "help":
       printHelp();
       return;
@@ -82,7 +88,7 @@ async function main(argv: string[]): Promise<void> {
 
 function normalizeCommand(command: string | undefined): Command {
   if (!command || command === "serve" || command === "start") return "serve";
-  if (command === "init" || command === "doctor" || command === "verify" || command === "config" || command === "agents") return command;
+  if (command === "init" || command === "doctor" || command === "verify" || command === "config" || command === "agents" || command === "capabilities" || command === "providers") return command;
   if (command === "help" || command === "--help" || command === "-h") return "help";
   if (command === "version" || command === "--version" || command === "-v") return "version";
   throw new Error(`Unknown command: ${command}`);
@@ -221,6 +227,10 @@ async function serve(): Promise<void> {
   const httpServer = app.listen(config.port, config.host, () => {
     console.log(`devspace listening on http://${config.host}:${config.port}/mcp`);
     console.log(`public base url: ${config.publicBaseUrl}`);
+    if (config.capabilities.enabled) {
+      console.log(`capability MCP: ${new URL("/capabilities/mcp", config.publicBaseUrl)}`);
+      console.log(`capability REST: ${new URL("/api/capabilities/v1", config.publicBaseUrl)}`);
+    }
     console.log(`allowed roots: ${config.allowedRoots.join(", ")}`);
     console.log(`allowed hosts: ${config.allowedHosts.join(", ")}`);
     if (config.allowedHosts.includes("*")) {
@@ -272,6 +282,12 @@ async function runDoctor(): Promise<void> {
     const config = loadConfig();
     console.log(`Local MCP URL: http://${config.host}:${config.port}/mcp`);
     console.log(`Public MCP URL: ${new URL("/mcp", config.publicBaseUrl).toString()}`);
+    console.log(`Capabilities: ${config.capabilities.enabled ? "enabled" : "disabled"}`);
+    if (config.capabilities.enabled) {
+      console.log(`Capability MCP URL: ${new URL("/capabilities/mcp", config.publicBaseUrl)}`);
+      console.log(`Capability REST URL: ${new URL("/api/capabilities/v1", config.publicBaseUrl)}`);
+      console.log(`Capability provider config: ${config.capabilities.configDir}`);
+    }
     console.log(`Allowed roots: ${config.allowedRoots.join(", ")}`);
     console.log(`Allowed hosts: ${config.allowedHosts.join(", ")}`);
   } catch (error) {
@@ -365,12 +381,219 @@ function printHelp(): void {
       "  devspace agents ls       List subagent sessions",
       "  devspace agents run <profile-or-provider-or-id> [--model <model>] <prompt>",
       "  devspace agents show <id>",
+      "  devspace capabilities list|search|describe|open|call|status|cancel|close [options]",
+      "  devspace providers list [--json]",
       "  devspace -v, --version   Print the installed version",
       "",
       "For temporary tunnels:",
       "  DEVSPACE_PUBLIC_BASE_URL=https://example.trycloudflare.com devspace serve",
     ].join("\n"),
   );
+}
+
+async function runCapabilitiesCommand(args: string[]): Promise<void> {
+  const [subcommand, ...rest] = args;
+  const options = capabilityCliOptions(rest);
+  switch (subcommand) {
+    case "list": {
+      const query = new URLSearchParams();
+      addQuery(query, "providerId", options.values.provider);
+      addQuery(query, "tag", options.values.tag);
+      addQuery(query, "cursor", options.values.cursor);
+      addQuery(query, "limit", options.values.limit);
+      if (options.flags.has("available-only")) query.set("availableOnly", "true");
+      await printCapabilityResponse(await capabilityFetch(`/capabilities?${query}`, options), options);
+      return;
+    }
+    case "search": {
+      const query = options.positionals.join(" ").trim();
+      if (!query) throw new Error("Usage: devspace capabilities search <query> [--json]");
+      await printCapabilityResponse(await capabilityFetch("/capabilities/search", options, {
+        query,
+        filters: {
+          providerIds: options.values.provider ? [options.values.provider] : undefined,
+          tags: options.values.tag ? [options.values.tag] : undefined,
+          availableOnly: options.flags.has("available-only") || undefined,
+        },
+        limit: numberOption(options.values.limit, "limit"),
+      }), options);
+      return;
+    }
+    case "describe": {
+      const [capabilityId] = options.positionals;
+      if (!capabilityId) throw new Error("Usage: devspace capabilities describe <capability-id>");
+      await printCapabilityResponse(await capabilityFetch(`/capabilities/${encodeURIComponent(capabilityId)}`, options), options);
+      return;
+    }
+    case "open": {
+      const [providerId] = options.positionals;
+      if (!providerId || !options.values.type) {
+        throw new Error("Usage: devspace capabilities open <provider-id> --type TYPE --selector JSON");
+      }
+      await printCapabilityResponse(await capabilityFetch("/leases", options, {
+        providerId,
+        resourceType: options.values.type,
+        selector: jsonOption(options.values.selector ?? "{}", "selector"),
+        ttlSeconds: numberOption(options.values["ttl-seconds"], "ttl-seconds"),
+      }), options);
+      return;
+    }
+    case "call": {
+      const [capabilityId] = options.positionals;
+      if (!capabilityId) throw new Error("Usage: devspace capabilities call <capability-id> --arguments JSON");
+      await printCapabilityResponse(await capabilityFetch("/invocations", options, {
+        capabilityId,
+        arguments: jsonOption(options.values.arguments ?? "{}", "arguments"),
+        leaseId: options.values.lease,
+        mode: options.flags.has("async") ? "async" : "sync",
+        timeoutMs: numberOption(options.values["timeout-ms"], "timeout-ms"),
+        idempotencyKey: options.values["idempotency-key"],
+      }), options);
+      return;
+    }
+    case "status": {
+      const [invocationId] = options.positionals;
+      const path = invocationId
+        ? `/invocations/${encodeURIComponent(invocationId)}`
+        : "/providers";
+      await printCapabilityResponse(await capabilityFetch(path, options), options);
+      return;
+    }
+    case "cancel": {
+      const [invocationId] = options.positionals;
+      if (!invocationId) throw new Error("Usage: devspace capabilities cancel <invocation-id>");
+      await printCapabilityResponse(await capabilityFetch(
+        `/invocations/${encodeURIComponent(invocationId)}/cancel`, options, {}, "POST",
+      ), options);
+      return;
+    }
+    case "close": {
+      const [leaseId] = options.positionals;
+      if (!leaseId) throw new Error("Usage: devspace capabilities close <lease-id>");
+      await printCapabilityResponse(await capabilityFetch(
+        `/leases/${encodeURIComponent(leaseId)}`, options, undefined, "DELETE",
+      ), options);
+      return;
+    }
+    case undefined:
+    case "help":
+    case "--help":
+      printCapabilitiesHelp();
+      return;
+    default:
+      throw new Error(`Unknown capabilities command: ${subcommand}`);
+  }
+}
+
+async function runProvidersCommand(args: string[]): Promise<void> {
+  const [subcommand, ...rest] = args;
+  if (subcommand !== "list" && subcommand !== "ls") {
+    throw new Error("Usage: devspace providers list [--json]");
+  }
+  const options = capabilityCliOptions(rest);
+  await printCapabilityResponse(await capabilityFetch("/providers", options), options);
+}
+
+interface ParsedCapabilityCliOptions {
+  flags: Set<string>;
+  values: Record<string, string | undefined>;
+  positionals: string[];
+}
+
+function capabilityCliOptions(args: string[]): ParsedCapabilityCliOptions {
+  const flags = new Set<string>();
+  const values: Record<string, string | undefined> = {};
+  const positionals: string[] = [];
+  const valueOptions = new Set([
+    "url", "provider", "tag", "cursor", "limit", "type", "selector", "ttl-seconds",
+    "arguments", "lease", "timeout-ms", "idempotency-key",
+  ]);
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index]!;
+    if (!argument.startsWith("--")) {
+      positionals.push(argument);
+      continue;
+    }
+    const name = argument.slice(2);
+    if (valueOptions.has(name)) {
+      const value = args[++index];
+      if (!value) throw new Error(`--${name} requires a value`);
+      values[name] = value;
+    } else if (["json", "available-only", "async"].includes(name)) {
+      flags.add(name);
+    } else {
+      throw new Error(`Unknown capability option: --${name}`);
+    }
+  }
+  return { flags, values, positionals };
+}
+
+async function capabilityFetch(
+  path: string,
+  options: ParsedCapabilityCliOptions,
+  body?: unknown,
+  method = body === undefined ? "GET" : "POST",
+): Promise<unknown> {
+  const config = loadConfig();
+  const base = options.values.url
+    ?? `http://${config.host === "::1" ? "[::1]" : config.host}:${config.port}/api/capabilities/v1`;
+  const headers: Record<string, string> = {};
+  const token = process.env.DEVSPACE_CAPABILITY_BEARER_TOKEN;
+  if (token) headers.authorization = `Bearer ${token}`;
+  if (body !== undefined) headers["content-type"] = "application/json";
+  const url = `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+  const response = await fetch(url, {
+    method,
+    headers,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const payload = await response.json() as unknown;
+  if (!response.ok) {
+    const message = typeof payload === "object" && payload
+      && "error" in payload && typeof payload.error === "object" && payload.error
+      && "code" in payload.error && "message" in payload.error
+      ? `${String(payload.error.code)}: ${String(payload.error.message)}`
+      : `Capability API returned HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  return payload;
+}
+
+async function printCapabilityResponse(
+  response: Promise<unknown> | unknown,
+  options: ParsedCapabilityCliOptions,
+): Promise<void> {
+  const payload = await response;
+  console.log(JSON.stringify(payload, null, options.flags.has("json") ? undefined : 2));
+}
+
+function addQuery(query: URLSearchParams, key: string, value: string | undefined): void {
+  if (value !== undefined) query.set(key, value);
+}
+
+function numberOption(value: string | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) throw new Error(`--${name} must be an integer`);
+  return parsed;
+}
+
+function jsonOption(value: string, name: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error(`--${name} must be valid JSON`);
+  }
+}
+
+function printCapabilitiesHelp(): void {
+  console.log([
+    "DevSpace capabilities",
+    "",
+    "Commands: list, search, describe, open, call, status, cancel, close",
+    "Common options: --url URL --json",
+    "OAuth mode: set DEVSPACE_CAPABILITY_BEARER_TOKEN for a capability-resource token.",
+  ].join("\n"));
 }
 
 async function runAgentsCommand(args: string[]): Promise<void> {

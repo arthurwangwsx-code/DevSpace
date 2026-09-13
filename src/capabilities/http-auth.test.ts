@@ -22,7 +22,6 @@ const workspaceResource = new URL("/mcp", config.publicBaseUrl).href;
 const now = Math.floor(Date.now() / 1_000);
 const store = new SqliteOAuthStore(config.stateDir);
 const client = new SqliteOAuthClientsStore(store, ["localhost"]).registerClient({
-  client_id: "capability-client",
   redirect_uris: ["http://localhost/callback"],
 });
 store.saveAccessToken(hash("valid-discover"), {

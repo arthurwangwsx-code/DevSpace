@@ -71,6 +71,7 @@ import {
 } from "./local-agent-availability.js";
 import { CapabilityError } from "./capabilities/errors.js";
 import { createCapabilityHttpRouter } from "./capabilities/http-router.js";
+import { createCapabilityMcpServer } from "./capabilities/mcp-adapter.js";
 import type { ProviderRegistration } from "./capabilities/provider.js";
 import { CapabilityRuntime } from "./capabilities/runtime.js";
 import type { CapabilityPrincipal } from "./capabilities/types.js";
@@ -1723,6 +1724,13 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
       resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(capabilityResourceServerUrl),
     })
     : passThroughAuth;
+  const capabilityMcpAuth = config.authMode === "oauth"
+    ? requireBearerAuth({
+      verifier: oauthProvider,
+      requiredScopes: [],
+      resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(capabilityResourceServerUrl),
+    })
+    : passThroughAuth;
   const capabilityRuntime = config.capabilities.enabled
     ? new CapabilityRuntime({
       stateDir: config.stateDir,
@@ -1992,6 +2000,33 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
         ),
       }),
     );
+
+    app.post("/capabilities/mcp", async (req, res) => {
+      try {
+        await capabilityReady;
+        await runMiddleware(capabilityMcpAuth, req, res);
+        if (res.headersSent) return;
+        const principal = capabilityPrincipal(req, config.authMode, capabilityResourceServerUrl);
+        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+        const server = createCapabilityMcpServer(capabilityRuntime, principal);
+        res.once("close", () => {
+          void transport.close();
+          void server.close();
+        });
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+      } catch (error) {
+        logEvent(config.logging, "error", "capability_mcp_request_error", {
+          requestId: res.locals.requestId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        if (!res.headersSent) sendJsonRpcError(res, 500, -32603, "Internal server error");
+      }
+    });
+    app.all("/capabilities/mcp", (_req, res) => {
+      res.setHeader("Allow", "POST");
+      sendJsonRpcError(res, 405, -32000, "Method not allowed in stateless MCP mode");
+    });
   }
 
   app.all("/mcp", async (req, res) => {
@@ -2215,6 +2250,16 @@ function capabilityPrincipal(
   };
 }
 
+function runMiddleware(
+  middleware: RequestHandler,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    middleware(req, res, (error?: unknown) => error ? reject(error) : resolve());
+  });
+}
+
 async function isMainModule(): Promise<boolean> {
   if (!process.argv[1]) return false;
 
@@ -2229,6 +2274,9 @@ if (await isMainModule()) {
     console.log(
       `devspace listening on http://${config.host}:${config.port}/mcp`,
     );
+    if (config.capabilities.enabled) {
+      console.log(`capabilities listening on http://${config.host}:${config.port}/capabilities/mcp`);
+    }
     console.log(`allowed roots: ${config.allowedRoots.join(", ")}`);
     console.log(`auth: ${config.authMode === "oauth" ? "oauth owner-token flow required" : "trusted local tunnel"}`);
     console.log(`logging: ${config.logging.level} ${config.logging.format}`);

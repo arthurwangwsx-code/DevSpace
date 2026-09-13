@@ -1212,7 +1212,7 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 3 | 完成（2026-09-13） | 本批提交 | 单实例、发现、崩溃退避恢复、权限门、禁用与关闭测试 | Fake Provider | 周期 health polling 留待硬化批次 |
 | 4 | 完成（2026-09-13） | 本批提交 | Grant、lease 越权、Schema、队列、幂等、取消、超时、输出上限和脱敏审计 | Fake Provider | Grant 持久化管理入口留待 API/CLI 批次 |
 | 5 | 完成（2026-09-13） | 本批提交 | REST catalog/search/lease/invoke/error/SSE；OAuth token/scope/audience/expiry 与双 resource metadata；完整 test/build/旧 MCP 契约 | Fake Provider + HTTP OAuth client | SSE 采用 resync 快照恢复；持久事件回放留待硬化批次 |
-| 6 | 待实施 | — | — | MCP/REST/CLI | — |
+| 6 | 完成（2026-09-13） | 本批提交 | 固定 8-tool MCP contract、共享 policy/invocation、CLI JSON stdout/退出码、旧 MCP 契约 | Fake Provider 经 MCP、REST 与 CLI | CLI 通过本机 REST；OAuth 模式需 `DEVSPACE_CAPABILITY_BEARER_TOKEN` |
 | 7 | 待实施 | — | — | 当前 Chrome | — |
 | 8 | 待实施 | — | — | 当前 Chrome + 锁屏 | — |
 | 9 | 待实施 | — | — | macOS UI + TCC | — |
