@@ -159,6 +159,9 @@ export class BrowserExtensionProvider extends BrowserControlProvider {}
 
 function capability(id: string, title: string, command: string, requiresLease: boolean, effects: typeof READ_ONLY, properties: JsonObject, required: string[] = [], aliases: string[] = []): ProviderCapability {
   const [, resource = "browser", action = "invoke"] = id.split(".");
-  return { descriptor: { id, version: "2.0.0", providerId: BROWSER_EXTENSION_PROVIDER_ID, title, description: title, tags: ["browser", resource, action], inputSchema: { type: "object", properties, required, additionalProperties: false }, effects, permissions: [], availability: { requiresAwake: true, requiresLoggedInSession: true, requiresUnlocked: false, requiresForegroundApp: false }, execution: { modes: ["sync"], defaultTimeoutMs: 20_000, maxTimeoutMs: 60_000, requiresLease, resourceTypes: requiresLease ? ["browser_page"] : [] }, metadata: { domain: "browser", resource, action, routing: "extension-first", transport: "chrome-native-messaging" } }, binding: { command }, aliases };
+  // Bump this version whenever any public browser capability contract changes.
+  // The persisted Capability Registry intentionally rejects same-version schema
+  // drift across DevSpace restarts.
+  return { descriptor: { id, version: "2.1.0", providerId: BROWSER_EXTENSION_PROVIDER_ID, title, description: title, tags: ["browser", resource, action], inputSchema: { type: "object", properties, required, additionalProperties: false }, effects, permissions: [], availability: { requiresAwake: true, requiresLoggedInSession: true, requiresUnlocked: false, requiresForegroundApp: false }, execution: { modes: ["sync"], defaultTimeoutMs: 20_000, maxTimeoutMs: 60_000, requiresLease, resourceTypes: requiresLease ? ["browser_page"] : [] }, metadata: { domain: "browser", resource, action, routing: "extension-first", transport: "chrome-native-messaging" } }, binding: { command }, aliases };
 }
 function asObject(value: JsonValue): JsonObject { return value && typeof value === "object" && !Array.isArray(value) ? value : {}; }

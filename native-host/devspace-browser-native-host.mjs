@@ -17,6 +17,7 @@ let socketConnected = false;
 let reconnectTimer;
 let stdinEnded = false;
 const pendingNativePayloads = [];
+let cachedProfileHello;
 
 function connectSocket() {
   if (stdinEnded || socket) return;
@@ -27,6 +28,13 @@ function connectSocket() {
     if (socket !== current) return;
     socketConnected = true;
     socketBuffer = "";
+    // The extension sends profile_hello only when it opens the native port.
+    // A DevSpace restart replaces the Unix-socket server without replacing
+    // that port, so replay the cached identity before any queued commands.
+    if (cachedProfileHello) {
+      current.write(cachedProfileHello);
+      current.write("\n");
+    }
     while (pendingNativePayloads.length > 0) {
       current.write(pendingNativePayloads.shift());
       current.write("\n");
@@ -57,17 +65,29 @@ function scheduleReconnect() {
 }
 
 function relayToSocket(payload) {
+  if (isProfileHello(payload)) cachedProfileHello = payload;
   if (socket && socketConnected && !socket.destroyed) {
     socket.write(payload);
     socket.write("\n");
     return;
   }
-  pendingNativePayloads.push(payload);
+  // profile_hello is state, not an RPC. The cached copy is replayed exactly
+  // once per socket connection and must not also accumulate in the queue.
+  if (!isProfileHello(payload)) pendingNativePayloads.push(payload);
   // Bound memory while DevSpace is offline. Chrome's extension side will retry
   // higher-level requests, so retaining the newest messages is preferable to
   // an unbounded native-host queue.
   if (pendingNativePayloads.length > 128) pendingNativePayloads.shift();
   connectSocket();
+}
+
+function isProfileHello(payload) {
+  try {
+    const value = JSON.parse(payload.toString("utf8"));
+    return value?.protocol === 1 && value?.event === "profile_hello";
+  } catch {
+    return false;
+  }
 }
 
 function writeNative(value) {
