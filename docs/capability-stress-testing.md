@@ -121,8 +121,14 @@ Provider recovery took 1.57 seconds, process-tree RSS peaked at 603.84 MiB, FD
 count ended 55 to 54 with one listener, and shutdown left no Provider process.
 Post-warm-up RSS growth and fitted slope were both negative. Artifact:
 `.build/capability-stress-soak-10m-delegated-final/2026-09-13T04-40-54-345Z`.
-The 24-hour release run started on 2026-09-13 and remains in progress under
-`.build/capability-stress-soak-24h-final-v8`; an in-progress process is not a
+The first 24-hour release attempt exposed an unbounded persistent-history gap:
+after about 1 hour 30 minutes it had 362,341 invocation rows, 724,682 audit
+events, and a 566 MiB fixture database despite the 2,000-entry in-memory limit.
+It was stopped rather than allowing a projected multi-gigabyte test artifact to
+grow for the sake of elapsed time. Commit `ba9bab5` applies the same count and
+retention limits to SQLite, preserves active invocations, and adds persistent
+row-count and disk-size release gates. A replacement run started from that
+commit under `.build/capability-stress-soak-24h-bounded-final`; it is not a
 passing release gate until its final receipt and cooldown checks complete.
 
 After switching the production default to delegated approval, a final local
@@ -139,6 +145,12 @@ idempotency, cancellation, timeout, output limit, Provider crash/recovery and
 shutdown cleanup; process-tree RSS peaked at 340.13 MiB and no Provider child
 survived shutdown. Artifact:
 `.build/capability-stress-browser-control-final/2026-09-13T07-45-27-624Z`.
+
+The persistent-bound crossing run completed 2,400/2,400 calls and ended with
+exactly 2,000 invocation rows, 4,949 audit events, and 3.62 MiB of SQLite state.
+All 26 gates passed, including 36 ms invocation p95 and zero orphan Providers.
+Artifact:
+`.build/capability-stress-persistent-bounds-crossing/2026-09-13T07-57-14-542Z`.
 
 ## Real-provider matrix
 
