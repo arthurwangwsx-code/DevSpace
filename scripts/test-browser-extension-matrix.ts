@@ -394,7 +394,20 @@ button.addEventListener('click',()=>{button.textContent='Increment '+(++count);d
 }
 
 function closeServer(server: Server): Promise<void> {
-  return new Promise((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise()));
+  return new Promise((resolvePromise, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(forceTimer);
+      clearTimeout(hardTimer);
+      if (error) reject(error); else resolvePromise();
+    };
+    const forceTimer = setTimeout(() => server.closeAllConnections(), 1_000);
+    const hardTimer = setTimeout(() => finish(), 5_000);
+    server.close((error) => finish(error ?? undefined));
+    server.closeIdleConnections();
+  });
 }
 
 function snapshotElements(value: JsonValue): Array<{ index?: number; label?: string }> {

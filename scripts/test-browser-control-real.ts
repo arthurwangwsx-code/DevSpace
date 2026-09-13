@@ -237,7 +237,20 @@ async function startFixture(): Promise<{ server: Server; url: string }> {
 }
 
 async function closeServer(server: Server): Promise<void> {
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(forceTimer);
+      clearTimeout(hardTimer);
+      if (error) reject(error); else resolve();
+    };
+    const forceTimer = setTimeout(() => server.closeAllConnections(), 1_000);
+    const hardTimer = setTimeout(() => finish(), 5_000);
+    server.close((error) => finish(error ?? undefined));
+    server.closeIdleConnections();
+  });
 }
 
 function requiredElement(elements: Array<Record<string, unknown>>, label: string): Record<string, unknown> {

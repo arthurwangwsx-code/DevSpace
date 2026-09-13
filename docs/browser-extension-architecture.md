@@ -172,6 +172,10 @@ Mac is already locked or another process owns the bridge socket, and writes a
 redacted JSON/Markdown receipt under `.build/browser-extension-matrix/`.
 Baseline-only mode performs the same discovery, lease, mutation, screenshot and
 cleanup checks but stops before asking for a lock transition.
+Both browser fixtures bound shutdown: idle HTTP connections close immediately,
+remaining fixture-only keep-alive connections close after one second, and the
+runner has a five-second cleanup ceiling. This keeps a successful browser run
+from hanging indefinitely during evidence generation.
 
 ## Security boundaries
 
