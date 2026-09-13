@@ -27,7 +27,7 @@ try {
     const status = object(await invoke("desktop.macos.status", {}));
     assert.equal(status.accessibilityTrusted, true, "signed production Host lacks Accessibility permission");
     assert.equal(status.screenCaptureGranted, true, "signed production Host lacks Screen Recording permission");
-    assert.equal(status.version, "0.4.3");
+    assert.equal(status.version, "0.4.4");
     return { processId: status.processId, version: status.version };
   });
 

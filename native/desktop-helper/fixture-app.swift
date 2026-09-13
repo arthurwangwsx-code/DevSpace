@@ -15,6 +15,11 @@ final class FixtureController: NSObject {
     }
 }
 
+// NSControl does not strongly retain its target. Keep the fixture controller
+// alive for the lifetime of the process so AXPress exercises the real action
+// path instead of a deallocated target.
+private var retainedController: FixtureController?
+
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 app.finishLaunching()
@@ -30,6 +35,7 @@ window.title = "DevSpace Desktop Fixture"
 let label = NSTextField(labelWithString: "DevSpace Fixture Label")
 label.frame = NSRect(x: 40, y: 170, width: 360, height: 24)
 let controller = FixtureController(label: label)
+retainedController = controller
 let input = NSTextField(string: "fixture-start")
 input.frame = NSRect(x: 40, y: 115, width: 360, height: 28)
 input.identifier = NSUserInterfaceItemIdentifier("fixture-input")

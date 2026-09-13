@@ -3,7 +3,7 @@ import ApplicationServices
 import Foundation
 import ScreenCaptureKit
 
-let helperVersion = "0.4.3"
+let helperVersion = "0.4.4"
 let userActivityYieldSeconds = 1.0
 let snapshotMaxAgeSeconds = 30.0
 let snapshotCacheLimit = 16
@@ -272,7 +272,7 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
                 throw HelperError(message: "The accessibility element rejected AXPress.")
             }
             return [
-                "clicked": true, "verified": true, "method": "AXPress",
+                "clicked": true, "verified": false, "method": "AXPress",
                 "snapshotId": snapshotId, "elementId": elementId,
                 "bundleId": bundleId, "processId": app.processIdentifier,
             ]
