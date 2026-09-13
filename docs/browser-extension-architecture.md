@@ -71,6 +71,19 @@ at the native host; the DevSpace socket uses newline-delimited JSON.
 {"protocol":1,"id":"...","ok":true,"result":{}}
 ```
 
+The socket also has one host-local control frame:
+
+```json
+{"protocol":1,"event":"native_host_shutdown","reason":"profile_replaced"}
+```
+
+DevSpace sends it only over the user-owned Unix socket when a newer connection
+replaces the same Chrome profile or a bridge request times out. The native host
+consumes the frame locally, does not forward it to Chrome, and exits cleanly;
+the extension's existing disconnect handler then creates a fresh Native
+Messaging port. A 250 ms server-side destroy fallback bounds retirement when an
+older or unresponsive host does not understand the control frame.
+
 Initial commands are `hello`, `list_tabs`, `use_tab`, `release_tab`, `close_tab`,
 `open_tab`, `snapshot`, `navigate`, `click`, `type`, `press`, and `screenshot`.
 Every page command except discovery requires ownership by the requesting
@@ -255,6 +268,10 @@ surface.
   stable Unix socket without requiring a Chrome extension reload. It caches the
   extension's `profile_hello` identity and replays it exactly once on each new
   socket connection, so a transport reconnect also restores profile discovery.
+- A superseded same-profile host is explicitly retired instead of merely having
+  its socket destroyed. Request timeouts retire that host as well. This prevents
+  a stale process from reconnecting with a cached `profile_hello` and racing the
+  healthy connection back out of the profile registry.
 - `browser.page.wait` supports selector/text/load plus URL and network-idle
   conditions.
 - Browser downloads expose status and completion waiting as canonical
