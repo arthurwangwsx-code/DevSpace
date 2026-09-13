@@ -45,6 +45,7 @@ export class BrowserExtensionProvider implements CapabilityProvider {
   }
   async discover(_signal: AbortSignal): Promise<ProviderCapability[]> {
     return [
+      capability("browser.extension.list_profiles", "List connected Chrome profiles", "__list_profiles", false, READ_ONLY, {}),
       capability("browser.extension.status", "Inspect the connected Chrome extension and profile", "hello", false, READ_ONLY, {}),
       capability("browser.extension.list_pages", "List current Chrome profile tabs", "list_tabs", false, READ_ONLY, { all: { type: "boolean", default: true } }, [], ["browser.chrome.list_pages"]),
       capability("browser.extension.open_page", "Open an agent Chrome tab", "open_tab", false, MUTATION, { url: { type: "string" } }, [], ["browser.chrome.open_page"]),
@@ -82,22 +83,30 @@ export class BrowserExtensionProvider implements CapabilityProvider {
   async open(request: ProviderOpenRequest, context: ProviderInvocationContext): Promise<ProviderLease> {
     if (request.resourceType !== "browser_page") throw new CapabilityError("invalid_arguments", "Browser extension supports browser_page leases only.");
     const tabId = request.selector.tabId;
+    const profileId = typeof request.selector.profileId === "string" ? request.selector.profileId : undefined;
     if (!Number.isInteger(tabId) || (tabId as number) < 0) throw new CapabilityError("invalid_arguments", "selector.tabId must be a non-negative integer.");
-    const result = await this.bridge.call("use_tab", { clientId: CLIENT_ID, tabId: tabId as number }, context.signal);
-    return { handle: { tabId: tabId as number }, display: asObject(result) };
+    const result = await this.bridge.call("use_tab", { clientId: CLIENT_ID, tabId: tabId as number }, context.signal, 10_000, profileId);
+    return {
+      handle: { tabId: tabId as number, ...(profileId ? { profileId } : {}) },
+      display: { ...asObject(result), ...(profileId ? { profileId } : {}) },
+    };
   }
   async close(lease: ProviderLease, context: ProviderInvocationContext): Promise<void> {
     const tabId = lease.handle.tabId;
     if (Number.isInteger(tabId)) {
       const command = lease.display.ownership === "agent" ? "close_tab" : "release_tab";
-      await this.bridge.call(command, { clientId: CLIENT_ID, tabId: tabId as number }, context.signal);
+      const profileId = typeof lease.handle.profileId === "string" ? lease.handle.profileId : undefined;
+      await this.bridge.call(command, { clientId: CLIENT_ID, tabId: tabId as number }, context.signal, 10_000, profileId);
     }
   }
   async invoke(request: ProviderInvocation, context: ProviderInvocationContext): Promise<JsonValue> {
     const command = typeof request.binding.command === "string" ? request.binding.command : undefined;
     if (!command) throw new CapabilityError("invalid_arguments", "Browser extension command binding is missing.");
     const params = request.arguments && typeof request.arguments === "object" && !Array.isArray(request.arguments) ? { ...request.arguments } : {};
+    if (command === "__list_profiles") return { profiles: this.bridge.listProfiles() };
     params.clientId = CLIENT_ID;
+    const requestedProfileId = typeof params.profileId === "string" ? params.profileId : undefined;
+    delete params.profileId;
     if (command === "set_input_files") {
       const files = Array.isArray(params.files) ? params.files : [];
       params.files = files.map((file) => this.validateUploadPath(file));
@@ -108,7 +117,9 @@ export class BrowserExtensionProvider implements CapabilityProvider {
       if (!Number.isInteger(tabId)) throw new CapabilityError("lease_required", "A browser_page lease is required.");
       params.tabId = tabId as number;
     }
-    try { return await this.bridge.call(command, params, context.signal); }
+    const leaseProfileId = typeof request.lease?.handle.profileId === "string" ? request.lease.handle.profileId : undefined;
+    const profileId = leaseProfileId ?? requestedProfileId;
+    try { return await this.bridge.call(command, params, context.signal, 10_000, profileId); }
     catch (error) {
       if (/not connected|disconnected|connection (?:failed|was replaced)|bridge stopped/i.test(String(error))) {
         throw new CapabilityError("provider_unavailable", "DevSpace Browser Bridge extension is not connected.", { cause: error });

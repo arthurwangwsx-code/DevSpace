@@ -32,6 +32,11 @@ await new Promise<void>((resolve, reject) => {
   extension.once("connect", resolve);
   extension.once("error", reject);
 });
+extension.write(JSON.stringify({
+  protocol: 1,
+  event: "profile_hello",
+  profile: { profileId: "profile-test", focused: true, extensionVersion: "0.2.0" },
+}) + "\n");
 await new Promise((resolve) => setTimeout(resolve, 10));
 assert.equal((await provider.health(lifetime.signal)).state, "ready");
 
@@ -60,8 +65,17 @@ extension.on("data", (chunk) => {
 });
 
 const capabilities = await provider.discover(lifetime.signal);
-assert.equal(capabilities.length, 24);
+assert.equal(capabilities.length, 25);
 const byId = new Map(capabilities.map((entry) => [entry.descriptor.id, entry]));
+const profiles = byId.get("browser.extension.list_profiles")!;
+assert.deepEqual(await provider.invoke({
+  capabilityId: profiles.descriptor.id,
+  descriptor: profiles.descriptor,
+  binding: profiles.binding,
+  arguments: {},
+}, { signal: lifetime.signal }), {
+  profiles: [{ profileId: "profile-test", focused: true, extensionVersion: "0.2.0" }],
+});
 assert.deepEqual(byId.get("browser.extension.snapshot")?.aliases, ["browser.chrome.take_snapshot"]);
 assert.equal(byId.get("browser.extension.evaluate")?.descriptor.effects.openWorld, true);
 assert.ok(byId.get("browser.extension.set_input_files"));
@@ -78,8 +92,8 @@ assert.deepEqual(seen.at(-1), {
   params: { clientId: "devspace", all: true },
 });
 
-const lease = await provider.open({ resourceType: "browser_page", selector: { tabId: 7 } }, invocationContext);
-assert.deepEqual(lease.handle, { tabId: 7 });
+const lease = await provider.open({ resourceType: "browser_page", selector: { tabId: 7, profileId: "profile-test" } }, invocationContext);
+assert.deepEqual(lease.handle, { tabId: 7, profileId: "profile-test" });
 assert.equal(lease.display.ownership, "adopted");
 const snapshot = byId.get("browser.extension.snapshot")!;
 await assert.rejects(
@@ -127,7 +141,7 @@ await assert.rejects(
 await provider.close(lease, invocationContext);
 assert.equal(seen.at(-1)?.command, "release_tab");
 
-const agentLease = await provider.open({ resourceType: "browser_page", selector: { tabId: 8 } }, invocationContext);
+const agentLease = await provider.open({ resourceType: "browser_page", selector: { tabId: 8, profileId: "profile-test" } }, invocationContext);
 assert.equal(agentLease.display.ownership, "agent");
 await provider.close(agentLease, invocationContext);
 assert.equal(seen.at(-1)?.command, "close_tab");

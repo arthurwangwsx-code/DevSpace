@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as prompts from "@clack/prompts";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
@@ -55,7 +55,7 @@ import {
 } from "./capabilities/providers/chrome-devtools-provider.js";
 import { createMacosDesktopManifest } from "./capabilities/providers/macos-desktop-provider.js";
 
-type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "grants" | "help" | "version";
+type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "grants" | "browser" | "help" | "version";
 const require = createRequire(import.meta.url);
 const SUPPORTED_NODE_RANGE = ">=20.12 <27";
 
@@ -94,6 +94,9 @@ async function main(argv: string[]): Promise<void> {
     case "grants":
       await runGrantsCommand(args);
       return;
+    case "browser":
+      await runBrowserCommand(args);
+      return;
     case "help":
       printHelp();
       return;
@@ -105,7 +108,7 @@ async function main(argv: string[]): Promise<void> {
 
 function normalizeCommand(command: string | undefined): Command {
   if (!command || command === "serve" || command === "start") return "serve";
-  if (command === "init" || command === "doctor" || command === "verify" || command === "config" || command === "agents" || command === "capabilities" || command === "providers" || command === "grants") return command;
+  if (command === "init" || command === "doctor" || command === "verify" || command === "config" || command === "agents" || command === "capabilities" || command === "providers" || command === "grants" || command === "browser") return command;
   if (command === "help" || command === "--help" || command === "-h") return "help";
   if (command === "version" || command === "--version" || command === "-v") return "version";
   throw new Error(`Unknown command: ${command}`);
@@ -408,6 +411,7 @@ function printHelp(): void {
       "  devspace providers add-chrome [--command <absolute-path>]",
       "  devspace providers add-desktop --command <absolute-path>",
       "  devspace grants list|add|revoke [options]",
+      "  devspace browser doctor|package|install-host|stage-upgrade",
       "  devspace -v, --version   Print the installed version",
       "",
       "For temporary tunnels:",
@@ -653,6 +657,42 @@ async function runGrantsCommand(args: string[]): Promise<void> {
     return;
   }
   throw new Error("Usage: devspace grants list|add|revoke [options]");
+}
+
+async function runBrowserCommand(args: string[]): Promise<void> {
+  const [subcommand, ...rest] = args;
+  const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const scripts: Record<string, string> = {
+    doctor: join(packageRoot, "scripts", "doctor-browser-extension.mjs"),
+    package: join(packageRoot, "scripts", "package-browser-extension.mjs"),
+    "install-host": join(packageRoot, "native-host", "install.mjs"),
+    "stage-upgrade": join(packageRoot, "scripts", "stage-browser-extension-upgrade.mjs"),
+  };
+  if (!subcommand || subcommand === "help" || subcommand === "--help") {
+    console.log([
+      "Browser extension commands:",
+      "  devspace browser doctor",
+      "  devspace browser package",
+      "  devspace browser install-host",
+      "  devspace browser stage-upgrade",
+    ].join("\n"));
+    return;
+  }
+  const script = scripts[subcommand];
+  if (!script || rest.length > 0) {
+    throw new Error("Usage: devspace browser doctor|package|install-host|stage-upgrade");
+  }
+  await new Promise<void>((resolveRun, rejectRun) => {
+    const child = spawn(process.execPath, [script], {
+      stdio: "inherit",
+      env: process.env,
+    });
+    child.once("error", rejectRun);
+    child.once("exit", (code, signal) => {
+      if (code === 0) resolveRun();
+      else rejectRun(new Error(`Browser command ${subcommand} failed (${signal ?? `exit ${code ?? "unknown"}`}).`));
+    });
+  });
 }
 
 interface ParsedCapabilityCliOptions {

@@ -8,15 +8,23 @@ export const BROWSER_EXTENSION_PROTOCOL = 1;
 const DEFAULT_MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
 
 interface PendingCall {
+  socket: net.Socket;
   resolve(value: JsonValue): void;
   reject(error: Error): void;
   timer: NodeJS.Timeout;
 }
 
+interface ExtensionConnection {
+  socket: net.Socket;
+  buffer: string;
+  profileId?: string;
+  profile?: JsonObject;
+}
+
 export class BrowserExtensionBridge {
   private server?: net.Server;
-  private extension?: net.Socket;
-  private extensionBuffer = "";
+  private readonly connections = new Set<ExtensionConnection>();
+  private readonly profiles = new Map<string, ExtensionConnection>();
   private pending = new Map<string, PendingCall>();
 
   constructor(
@@ -37,18 +45,36 @@ export class BrowserExtensionBridge {
 
   async stop(): Promise<void> {
     this.rejectPending(new Error("browser extension bridge stopped"));
-    this.extension?.destroy();
-    this.extension = undefined;
+    for (const connection of this.connections) connection.socket.destroy();
+    this.connections.clear();
+    this.profiles.clear();
     if (this.server) await new Promise<void>((resolve) => this.server!.close(() => resolve()));
     this.server = undefined; await rm(this.socketPath, { force: true });
   }
 
-  get connected(): boolean { return Boolean(this.extension && !this.extension.destroyed); }
+  get connected(): boolean { return [...this.connections].some(({ socket }) => !socket.destroyed); }
 
-  call(command: string, params: JsonObject, signal: AbortSignal, timeoutMs = 10_000): Promise<JsonValue> {
+  listProfiles(): JsonObject[] {
+    return [...this.profiles.entries()].map(([profileId, connection]) => ({
+      profileId,
+      ...(connection.profile ?? {}),
+    }));
+  }
+
+  call(
+    command: string,
+    params: JsonObject,
+    signal: AbortSignal,
+    timeoutMs = 10_000,
+    profileId?: string,
+  ): Promise<JsonValue> {
     if (signal.aborted) return Promise.reject(new Error("browser extension request aborted"));
-    const socket = this.extension;
-    if (!socket || socket.destroyed) return Promise.reject(new Error("browser extension is not connected"));
+    const socket = this.selectConnection(profileId)?.socket;
+    if (!socket || socket.destroyed) {
+      return Promise.reject(new Error(profileId
+        ? `browser extension profile is not connected: ${profileId}`
+        : "browser extension is not connected"));
+    }
     const id = randomUUID();
     return new Promise<JsonValue>((resolve, reject) => {
       const finish = (error?: Error, value?: JsonValue) => {
@@ -58,7 +84,7 @@ export class BrowserExtensionBridge {
       };
       const aborted = () => finish(new Error("browser extension request aborted"));
       const timer = setTimeout(() => finish(new Error(`browser extension request timed out: ${command}`)), timeoutMs);
-      this.pending.set(id, { resolve: (value) => finish(undefined, value), reject: (error) => finish(error), timer });
+      this.pending.set(id, { socket, resolve: (value) => finish(undefined, value), reject: (error) => finish(error), timer });
       signal.addEventListener("abort", aborted, { once: true });
       socket.write(
         JSON.stringify({ protocol: BROWSER_EXTENSION_PROTOCOL, id, command, params }) + "\n",
@@ -70,43 +96,69 @@ export class BrowserExtensionBridge {
   }
 
   private accept(socket: net.Socket): void {
-    if (this.extension && !this.extension.destroyed) {
-      this.rejectPending(new Error("browser extension connection was replaced"));
-      this.extension.destroy();
-    }
-    this.extension = socket; this.extensionBuffer = "";
+    const connection: ExtensionConnection = { socket, buffer: "" };
+    this.connections.add(connection);
     socket.setEncoding("utf8");
-    socket.on("data", (chunk) => this.consume(String(chunk)));
+    socket.on("data", (chunk) => this.consume(connection, String(chunk)));
     socket.on("error", () => {
-      if (this.extension === socket) this.rejectPending(new Error("browser extension connection failed"));
+      this.rejectPendingForSocket(socket, new Error("browser extension connection failed"));
     });
     socket.on("close", () => {
-      if (this.extension === socket) {
-        this.extension = undefined;
-        this.extensionBuffer = "";
-        this.rejectPending(new Error("browser extension disconnected"));
+      this.connections.delete(connection);
+      if (connection.profileId && this.profiles.get(connection.profileId) === connection) {
+        this.profiles.delete(connection.profileId);
       }
+      this.rejectPendingForSocket(socket, new Error("browser extension disconnected"));
     });
   }
 
-  private consume(chunk: string): void {
-    this.extensionBuffer += chunk;
-    if (Buffer.byteLength(this.extensionBuffer) > this.maxMessageBytes) {
-      this.rejectPending(new Error("browser extension response exceeds the bridge limit"));
-      this.extension?.destroy();
+  private consume(connection: ExtensionConnection, chunk: string): void {
+    connection.buffer += chunk;
+    if (Buffer.byteLength(connection.buffer) > this.maxMessageBytes) {
+      this.rejectPendingForSocket(connection.socket, new Error("browser extension response exceeds the bridge limit"));
+      connection.socket.destroy();
       return;
     }
     for (;;) {
-      const newline = this.extensionBuffer.indexOf("\n"); if (newline < 0) return;
-      const line = this.extensionBuffer.slice(0, newline); this.extensionBuffer = this.extensionBuffer.slice(newline + 1);
+      const newline = connection.buffer.indexOf("\n"); if (newline < 0) return;
+      const line = connection.buffer.slice(0, newline); connection.buffer = connection.buffer.slice(newline + 1);
       if (!line.trim()) continue;
       try {
-        const message = JSON.parse(line) as { protocol?: number; id?: string; ok?: boolean; result?: JsonValue; error?: string };
-        if (message.protocol !== BROWSER_EXTENSION_PROTOCOL || !message.id) continue;
+        const message = JSON.parse(line) as {
+          protocol?: number;
+          id?: string;
+          ok?: boolean;
+          result?: JsonValue;
+          error?: string;
+          event?: string;
+          profile?: JsonObject;
+        };
+        if (message.protocol !== BROWSER_EXTENSION_PROTOCOL) continue;
+        if (message.event === "profile_hello" && message.profile) {
+          const profileId = typeof message.profile.profileId === "string" ? message.profile.profileId : undefined;
+          if (!profileId) continue;
+          const replaced = this.profiles.get(profileId);
+          if (replaced && replaced !== connection) replaced.socket.destroy();
+          connection.profileId = profileId;
+          connection.profile = message.profile;
+          this.profiles.set(profileId, connection);
+          continue;
+        }
+        if (!message.id) continue;
         const pending = this.pending.get(message.id); if (!pending) continue;
+        if (pending.socket !== connection.socket) continue;
         if (message.ok) pending.resolve(message.result ?? null); else pending.reject(new Error(message.error || "browser extension request failed"));
       } catch {}
     }
+  }
+
+  private selectConnection(profileId?: string): ExtensionConnection | undefined {
+    if (profileId) return this.profiles.get(profileId);
+    const focused = [...this.profiles.values()].find(({ profile }) => profile?.focused === true);
+    if (focused) return focused;
+    if (this.profiles.size > 0) return this.profiles.values().next().value;
+    if (this.connections.size === 1) return this.connections.values().next().value;
+    return undefined;
   }
 
   private rejectPending(error: Error): void {
@@ -115,5 +167,13 @@ export class BrowserExtensionBridge {
       pending.reject(error);
     }
     this.pending.clear();
+  }
+
+  private rejectPendingForSocket(socket: net.Socket, error: Error): void {
+    for (const pending of this.pending.values()) {
+      if (pending.socket !== socket) continue;
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
   }
 }

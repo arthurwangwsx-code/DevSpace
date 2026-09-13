@@ -231,3 +231,21 @@ Unpacked upgrades can be staged into the already-installed profile with
 `npm run stage:browser-extension-upgrade`; Chrome still requires a user-visible
 extension reload when the manifest or requested permissions change. This is a
 Chrome security boundary and is not bypassed.
+
+The same lifecycle is also available through the product CLI:
+
+```text
+devspace browser package
+devspace browser install-host
+devspace browser stage-upgrade
+devspace browser doctor
+```
+
+v0.2 also introduces persistent per-profile identities. Every installed Chrome
+profile keeps a `profileId` in extension local storage and registers it when the
+Native Messaging port connects. The bridge accepts multiple profile connections
+at once instead of replacing the previous socket. Calls and page leases can pin
+a `profileId`; without one, DevSpace prefers the connected profile whose Chrome
+window reports itself focused, then falls back to the first connected profile.
+This prevents cross-profile page selection while preserving a zero-config
+single-profile path.

@@ -19,6 +19,15 @@ for (const flag of ["-v", "--version"]) {
   assert.equal(output, packageJson.version);
 }
 
+const browserHelp = execFileSync("node", ["--import", "tsx", "src/cli.ts", "browser", "--help"], {
+  encoding: "utf8",
+  env: { ...process.env, DEVSPACE_CONFIG_DIR: "/tmp/devspace-cli-browser-help-test" },
+});
+assert.match(browserHelp, /devspace browser package/);
+assert.match(browserHelp, /devspace browser install-host/);
+assert.match(browserHelp, /devspace browser stage-upgrade/);
+assert.match(browserHelp, /devspace browser doctor/);
+
 const root = mkdtempSync(join(tmpdir(), "devspace-cli-agents-test-"));
 try {
   const configDir = join(root, ".devspace");

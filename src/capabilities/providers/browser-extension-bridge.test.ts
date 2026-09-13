@@ -58,6 +58,41 @@ oversizedExtension.on("data", (chunk) => {
 const oversized = bridge.call("oversized", {}, controller.signal, 2_000);
 await assert.rejects(oversized, /exceeds the bridge limit/);
 
+const profileA = net.createConnection(socketPath);
+const profileB = net.createConnection(socketPath);
+await Promise.all([
+  new Promise<void>((resolve, reject) => { profileA.once("connect", resolve); profileA.once("error", reject); }),
+  new Promise<void>((resolve, reject) => { profileB.once("connect", resolve); profileB.once("error", reject); }),
+]);
+profileA.write(JSON.stringify({ protocol: 1, event: "profile_hello", profile: { profileId: "profile-a", focused: false, extensionVersion: "0.2.0" } }) + "\n");
+profileB.write(JSON.stringify({ protocol: 1, event: "profile_hello", profile: { profileId: "profile-b", focused: true, extensionVersion: "0.2.0" } }) + "\n");
+await new Promise((resolve) => setTimeout(resolve, 10));
+assert.deepEqual(bridge.listProfiles().map((profile) => profile.profileId).sort(), ["profile-a", "profile-b"]);
+
+let inputA = "";
+let inputB = "";
+profileA.setEncoding("utf8");
+profileB.setEncoding("utf8");
+profileA.on("data", (chunk) => respond(profileA, "a", chunk));
+profileB.on("data", (chunk) => respond(profileB, "b", chunk));
+assert.deepEqual(await bridge.call("who", {}, controller.signal, 2_000, "profile-a"), { profile: "a" });
+assert.deepEqual(await bridge.call("who", {}, controller.signal, 2_000), { profile: "b" });
+
+function respond(socket: net.Socket, label: string, chunk: string | Buffer) {
+  if (socket === profileA) inputA += chunk;
+  else inputB += chunk;
+  const value = socket === profileA ? inputA : inputB;
+  const newline = value.indexOf("\n");
+  if (newline < 0) return;
+  const request = JSON.parse(value.slice(0, newline));
+  if (socket === profileA) inputA = value.slice(newline + 1);
+  else inputB = value.slice(newline + 1);
+  socket.write(JSON.stringify({ protocol: 1, id: request.id, ok: true, result: { profile: label } }) + "\n");
+}
+
+profileA.destroy();
+profileB.destroy();
+
 await bridge.stop();
 await rm(root, { recursive: true, force: true });
-console.log("browser extension bridge tests passed: fragmented reply, abort, disconnect, size limit");
+console.log("browser extension bridge tests passed: fragmented reply, abort, disconnect, size limit, multi-profile routing");

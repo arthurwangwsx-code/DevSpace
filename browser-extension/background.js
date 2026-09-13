@@ -25,6 +25,20 @@ function ensureProfileId() {
   return profileIdPromise;
 }
 
+async function profileMetadata() {
+  let focused = false;
+  try { focused = Boolean((await chrome.windows.getLastFocused())?.focused); } catch {}
+  let tabCount = 0;
+  try { tabCount = (await chrome.tabs.query({})).length; } catch {}
+  return {
+    profileId: await ensureProfileId(),
+    extensionVersion: chrome.runtime.getManifest().version,
+    incognito: Boolean(chrome.extension?.inIncognitoContext),
+    focused,
+    tabCount,
+  };
+}
+
 async function persistState() {
   const serialized = {};
   for (const [clientId, value] of clients) {
@@ -349,10 +363,11 @@ async function handle(message, replyPort) {
   try { replyPort.postMessage({ protocol: PROTOCOL, id, ok: true, result: await handler(params) }); }
   catch (error) { replyPort.postMessage({ protocol: PROTOCOL, id, ok: false, error: error?.message || String(error) }); }
 }
-function connect() {
+async function connect() {
   if (port) return; try { port = chrome.runtime.connectNative(HOST); } catch { port = null; return; }
   const current = port; current.onMessage.addListener((message) => void handle(message, current));
   current.onDisconnect.addListener(() => { void chrome.runtime.lastError; if (port === current) port = null; });
+  try { current.postMessage({ protocol: PROTOCOL, event: "profile_hello", profile: await profileMetadata() }); } catch {}
 }
 chrome.tabs.onRemoved.addListener((tabId) => {
   const clientId = tabOwner.get(tabId);
@@ -365,9 +380,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   networkEvents.delete(tabId);
 });
 chrome.alarms.create("devspace-reconnect", { periodInMinutes: 1 });
-chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "devspace-reconnect") connect(); });
+chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "devspace-reconnect") void connect(); });
 // Establish Native Messaging immediately. Commands still await restored
 // ownership state in handle(), so reconnect does not need to wait for storage
 // I/O before Chrome can attach the native port.
-connect();
+void connect();
 void ensureStateReady();

@@ -12,6 +12,7 @@ const localStorage = {};
 let tabRemovedListener;
 let debuggerEventListener;
 const downloads = [];
+const debuggerCommands = [];
 const port = {
   onMessage: { addListener(listener) { nativeMessageListener = listener; } },
   onDisconnect: { addListener() {} },
@@ -50,7 +51,18 @@ const chrome = {
   debugger: {
     async attach() {},
     async detach() {},
-    async sendCommand() { return {}; },
+    async sendCommand(_target, method, params = {}) {
+      debuggerCommands.push({ method, params });
+      if (method === "Runtime.evaluate") {
+        if (String(params.expression).startsWith("document.querySelector")) return { result: { objectId: "object-1" } };
+        return { result: { value: true, type: "boolean" } };
+      }
+      if (method === "DOM.describeNode") return { node: { backendNodeId: 99 } };
+      if (method === "Performance.getMetrics") return { metrics: [{ name: "TaskDuration", value: 1.5 }] };
+      if (method === "Page.getNavigationHistory") return { currentIndex: 1, entries: [{ id: 1 }, { id: 2 }, { id: 3 }] };
+      if (method === "Page.captureScreenshot") return { data: "ZmFrZQ==" };
+      return {};
+    },
     onEvent: { addListener(listener) { debuggerEventListener = listener; } },
   },
   downloads: {
@@ -92,6 +104,16 @@ assert.equal(consoleResult.result.messages[0].args[0], "hello");
 const networkResult = await request("list_network", { clientId: "devspace", tabId: 7 });
 assert.equal(networkResult.result.requests[0].headers.Authorization, "<redacted>");
 assert.equal(networkResult.result.requests[0].headers.Accept, "application/json");
+const uploaded = await request("set_input_files", { clientId: "devspace", tabId: 7, index: 0, files: ["/tmp/a.txt"] });
+assert.equal(uploaded.result.files, 1);
+const fileCommand = debuggerCommands.find(({ method }) => method === "DOM.setFileInputFiles");
+assert.equal(fileCommand?.params.backendNodeId, 99);
+assert.equal(fileCommand?.params.files[0], "/tmp/a.txt");
+const perf = await request("performance", { clientId: "devspace", tabId: 7 });
+assert.equal(perf.result.metrics[0].name, "TaskDuration");
+const shot = await request("screenshot", { clientId: "devspace", tabId: 7, format: "jpeg", quality: 75, fullPage: true });
+assert.equal(shot.result.mimeType, "image/jpeg");
+assert.equal(debuggerCommands.find(({ method }) => method === "Page.captureScreenshot")?.params.captureBeyondViewport, true);
 await request("release_tab", { clientId: "devspace", tabId: 7 });
 assert.equal(tabs.has(7), true);
 
