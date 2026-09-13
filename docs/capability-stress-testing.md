@@ -35,14 +35,23 @@ npm run stress:capabilities -- \
   --concurrency 24 \
   --operations 200 \
   --churn 500 \
-  --capacity-requests 96
+  --capacity-requests 96 \
+  --progress-interval 5s
 ```
 
 Use `--duration 30m`, `--think-time 100`, and `--cooldown 60s` for accelerated
-soaks. `--keep-fixture` is diagnostic-only. Results are written as stable
+soaks. `--progress-interval` controls the live checkpoint cadence; it defaults
+to 60 seconds for `soak` and one second for shorter profiles.
+`--keep-fixture` is diagnostic-only. Results are written as stable
 `summary.json`, human-readable `summary.md`, and bounded `server-output.log`
-under `artifacts/capability-stress/<timestamp>/`. Setup failures write
-`failure.json` as well.
+under `artifacts/capability-stress/<timestamp>/`. Every run also atomically
+replaces `progress.json` while it is active. External supervisors can parse that
+file without racing a partial write and inspect the current phase, elapsed time,
+completed workload, latest process-tree sample, and bounded persistent-state
+counts. Its `state` is `running`, `complete`, or `failed`; setup failures also
+write `failure.json`. A `complete` progress file is an observability checkpoint,
+not release evidence by itself: callers must still require a passing
+`summary.json` and the appropriate release receipt.
 
 `test:real-mcp-mount` is dependency-sensitive rather than deterministic: it
 uses the locally installed official `chrome-devtools-mcp`, points it at an
