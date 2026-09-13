@@ -249,7 +249,7 @@ export class CapabilityRegistry {
       effects: { ...entry.descriptor.effects },
       availability: {
         state,
-        ...(health?.reasonCode ? { reasonCode: health.reasonCode } : {}),
+        ...(state !== "ready" && health?.reasonCode ? { reasonCode: health.reasonCode } : {}),
       },
     };
   }

@@ -169,6 +169,8 @@ try {
   });
   assert.equal(permissionAware.list().items.find(({ id }) => id === "desktop.macos.status")?.availability.state,
     "ready");
+  assert.equal(permissionAware.list().items.find(({ id }) => id === "desktop.macos.status")?.availability.reasonCode,
+    undefined);
   assert.equal(permissionAware.list().items.find(({ id }) => id === "desktop.macos.snapshot_app")?.availability.state,
     "permission_required");
   assert.deepEqual(permissionAware.list({ availableOnly: true }).items.map(({ id }) => id),

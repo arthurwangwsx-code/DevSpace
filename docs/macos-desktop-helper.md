@@ -7,16 +7,30 @@ mounted by DevSpace or by another MCP host without adding a new public DevSpace 
 
 ```bash
 npm run test:desktop-helper
+DEVSPACE_DESKTOP_SIGNING_IDENTITY='<codesign identity>' \
+  npm run build:desktop-host
+sh scripts/install-desktop-host.sh
+node scripts/doctor-desktop-host.mjs "$HOME/Applications/DevSpaceDesktopHost.app"
 devspace providers add-desktop \
-  --command "$PWD/.build/devspace-desktop-helper"
+  --command "$HOME/Applications/DevSpaceDesktopHost.app/Contents/MacOS/devspace-desktop-helper"
 ```
 
 Run `npm run test:desktop-lock-boundary` separately while macOS is locked; the
 test must reject UI and lease operations.
 
-The build script compiles an optimized binary and applies an ad-hoc signature with the stable identifier
-`com.devspace.desktop-helper`. Production packaging should replace this with a Developer ID signature and
-keep the installed path and designated requirement stable before the user grants TCC permissions.
+The legacy helper script compiles a bare ad-hoc binary for fixture tests. The desktop-host build creates an
+App Bundle with the fixed identifier `com.devspace.desktop-host`. Set
+`DEVSPACE_DESKTOP_SIGNING_IDENTITY` to a stable Apple Development or Developer ID identity before installing
+and granting TCC permissions; the default ad-hoc build is only for deterministic packaging tests. The
+installer uses the fixed current-user path, verifies the signature, and moves an existing installation into
+a timestamped backup instead of deleting it. `doctor-desktop-host.mjs` reports whether the installed bundle
+has a valid, non-ad-hoc identity. Compatible upgrades must use the same team and identifier.
+
+After updating the installed executable path, use `devspace.providers.control` through the fixed Capability
+MCP or the REST admin action to reload the Provider without restarting DevSpace. Runtime permission truth is
+reported separately by `devspace capabilities doctor --provider desktop.macos.accessibility --json`; a live
+process can be `degraded` while its status capability remains available and protected capabilities report
+`permission_required`.
 
 Enable DevSpace capabilities and restart the service after registration. The Provider child is then kept
 alive by the same supervisor used for Chrome and external MCP servers.
