@@ -187,6 +187,10 @@ from hanging indefinitely during evidence generation.
 - Releasing an adopted lease leaves the tab open; releasing an agent-created
   tab closes only that agent-created tab.
 - The bridge does not persist cookies, page contents, passwords or CDP sessions.
+- Bridge failures use the same stable public error contract for invoke and lease
+  lifecycle calls: disconnects become `provider_unavailable`, request deadlines
+  become `timeout`, cancellation becomes `cancelled`, and oversized replies
+  become `output_too_large` instead of leaking an internal 500.
 
 ## Delivery phases
 
