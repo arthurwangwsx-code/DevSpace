@@ -18,6 +18,14 @@ devspace providers add-desktop \
 Run `npm run test:desktop-lock-boundary` separately while macOS is locked; the
 test must reject UI and lease operations.
 
+After granting the two permissions to the installed signed Host, run
+`npm run test:desktop-runtime-fixture` while unlocked. This is the production-path
+acceptance test: it calls the fixed REST API through the dynamically mounted Provider
+and installed Host, validates AX redaction, window screenshot, click, text and allowed
+key input, restarts only the dedicated fixture app, and requires the old process-bound
+lease to fail with `lease_expired` before a recovery lease succeeds. It refuses to run
+while locked or while either production Host permission is absent.
+
 The legacy helper script compiles a bare ad-hoc binary for fixture tests. The desktop-host build creates an
 App Bundle with the fixed identifier `com.devspace.desktop-host`. Set
 `DEVSPACE_DESKTOP_SIGNING_IDENTITY` to a stable Apple Development or Developer ID identity before installing

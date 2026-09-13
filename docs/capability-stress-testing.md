@@ -19,6 +19,8 @@ npm run stress:capabilities:local
 npm run stress:capabilities:soak
 npm run test:real-mcp-mount
 npm run test:desktop-provider-performance
+npm run test:desktop-runtime-fixture
+npm run test:capability-release -- --lane locked
 
 # Reproduce one dimension
 npm run stress:capabilities -- \
@@ -40,6 +42,36 @@ uses the locally installed official `chrome-devtools-mcp`, points it at an
 intentionally unreachable loopback browser endpoint so no user page is touched,
 and validates the real package's dynamic install/discover/search/reload/remove
 process lifecycle. Its receipts are stored under `.build/real-mcp-mount/`.
+
+`test:desktop-runtime-fixture` is deliberately separate from the direct Helper
+canary. It drives the deployed REST → Runtime → mounted Provider → signed Host path,
+including a real fixture-app process restart and old-lease rejection. It requires an
+unlocked session plus Accessibility and Screen Recording permission for the installed
+Host, and writes receipts under `.build/desktop-runtime-fixture/`.
+
+## Release lanes
+
+`test:capability-release` is the top-level evidence orchestrator. It runs each gate
+as a direct child process, stores console output in a per-gate log, records
+the exact Git commit and dirty paths, stops on the first failure by default, and
+writes a JSON/Markdown lane receipt under `.build/capability-release/`.
+
+- `core`: typecheck, full unit/integration suite, production build, isolated
+  capability stress smoke, and a real external `chrome-devtools-mcp` mount.
+- `locked`: all core gates plus the fail-closed desktop lock boundary and live
+  production Provider reload/continuous-catalog canary.
+- `unlocked`: all core gates plus the direct Helper fixture, the deployed
+  production desktop fixture (including stale-process lease rejection), and the
+  production Provider canary.
+- `browser-transition`: starts unlocked and runs the live extension baseline →
+  locked continuation → unlocked recovery matrix through the production REST API.
+
+Use `--list` to inspect a lane without running it, `--only gate1,gate2` for a
+targeted rerun (recorded as `releaseEligible: false` even when it passes), and
+`--continue-on-failure` when collecting a complete failure
+inventory. A release requires passing receipts from `locked`, `unlocked`,
+`browser-transition`, and the separate 24-hour capability soak. The orchestrator
+never treats a skipped lane or a precondition failure as a pass.
 
 | Profile | Clients | Calls/client | MCP session churn | Duration |
 | --- | ---: | ---: | ---: | ---: |
