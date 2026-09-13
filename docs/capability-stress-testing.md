@@ -121,7 +121,9 @@ Provider recovery took 1.57 seconds, process-tree RSS peaked at 603.84 MiB, FD
 count ended 55 to 54 with one listener, and shutdown left no Provider process.
 Post-warm-up RSS growth and fitted slope were both negative. Artifact:
 `.build/capability-stress-soak-10m-delegated-final/2026-09-13T04-40-54-345Z`.
-The 24-hour release run remains outstanding.
+The 24-hour release run started on 2026-09-13 and remains in progress under
+`.build/capability-stress-soak-24h-final-v8`; an in-progress process is not a
+passing release gate until its final receipt and cooldown checks complete.
 
 After switching the production default to delegated approval, a final local
 profile ran without creating any Grant: 1,600/1,600 business calls, 256 MCP
@@ -129,6 +131,14 @@ session reconnects, REST/MCP invocation p95 of 38 ms, all 23 gates passed,
 66 accepted plus 62 explicit rate-limited burst calls, peak process-tree RSS
 626.86 MiB, and no orphan Provider. Artifact:
 `.build/capability-stress-local-final-v2/2026-09-13T04-38-38-245Z`.
+
+After canonical `browser.control` routing and the fixed eight-tool contract were
+landed, a fresh smoke completed 80/80 calls with 2 ms discovery and 27 ms
+invocation p95. All 23 gates passed, including overload normalization,
+idempotency, cancellation, timeout, output limit, Provider crash/recovery and
+shutdown cleanup; process-tree RSS peaked at 340.13 MiB and no Provider child
+survived shutdown. Artifact:
+`.build/capability-stress-browser-control-final/2026-09-13T07-45-27-624Z`.
 
 ## Real-provider matrix
 
