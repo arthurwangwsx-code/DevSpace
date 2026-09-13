@@ -183,6 +183,23 @@ policy, queue, cancellation, normalized failures, provider crash/backoff/restart
 process-tree resources, and shutdown cleanup without touching Chrome or desktop
 state.
 
+### 2026-09-13 Computer Use desktop baseline
+
+The production desktop Provider now has a dedicated read-only performance canary that
+uses the real fixed Capability REST/MCP surface and the installed signed desktop Host.
+With all 14 `desktop.macos.*` descriptors mounted, 50 REST status samples and 25 MCP
+status samples completed with REST p95 44 ms and MCP p95 48 ms. The Provider PID stayed
+stable and its measured RSS grew by only 928 KiB during the run. The canary correctly
+reported the Host as `degraded` because Accessibility and Screen Recording had not yet
+been granted; permission state is therefore part of the performance receipt instead of
+being hidden by a restart loop.
+
+The same revision's isolated Capability smoke workload completed 80/80 business
+invocations with invocation p95 24 ms and a 355.27 MiB peak process-tree RSS. Its only
+failed release gate before commit was `runtime_source_provenance`, because the harness
+deliberately rejects a dirty source tree. Rerun the same profile from the final clean
+commit before treating it as release evidence.
+
 ## Framework and protocol decisions
 
 Do not replace Express based only on framework microbenchmarks. The observed stalls

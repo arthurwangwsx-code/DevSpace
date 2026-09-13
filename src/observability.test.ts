@@ -11,6 +11,8 @@ import { createServer } from "./server.js";
 const root = await mkdtemp(join(tmpdir(), "devspace-observability-test-"));
 const warnings: string[] = [];
 const originalWarn = console.warn;
+const originalAsyncLogFile = process.env.DEVSPACE_ASYNC_LOG_FILE;
+delete process.env.DEVSPACE_ASYNC_LOG_FILE;
 const config = loadConfig({
   DEVSPACE_CONFIG_DIR: join(root, "config"),
   DEVSPACE_STATE_DIR: join(root, "state"),
@@ -57,6 +59,8 @@ try {
   assert.ok(events.some((event) => event.event === "http_request_slow"));
 } finally {
   console.warn = originalWarn;
+  if (originalAsyncLogFile === undefined) delete process.env.DEVSPACE_ASYNC_LOG_FILE;
+  else process.env.DEVSPACE_ASYNC_LOG_FILE = originalAsyncLogFile;
   await transport.terminateSession().catch(() => {});
   await client.close();
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));

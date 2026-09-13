@@ -1998,6 +1998,13 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
     res.json({
       ok: true,
       name: "devspace",
+      release: {
+        id: process.env.DEVSPACE_RELEASE_ID ?? "development",
+        sourceCommit: process.env.DEVSPACE_SOURCE_COMMIT ?? "unknown",
+        pid: process.pid,
+        uptimeSeconds: Math.floor(process.uptime()),
+        nodeVersion: process.version,
+      },
       capabilities: capabilityRuntime
         ? { enabled: true, catalogRevision: capabilityRuntime.registry.revision }
         : { enabled: false },
