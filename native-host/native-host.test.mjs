@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const root = await mkdtemp(path.join(os.tmpdir(), "devspace-native-host-"));
 const socketPath = path.join(root, "bridge.sock");
 const here = path.dirname(fileURLToPath(import.meta.url));
-const server = net.createServer();
+let server = net.createServer();
 await new Promise((resolve, reject) => {
   server.once("error", reject);
   server.listen(socketPath, resolve);
@@ -49,12 +49,49 @@ const newline = socketInput.indexOf(0x0a);
 const relayed = JSON.parse(socketInput.subarray(0, newline).toString("utf8"));
 assert.equal(relayed.result.length, largeResult.length);
 
-child.stdin.end();
+// DevSpace restarts must not require reloading the Chrome extension. Drop the
+// Unix-socket server while leaving the native host alive, then recreate it and
+// verify the same host process reconnects in both directions.
 socket.destroy();
+await new Promise((resolve) => server.close(resolve));
+await rm(socketPath, { force: true });
+server = net.createServer();
+await new Promise((resolve, reject) => {
+  server.once("error", reject);
+  server.listen(socketPath, resolve);
+});
+const reconnected = await new Promise((resolve, reject) => {
+  const timer = setTimeout(() => reject(new Error("native host did not reconnect")), 5_000);
+  server.once("connection", (value) => { clearTimeout(timer); resolve(value); });
+});
+reconnected.write(JSON.stringify({ protocol: 1, id: "after-restart", command: "hello", params: {} }) + "\n");
+await waitFor(() => {
+  let offset = 0;
+  while (stdout.length >= offset + 4) {
+    const size = stdout.readUInt32LE(offset);
+    if (stdout.length < offset + 4 + size) return false;
+    const value = JSON.parse(stdout.subarray(offset + 4, offset + 4 + size).toString("utf8"));
+    if (value.id === "after-restart") return true;
+    offset += 4 + size;
+  }
+  return false;
+});
+let reconnectedInput = "";
+reconnected.setEncoding("utf8");
+reconnected.on("data", (chunk) => { reconnectedInput += chunk; });
+const afterRestart = Buffer.from(JSON.stringify({ protocol: 1, id: "extension-after-restart", ok: true, result: { ok: true } }));
+const afterRestartHeader = Buffer.alloc(4);
+afterRestartHeader.writeUInt32LE(afterRestart.length, 0);
+child.stdin.write(afterRestartHeader);
+child.stdin.write(afterRestart);
+await waitFor(() => reconnectedInput.includes("extension-after-restart"));
+
+child.stdin.end();
+reconnected.destroy();
 server.close();
 await new Promise((resolve) => child.once("exit", resolve));
 await rm(root, { recursive: true, force: true });
-console.log("browser native host tests passed: framing and 2 MiB extension response relay");
+console.log("browser native host tests passed: framing, large relay, and DevSpace restart reconnect");
 
 async function waitFor(predicate, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;

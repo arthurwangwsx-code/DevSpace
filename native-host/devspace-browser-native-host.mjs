@@ -12,7 +12,63 @@ const socketPath = process.env.DEVSPACE_BROWSER_SOCKET
   || path.join(os.homedir(), ".devspace", "browser-extension.sock");
 let nativeBuffer = Buffer.alloc(0);
 let socketBuffer = "";
-const socket = net.createConnection(socketPath);
+let socket;
+let socketConnected = false;
+let reconnectTimer;
+let stdinEnded = false;
+const pendingNativePayloads = [];
+
+function connectSocket() {
+  if (stdinEnded || socket) return;
+  const current = net.createConnection(socketPath);
+  socket = current;
+  current.setEncoding("utf8");
+  current.on("connect", () => {
+    if (socket !== current) return;
+    socketConnected = true;
+    socketBuffer = "";
+    while (pendingNativePayloads.length > 0) {
+      current.write(pendingNativePayloads.shift());
+      current.write("\n");
+    }
+  });
+  current.on("data", consumeSocketData);
+  current.on("error", () => {
+    // DevSpace may legitimately restart while Chrome keeps this native host
+    // alive. Do not kill the host; reconnect to the stable Unix socket.
+  });
+  current.on("close", () => {
+    if (socket === current) {
+      socket = undefined;
+      socketConnected = false;
+      socketBuffer = "";
+    }
+    scheduleReconnect();
+  });
+}
+
+function scheduleReconnect() {
+  if (stdinEnded || reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = undefined;
+    connectSocket();
+  }, 250);
+  reconnectTimer.unref?.();
+}
+
+function relayToSocket(payload) {
+  if (socket && socketConnected && !socket.destroyed) {
+    socket.write(payload);
+    socket.write("\n");
+    return;
+  }
+  pendingNativePayloads.push(payload);
+  // Bound memory while DevSpace is offline. Chrome's extension side will retry
+  // higher-level requests, so retaining the newest messages is preferable to
+  // an unbounded native-host queue.
+  if (pendingNativePayloads.length > 128) pendingNativePayloads.shift();
+  connectSocket();
+}
 
 function writeNative(value) {
   const payload = Buffer.from(JSON.stringify(value));
@@ -28,11 +84,11 @@ process.stdin.on("data", (chunk) => {
     if (length > MAX_CHROME_TO_HOST_BYTES) process.exit(2);
     if (nativeBuffer.length < length + 4) return;
     const payload = nativeBuffer.subarray(4, length + 4); nativeBuffer = nativeBuffer.subarray(length + 4);
-    socket.write(payload); socket.write("\n");
+    relayToSocket(payload);
   }
 });
 
-socket.on("data", (chunk) => {
+function consumeSocketData(chunk) {
   socketBuffer += chunk.toString("utf8");
   if (Buffer.byteLength(socketBuffer) > MAX_HOST_TO_CHROME_BYTES) process.exit(2);
   for (;;) {
@@ -41,6 +97,12 @@ socket.on("data", (chunk) => {
     if (!line.trim()) continue;
     try { writeNative(JSON.parse(line)); } catch { writeNative({ protocol: 1, ok: false, error: "invalid DevSpace bridge response" }); }
   }
+}
+
+process.stdin.on("end", () => {
+  stdinEnded = true;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  socket?.end();
 });
-socket.on("error", () => process.exit(1));
-process.stdin.on("end", () => socket.end());
+
+connectSocket();
