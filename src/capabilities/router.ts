@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
-import { SqliteCapabilityAuditStore, digest } from "./audit-store.js";
+import {
+  DEFAULT_CAPABILITY_INVOCATION_RETENTION_MS,
+  DEFAULT_CAPABILITY_MAX_TRACKED_INVOCATIONS,
+  SqliteCapabilityAuditStore,
+  digest,
+} from "./audit-store.js";
 import { jsonValueSchema } from "./descriptor-schema.js";
 import { CapabilityError, normalizeCapabilityError } from "./errors.js";
 import { CapabilityLeaseManager } from "./leases.js";
@@ -102,8 +107,10 @@ export class CapabilityInvocationRouter {
       maxOutputBytes: options.maxOutputBytes ?? 4 * 1024 * 1024,
       defaultTimeoutMs: options.defaultTimeoutMs ?? 30_000,
       maxTimeoutMs: options.maxTimeoutMs ?? 120_000,
-      maxTrackedInvocations: options.maxTrackedInvocations ?? 10_000,
-      invocationRetentionMs: options.invocationRetentionMs ?? 24 * 60 * 60_000,
+      maxTrackedInvocations: options.maxTrackedInvocations
+        ?? DEFAULT_CAPABILITY_MAX_TRACKED_INVOCATIONS,
+      invocationRetentionMs: options.invocationRetentionMs
+        ?? DEFAULT_CAPABILITY_INVOCATION_RETENTION_MS,
     };
     this.onEvent = options.onEvent ?? (() => {});
     this.sessionStateProbe = options.sessionStateProbe ?? new SystemSessionStateProbe();

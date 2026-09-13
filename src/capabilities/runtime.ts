@@ -38,7 +38,10 @@ export class CapabilityRuntime {
   constructor(options: CapabilityRuntimeOptions) {
     this.enforcePolicy = options.enforcePolicy ?? true;
     this.store = new SqliteCapabilityCatalogStore(options.stateDir);
-    this.audit = new SqliteCapabilityAuditStore(options.stateDir);
+    this.audit = new SqliteCapabilityAuditStore(options.stateDir, {
+      maxInvocations: options.router?.maxTrackedInvocations,
+      invocationRetentionMs: options.router?.invocationRetentionMs,
+    });
     this.grants = new SqliteCapabilityGrantStore(options.stateDir);
     this.registry = new CapabilityRegistry(this.store);
     this.supervisor = new ProviderSupervisor(this.registry, {

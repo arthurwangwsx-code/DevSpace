@@ -2,11 +2,12 @@
 import { execFile } from "node:child_process";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer as createNetServer } from "node:net";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { openDatabase } from "../db/client.js";
 import {
   runCapabilityStressWorkload,
   type CapabilityStressReport,
@@ -34,6 +35,13 @@ interface ProcessTreeSample {
   descendantCount: number;
   fdCount?: number;
   listeningSocketCount?: number;
+}
+
+interface PersistentStateSummary {
+  bytes: number;
+  mib: number;
+  invocationRows: number;
+  auditEventRows: number;
 }
 
 class BoundedOutput {
@@ -119,8 +127,16 @@ try {
   await stopChild(server);
   server = undefined;
   const orphanDescendants = await waitForPidsExit(descendantPids, 5_000);
+  const persistentState = await summarizePersistentState(join(fixtureRoot, "state"));
   phase = "write_report";
-  const report = buildReport(workload, cli, samples, serverOutput.value, orphanDescendants);
+  const report = buildReport(
+    workload,
+    cli,
+    samples,
+    serverOutput.value,
+    orphanDescendants,
+    persistentState,
+  );
   await writeFile(join(artifactDir, "summary.json"), `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(join(artifactDir, "summary.md"), renderMarkdown(report));
   await writeFile(join(artifactDir, "server-output.log"), serverOutput.value);
@@ -160,6 +176,7 @@ function buildReport(
   processSamples: ProcessTreeSample[],
   serverLog: string,
   orphanDescendants: number,
+  persistentState: PersistentStateSummary,
 ) {
   const memory = summarizeMemory(processSamples);
   const noFatal = !/heap out of memory|FATAL ERROR|uncaught|panic:/i.test(serverLog);
@@ -183,6 +200,24 @@ function buildReport(
       passed: orphanDescendants === 0,
       actual: orphanDescendants,
       expected: "0",
+    },
+    {
+      name: "persistent_invocation_history_bounded",
+      passed: persistentState.invocationRows <= 2_000,
+      actual: persistentState.invocationRows,
+      expected: "<= 2000 rows",
+    },
+    {
+      name: "persistent_audit_history_bounded",
+      passed: persistentState.auditEventRows <= 8_000,
+      actual: persistentState.auditEventRows,
+      expected: "<= 8000 rows",
+    },
+    {
+      name: "persistent_state_below_128_mib",
+      passed: persistentState.mib < 128,
+      actual: persistentState.mib,
+      expected: "< 128 MiB",
     },
   ];
   if (workload.durationMs >= 10 * 60_000) checks.push(
@@ -215,8 +250,43 @@ function buildReport(
     },
     workload,
     memory,
+    persistentState,
     checks,
   };
+}
+
+async function summarizePersistentState(stateDirectory: string): Promise<PersistentStateSummary> {
+  const database = openDatabase(stateDirectory);
+  let invocationRows = 0;
+  let auditEventRows = 0;
+  try {
+    invocationRows = countRows(database.sqlite.prepare(
+      "select count(*) as count from capability_invocations",
+    ).get());
+    auditEventRows = countRows(database.sqlite.prepare(
+      "select count(*) as count from capability_audit_events",
+    ).get());
+  } finally {
+    database.close();
+  }
+  const bytes = await directoryBytes(stateDirectory);
+  return { bytes, mib: rounded(bytes / 1_024 / 1_024), invocationRows, auditEventRows };
+}
+
+function countRows(value: unknown): number {
+  return value && typeof value === "object" && "count" in value
+    ? Number((value as { count: number | bigint }).count)
+    : 0;
+}
+
+async function directoryBytes(directory: string): Promise<number> {
+  let total = 0;
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) total += await directoryBytes(path);
+    else if (entry.isFile()) total += (await stat(path)).size;
+  }
+  return total;
 }
 
 async function writeFixtureManifest(directory: string, stateDirectory: string): Promise<void> {
@@ -581,7 +651,7 @@ function renderMarkdown(report: ReturnType<typeof buildReport>): string {
     `| ${entry.passed ? "PASS" : "FAIL"} | ${entry.name} | ${entry.actual} | ${entry.expected} |`).join("\n");
   const operationRows = Object.entries(report.workload.metrics.operations).map(([name, value]) =>
     `| ${name} | ${value.count} | ${value.errors} | ${value.meanMs} | ${value.p95Ms} | ${value.p99Ms} |`).join("\n");
-  return `# DevSpace capability stress report\n\n- Result: ${report.ok ? "PASS" : "FAIL"}\n- Profile: ${report.run.profile}\n- Duration: ${report.workload.durationMs} ms\n- Concurrency: ${report.workload.options.concurrency}\n- Business invocations: ${report.workload.totals.completedInvocations}/${report.workload.totals.attemptedInvocations}\n- Max process-tree RSS: ${report.memory.maxRssMb} MiB\n- Max descendant processes: ${report.memory.maxDescendantCount}\n- Max file descriptors: ${report.memory.fdSamples ? report.memory.maxFdCount : "unavailable"}\n- Max listening sockets: ${report.memory.fdSamples ? report.memory.maxListeningSocketCount : "unavailable"}\n\n## Checks\n\n| Result | Check | Actual | Expected |\n| --- | --- | --- | --- |\n${checkRows}\n\n## Latency\n\n| Operation | Count | Errors | Mean ms | p95 ms | p99 ms |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${operationRows}\n`;
+  return `# DevSpace capability stress report\n\n- Result: ${report.ok ? "PASS" : "FAIL"}\n- Profile: ${report.run.profile}\n- Duration: ${report.workload.durationMs} ms\n- Concurrency: ${report.workload.options.concurrency}\n- Business invocations: ${report.workload.totals.completedInvocations}/${report.workload.totals.attemptedInvocations}\n- Max process-tree RSS: ${report.memory.maxRssMb} MiB\n- Persistent state: ${report.persistentState.mib} MiB (${report.persistentState.invocationRows} invocations, ${report.persistentState.auditEventRows} audit events)\n- Max descendant processes: ${report.memory.maxDescendantCount}\n- Max file descriptors: ${report.memory.fdSamples ? report.memory.maxFdCount : "unavailable"}\n- Max listening sockets: ${report.memory.fdSamples ? report.memory.maxListeningSocketCount : "unavailable"}\n\n## Checks\n\n| Result | Check | Actual | Expected |\n| --- | --- | --- | --- |\n${checkRows}\n\n## Latency\n\n| Operation | Count | Errors | Mean ms | p95 ms | p99 ms |\n| --- | ---: | ---: | ---: | ---: | ---: |\n${operationRows}\n`;
 }
 
 function rounded(value: number): number {

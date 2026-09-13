@@ -3,11 +3,38 @@ import { openDatabase, type DatabaseHandle } from "../db/client.js";
 import { redactCapabilityValue } from "./redaction.js";
 import type { CapabilityInvocation, JsonValue } from "./types.js";
 
+export const DEFAULT_CAPABILITY_MAX_TRACKED_INVOCATIONS = 10_000;
+export const DEFAULT_CAPABILITY_INVOCATION_RETENTION_MS = 24 * 60 * 60_000;
+
+export interface CapabilityAuditStoreOptions {
+  maxInvocations?: number;
+  invocationRetentionMs?: number;
+  maxAuditEvents?: number;
+  pruneEveryWrites?: number;
+}
+
 export class SqliteCapabilityAuditStore {
   private readonly database: DatabaseHandle;
+  private readonly maxInvocations: number;
+  private readonly invocationRetentionMs: number;
+  private readonly maxAuditEvents: number;
+  private readonly pruneEveryWrites: number;
+  private writesSincePrune = 0;
 
-  constructor(stateDir: string) {
+  constructor(stateDir: string, options: CapabilityAuditStoreOptions = {}) {
     this.database = openDatabase(stateDir);
+    this.maxInvocations = options.maxInvocations ?? DEFAULT_CAPABILITY_MAX_TRACKED_INVOCATIONS;
+    this.invocationRetentionMs = options.invocationRetentionMs
+      ?? DEFAULT_CAPABILITY_INVOCATION_RETENTION_MS;
+    this.maxAuditEvents = options.maxAuditEvents ?? this.maxInvocations * 4;
+    this.pruneEveryWrites = options.pruneEveryWrites ?? 1_000;
+    if (!Number.isInteger(this.maxInvocations) || this.maxInvocations < 1
+      || !Number.isInteger(this.invocationRetentionMs) || this.invocationRetentionMs < 1_000
+      || !Number.isInteger(this.maxAuditEvents) || this.maxAuditEvents < 1
+      || !Number.isInteger(this.pruneEveryWrites) || this.pruneEveryWrites < 1) {
+      throw new Error("Invalid capability audit retention limits.");
+    }
+    this.prune();
   }
 
   saveInvocation(invocation: CapabilityInvocation, argumentsValue: JsonValue): void {
@@ -37,8 +64,9 @@ export class SqliteCapabilityAuditStore {
       invocation.queuedAt,
       invocation.startedAt ?? null,
       invocation.finishedAt ?? null,
-      new Date(Date.parse(invocation.queuedAt) + 24 * 60 * 60_000).toISOString(),
+      new Date(Date.parse(invocation.queuedAt) + this.invocationRetentionMs).toISOString(),
     );
+    this.maybePrune();
   }
 
   recordEvent(input: {
@@ -66,10 +94,52 @@ export class SqliteCapabilityAuditStore {
       JSON.stringify(redactCapabilityValue(input.summary ?? {})),
       new Date().toISOString(),
     );
+    this.maybePrune();
+  }
+
+  prune(now = new Date()): { invocations: number; auditEvents: number } {
+    const nowIso = now.toISOString();
+    const auditCutoff = new Date(now.getTime() - this.invocationRetentionMs).toISOString();
+    const transaction = this.database.sqlite.transaction(() => {
+      let invocations = this.database.sqlite.prepare(`
+        delete from capability_invocations
+        where status not in ('queued', 'running') and expires_at <= ?
+      `).run(nowIso).changes;
+      invocations += this.database.sqlite.prepare(`
+        delete from capability_invocations
+        where invocation_id in (
+          select invocation_id from capability_invocations
+          where status not in ('queued', 'running')
+          order by queued_at desc, invocation_id desc
+          limit -1 offset ?
+        )
+      `).run(this.maxInvocations).changes;
+      let auditEvents = this.database.sqlite.prepare(`
+        delete from capability_audit_events where created_at <= ?
+      `).run(auditCutoff).changes;
+      auditEvents += this.database.sqlite.prepare(`
+        delete from capability_audit_events
+        where event_id in (
+          select event_id from capability_audit_events
+          order by created_at desc, event_id desc
+          limit -1 offset ?
+        )
+      `).run(this.maxAuditEvents).changes;
+      return { invocations, auditEvents };
+    });
+    const removed = transaction();
+    this.writesSincePrune = 0;
+    return removed;
   }
 
   close(): void {
+    this.prune();
     this.database.close();
+  }
+
+  private maybePrune(): void {
+    this.writesSincePrune += 1;
+    if (this.writesSincePrune >= this.pruneEveryWrites) this.prune();
   }
 }
 
