@@ -84,12 +84,16 @@ REST and MCP endpoints share the same limits and invocation history.
 | `DEVSPACE_CAPABILITY_MAX_OUTPUT_BYTES` | `4194304` | Maximum serialized result size: 4 MiB. |
 | `DEVSPACE_CAPABILITY_MAX_TRACKED_INVOCATIONS` | `10000` | Maximum terminal invocation records retained in process memory. Active and queued records are never evicted. |
 | `DEVSPACE_CAPABILITY_INVOCATION_RETENTION_MS` | `86400000` | Maximum age of terminal invocation records retained in process memory: 24 hours. |
+| `DEVSPACE_BROWSER_EXTENSION` | `0` | Set to `1` to register the opt-in current-profile Chrome extension Provider. The extension and native host must already be installed. |
+| `DEVSPACE_BROWSER_SOCKET` | `~/.devspace/browser-extension.sock` | Override the local Unix socket used by the extension Provider. The development native host uses the default path unless installed with a matching launcher configuration. |
 
 The count and age bounds apply to the live lookup/idempotency index. Provider,
 invocation, and audit evidence persisted in SQLite follows the database's
 separate operational retention policy. See
 [Capability stress testing](capability-stress-testing.md) for repeatable capacity,
 recovery, process-tree, and long-run measurements.
+See [Browser Extension Provider](browser-extension-architecture.md) for current
+Chrome installation, ownership semantics and the real lock-transition test.
 
 Long-lived launchers may set `DEVSPACE_ASYNC_LOG_FILE` to move structured event
 writes to a worker thread. `DEVSPACE_ASYNC_LOG_MAX_BYTES` defaults to 64 MiB,
