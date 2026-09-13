@@ -1,0 +1,50 @@
+import type {
+  CapabilityDescriptor,
+  JsonObject,
+  JsonValue,
+  ProviderHealth,
+} from "./types.js";
+
+export interface ProviderCapability {
+  descriptor: CapabilityDescriptor;
+  binding: JsonObject;
+  aliases?: string[];
+}
+
+export interface ProviderInvocation {
+  capabilityId: string;
+  descriptor: CapabilityDescriptor;
+  binding: JsonObject;
+  arguments: JsonValue;
+}
+
+export interface ProviderInvocationContext {
+  signal: AbortSignal;
+}
+
+export interface ProviderContext {
+  signal: AbortSignal;
+  reportFailure(error: unknown): void;
+  log(
+    level: "debug" | "info" | "warn" | "error",
+    event: string,
+    fields?: JsonObject,
+  ): void;
+}
+
+export interface CapabilityProvider {
+  readonly id: string;
+  start(context: ProviderContext): Promise<void>;
+  stop(reason: string): Promise<void>;
+  health(signal: AbortSignal): Promise<ProviderHealth>;
+  discover(signal: AbortSignal): Promise<ProviderCapability[]>;
+  invoke(request: ProviderInvocation, context: ProviderInvocationContext): Promise<JsonValue>;
+  cancel?(providerInvocationId: string): Promise<void>;
+}
+
+export interface ProviderRegistration {
+  provider: CapabilityProvider;
+  kind: string;
+  enabled: boolean;
+  manifestDigest?: string;
+}
