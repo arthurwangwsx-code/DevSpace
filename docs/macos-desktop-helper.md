@@ -42,8 +42,11 @@ Permission doctor probes always launch the installed bundle through LaunchServic
 directly from an already-authorized Terminal can inherit the terminal's TCC responsibility and produce a
 false positive; that result is not accepted as evidence that the background App identity is authorized.
 
-After updating the installed executable path, use `devspace.providers.control` through the fixed Capability
-MCP or the REST admin action to reload the Provider without restarting DevSpace. Runtime permission truth is
+After replacing the executable at the same installed path, use `devspace.providers.control` through the fixed
+Capability MCP or the REST admin action to reload the Provider without restarting DevSpace. If the transport,
+capability version, or public Schema changes, submit the complete replacement manifest through
+`devspace.providers.update` or `PUT /api/capabilities/v1/admin/providers/:id`; that path atomically updates the
+persisted manifest and restores the previous live Provider if the replacement cannot become usable. Runtime permission truth is
 reported separately by `devspace capabilities doctor --provider desktop.macos.accessibility --json`; a live
 process can be `degraded` while its status capability remains available and protected capabilities report
 `permission_required`.

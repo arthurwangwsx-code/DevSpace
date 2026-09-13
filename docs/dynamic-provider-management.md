@@ -135,14 +135,26 @@ An update uses the same fixed `capability_invoke` tool:
     "capabilityId": "devspace.providers.update",
     "arguments": {
       "providerId": "example.dynamic.mcp",
-      "manifest": { "apiVersion": "devspace.capabilities/v1", "kind": "McpProvider", "metadata": { "id": "example.dynamic.mcp" }, "spec": {} }
+      "manifest": {
+        "apiVersion": "devspace.capabilities/v1",
+        "kind": "McpProvider",
+        "metadata": { "id": "example.dynamic.mcp", "title": "Example MCP v2" },
+        "spec": {
+          "enabled": true,
+          "transport": {
+            "type": "stdio",
+            "command": "/absolute/path/to/example-mcp-v2",
+            "args": []
+          },
+          "discoverAllTools": true,
+          "discoveredToolVersion": "2.0.0",
+          "tools": []
+        }
+      }
     }
   }
 }
 ```
-
-The abbreviated `manifest` above only illustrates the envelope; a real request
-must include a complete manifest accepted by the schema.
 
 `reload` constructs a new downstream client from the persisted manifest, stops
 the old child/connection, swaps the registration, rediscovers its tools, and

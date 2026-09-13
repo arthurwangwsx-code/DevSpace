@@ -48,7 +48,10 @@ under `artifacts/capability-stress/<timestamp>/`. Setup failures write
 uses the locally installed official `chrome-devtools-mcp`, points it at an
 intentionally unreachable loopback browser endpoint so no user page is touched,
 and validates the real package's dynamic install/discover/search/reload/remove
-process lifecycle. Its receipts are stored under `.build/real-mcp-mount/`.
+process lifecycle. It also replaces the live manifest through
+`devspace.providers.update`, verifies the projected capability version and
+catalog revision change, and confirms that the fixed outer MCP remains eight
+tools. Its receipts are stored under `.build/real-mcp-mount/`.
 
 `test:desktop-runtime-fixture` is deliberately separate from the direct Helper
 canary. It drives the deployed REST → Runtime → mounted Provider → signed Host path,
@@ -76,7 +79,8 @@ writes a JSON/Markdown lane receipt under `.build/capability-release/`.
   locked continuation → unlocked recovery matrix through the production REST API.
 - `service-transition`: runs from an independent local/CI process, submits a production
   `--activate` through the production Workspace MCP, requires launchd to restore a new
-  current-source PID, and reconnects for a post-restart command canary.
+  current-source PID, requires every enabled Provider to recover to `ready` or
+  `degraded`, and reconnects for a post-restart command canary.
 
 Use `--list` to inspect a lane without running it, `--only gate1,gate2` for a
 targeted rerun (recorded as `releaseEligible: false` even when it passes), and
