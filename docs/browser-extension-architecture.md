@@ -88,15 +88,22 @@ console / network / performance          -> Chrome DevTools provider
 browser/system chrome UI                 -> desktop/computer-use provider
 ```
 
-The first implementation registers the extension as
-`browser.chrome.extension` with `browser.extension.*` capability IDs so it can
-be validated alongside the existing provider without creating duplicate public
-IDs. A later router migration aliases ordinary `browser.chrome.*` calls to the
-extension after real-browser validation is complete.
+The browser bridge registers as the internal `browser.control` provider and
+publishes canonical second-level IDs such as `browser.tab.list`,
+`browser.page.click`, `browser.debug.network`, and `browser.file.upload`.
+Extension/CDP/Playwright names are implementation details and may appear only as
+search aliases or internal provider metadata. They are not part of the public
+Capability contract.
 
-During phase 1 the provider is opt-in with `DEVSPACE_BROWSER_EXTENSION=1`, so a
-machine that has not installed the extension/native host remains healthy and
-the existing DevTools provider behavior is unchanged.
+The first-level Capability MCP contract remains the fixed eight-tool API
+documented in `docs/capability-api-principles.md`; browser growth MUST NOT add a
+new MCP tool.
+
+When the native-host manifest is installed, DevSpace automatically enables the
+browser control provider. `DEVSPACE_BROWSER_EXTENSION=0` remains an explicit
+operator kill switch, while `DEVSPACE_BROWSER_EXTENSION=1` forces the provider
+on for development and diagnostics. A machine without the extension/native host
+remains healthy.
 
 The extension manifest contains a stable development public key. This gives the
 unpacked build a deterministic ID, so Native Messaging can be installed before
@@ -120,9 +127,10 @@ packaging key lives outside Git under `~/.devspace/keys/`.
    `releaseReady` reports CRX availability. Doctor deliberately does not
    connect to that single-client socket because doing so would evict the real
    extension transport; the lock matrix performs the live call check.
-5. Start DevSpace with `DEVSPACE_BROWSER_EXTENSION=1`. Reload the extension or
-   wait for its one-minute reconnect alarm, then query provider health and the
-   capability catalog.
+5. Start DevSpace. The installed native-host manifest enables browser control
+   automatically; use `DEVSPACE_BROWSER_EXTENSION=1` only to force-enable it.
+   Reload the extension or wait for its reconnect alarm, then query provider
+   health and the capability catalog.
 
 The installer copies the bridge into Application Support and creates a launcher
 pinned to the absolute Node executable used at install time. This matters
@@ -168,12 +176,13 @@ redacted JSON/Markdown receipt under `.build/browser-extension-matrix/`.
 ## Delivery phases
 
 1. **Bridge foundation**: protocol, native host, extension, provider and unit
-   tests. Keep existing DevTools behavior unchanged.
+   tests.
 2. **Real Chrome validation**: install unpacked extension/native host, turn off
    remote debugging, verify list/adopt/snapshot/click/type/navigation/release on
    the user's normal profile without stealing focus.
-3. **Extension-first routing**: introduce browser routing/profile registry and
-   make normal `browser.chrome.*` operations prefer the extension.
+3. **Extension-first routing**: publish canonical `browser.*` capabilities from
+   `browser.control`; retain Chrome DevTools mappings as hidden internal
+   backends discoverable only through explicit diagnostic filters.
 4. **Product hardening**: profile selection, install/doctor CLI, reconnect,
    packaged extension, Edge/Chromium compatibility and soak tests.
 

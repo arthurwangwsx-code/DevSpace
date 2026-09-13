@@ -10,6 +10,7 @@ const baseEnv = {
   DEVSPACE_CONFIG_DIR: emptyConfigDir,
   DEVSPACE_ALLOWED_ROOTS: process.cwd(),
   DEVSPACE_OAUTH_OWNER_TOKEN: "test-owner-token-that-is-long-enough",
+  DEVSPACE_BROWSER_EXTENSION: "0",
 };
 
 assert.equal(loadConfig(baseEnv).widgets, "full");
@@ -20,6 +21,7 @@ assert.equal(loadConfig(baseEnv).toolMode, "minimal");
 assert.equal(loadConfig(baseEnv).authMode, "oauth");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_AUTH_MODE: "trusted-local" }).authMode, "trusted-local");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_CAPABILITY_ENFORCE_POLICY: "1" }).capabilities.enforcePolicy, true);
+assert.equal(loadConfig({ ...baseEnv, DEVSPACE_BROWSER_EXTENSION: "1" }).capabilities.browserControlEnabled, true);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "minimal" }).toolMode, "minimal");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "full" }).toolMode, "full");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "codex" }).toolMode, "codex");
@@ -127,6 +129,7 @@ assert.deepEqual(loadConfig(baseEnv).resources, {
 
 assert.deepEqual(loadConfig(baseEnv).capabilities, {
   enabled: false,
+  browserControlEnabled: false,
   configDir: join(process.env.HOME!, ".devspace", "capabilities"),
   adminApiEnabled: false,
   enforcePolicy: false,
@@ -155,6 +158,7 @@ assert.deepEqual(
   }).capabilities,
   {
     enabled: true,
+    browserControlEnabled: false,
     configDir: "/tmp/devspace-capabilities",
     adminApiEnabled: true,
     enforcePolicy: false,

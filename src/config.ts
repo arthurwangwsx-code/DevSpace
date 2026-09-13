@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { browserControlShouldEnable } from "./browser-control-config.js";
 import { expandHomePath } from "./roots.js";
 import type { LoggingConfig, LogFormat, LogLevel } from "./logger.js";
 import type { OAuthConfig } from "./oauth-provider.js";
@@ -31,6 +32,7 @@ export interface ResourceLimitsConfig {
 
 export interface CapabilityConfig {
   enabled: boolean;
+  browserControlEnabled: boolean;
   configDir: string;
   adminApiEnabled: boolean;
   enforcePolicy: boolean;
@@ -344,6 +346,7 @@ function parseCapabilityConfig(env: NodeJS.ProcessEnv): CapabilityConfig {
   }
   return {
     enabled: parseBoolean(env.DEVSPACE_CAPABILITIES),
+    browserControlEnabled: browserControlShouldEnable(env),
     configDir: resolve(expandHomePath(
       env.DEVSPACE_CAPABILITY_CONFIG_DIR ?? join(homedir(), ".devspace", "capabilities"),
     )),

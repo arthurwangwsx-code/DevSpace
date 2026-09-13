@@ -66,8 +66,12 @@ extension.on("data", (chunk) => {
 
 const capabilities = await provider.discover(lifetime.signal);
 assert.equal(capabilities.length, 25);
+assert.equal(capabilities.every(({ descriptor }) => descriptor.id.startsWith("browser.")), true);
+assert.equal(capabilities.some(({ descriptor }) => descriptor.id.includes(".extension.")), false);
+assert.equal(capabilities.some(({ descriptor }) => descriptor.id.includes(".chrome.")), false);
+assert.equal(capabilities.every(({ descriptor }) => descriptor.providerId === "browser.control"), true);
 const byId = new Map(capabilities.map((entry) => [entry.descriptor.id, entry]));
-const profiles = byId.get("browser.extension.list_profiles")!;
+const profiles = byId.get("browser.profile.list")!;
 assert.deepEqual(await provider.invoke({
   capabilityId: profiles.descriptor.id,
   descriptor: profiles.descriptor,
@@ -76,11 +80,15 @@ assert.deepEqual(await provider.invoke({
 }, { signal: lifetime.signal }), {
   profiles: [{ profileId: "profile-test", focused: true, extensionVersion: "0.2.0" }],
 });
-assert.deepEqual(byId.get("browser.extension.snapshot")?.aliases, ["browser.chrome.take_snapshot"]);
-assert.equal(byId.get("browser.extension.evaluate")?.descriptor.effects.openWorld, true);
-assert.ok(byId.get("browser.extension.set_input_files"));
+assert.ok(byId.get("browser.page.snapshot")?.aliases?.includes("browser.chrome.take_snapshot"));
+assert.ok(byId.get("browser.page.snapshot")?.aliases?.includes("browser.extension.snapshot"));
+assert.equal(byId.get("browser.page.evaluate")?.descriptor.effects.openWorld, true);
+assert.ok(byId.get("browser.file.upload"));
+assert.equal(byId.get("browser.page.click")?.descriptor.metadata?.domain, "browser");
+assert.equal(byId.get("browser.page.click")?.descriptor.metadata?.resource, "page");
+assert.equal(byId.get("browser.page.click")?.descriptor.metadata?.action, "click");
 const invocationContext = { signal: lifetime.signal };
-const list = byId.get("browser.extension.list_pages")!;
+const list = byId.get("browser.tab.list")!;
 await provider.invoke({
   capabilityId: list.descriptor.id,
   descriptor: list.descriptor,
@@ -95,7 +103,8 @@ assert.deepEqual(seen.at(-1), {
 const lease = await provider.open({ resourceType: "browser_page", selector: { tabId: 7, profileId: "profile-test" } }, invocationContext);
 assert.deepEqual(lease.handle, { tabId: 7, profileId: "profile-test" });
 assert.equal(lease.display.ownership, "adopted");
-const snapshot = byId.get("browser.extension.snapshot")!;
+const snapshot = byId.get("browser.page.snapshot")!;
+const upload = byId.get("browser.file.upload")!;
 await assert.rejects(
   provider.invoke({
     capabilityId: snapshot.descriptor.id,
@@ -105,6 +114,17 @@ await assert.rejects(
   }, invocationContext),
   (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "lease_required"),
 );
+await provider.invoke({
+  capabilityId: upload.descriptor.id,
+  descriptor: upload.descriptor,
+  binding: upload.binding,
+  arguments: { index: 1, files: [process.execPath] },
+  lease,
+}, invocationContext);
+assert.deepEqual(seen.at(-1), {
+  command: "set_input_files",
+  params: { clientId: "devspace", tabId: 7, files: [realpathSync(process.execPath)], index: 1 },
+});
 assert.deepEqual(await provider.invoke({
   capabilityId: snapshot.descriptor.id,
   descriptor: snapshot.descriptor,
@@ -116,7 +136,6 @@ assert.deepEqual(seen.at(-1), {
   command: "snapshot",
   params: { clientId: "devspace", tabId: 7 },
 });
-const upload = byId.get("browser.extension.set_input_files")!;
 await provider.invoke({
   capabilityId: upload.descriptor.id,
   descriptor: upload.descriptor,

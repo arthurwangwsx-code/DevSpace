@@ -17,6 +17,7 @@ const env = {
   DEVSPACE_OAUTH_OWNER_TOKEN: "capability-cli-owner-token-long-enough",
   DEVSPACE_AUTH_MODE: "trusted-local",
   DEVSPACE_CAPABILITIES: "1",
+  DEVSPACE_BROWSER_EXTENSION: "0",
   DEVSPACE_CAPABILITY_CONFIG_DIR: join(root, "providers"),
   DEVSPACE_LOG_LEVEL: "silent",
 };
