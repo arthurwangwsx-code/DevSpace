@@ -6,6 +6,11 @@ It creates disposable fixtures under the operating system temporary directory,
 starts a separate loopback-only DevSpace process, and never uses production
 DevSpace state or approved project roots.
 
+Mounted capability providers have a separate harness covering the fixed
+capability REST/MCP surface, downstream MCP crashes, grants, cancellation,
+output limits, and child-process cleanup. See
+[`capability-stress-testing.md`](./capability-stress-testing.md).
+
 ## Workload matrix
 
 | Scenario | Evidence |

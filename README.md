@@ -194,6 +194,7 @@ devspace doctor
 - [Universal Capability Runtime Implementation Plan (Chinese)](docs/capability-runtime-implementation-plan.md)
 - [Performance and Reliability Plan](docs/performance-and-reliability.md)
 - [Stress and Soak Testing](docs/stress-testing.md)
+- [Capability Runtime Stress Testing](docs/capability-stress-testing.md)
 
 Workspace handles are persistent. Keep them available across later turns;
 call `release_workspace` only when the user requests resource release or a

@@ -107,7 +107,11 @@ export function createCapabilityMcpServer(
       if (!provider) throw new CapabilityError("provider_unavailable", `Unknown provider: ${providerId}`);
       return provider;
     }
-    return { catalogRevision: runtime.registry.revision, providers };
+    return {
+      catalogRevision: runtime.registry.revision,
+      providers,
+      router: runtime.router.stats,
+    };
   }));
   server.registerTool("capability_cancel", {
     title: "Cancel capability invocation",

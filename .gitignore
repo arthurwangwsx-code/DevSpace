@@ -2,6 +2,7 @@ node_modules/
 dist/
 releases/
 artifacts/stress/
+artifacts/capability-stress/
 .env
 *.log
 

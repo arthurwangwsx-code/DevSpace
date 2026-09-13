@@ -176,6 +176,13 @@ active workers, a 4.91 MiB Go heap, and no goroutine growth. The reported
 upstream DELETE count remained zero, confirming that the LRU protection—not
 client teardown—bounded the server.
 
+The mounted-provider path is covered independently by
+[Capability runtime performance and reliability testing](capability-stress-testing.md).
+Its isolated stdio MCP fixture exercises the fixed capability REST/MCP adapters,
+policy, queue, cancellation, normalized failures, provider crash/backoff/restart,
+process-tree resources, and shutdown cleanup without touching Chrome or desktop
+state.
+
 ## Framework and protocol decisions
 
 Do not replace Express based only on framework microbenchmarks. The observed stalls

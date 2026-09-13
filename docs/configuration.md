@@ -65,6 +65,30 @@ Node heap is exhausted.
 | `DEVSPACE_PROCESS_MAX_SESSIONS` | `64` | Maximum retained running and completed process sessions. |
 | `DEVSPACE_PROCESS_BUFFER_CHARACTERS` | `524288` | Head/tail output buffer retained per process session. |
 
+### Capability Runtime Limits
+
+These settings apply only when `DEVSPACE_CAPABILITIES=1`. The fixed capability
+REST and MCP endpoints share the same limits and invocation history.
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `DEVSPACE_CAPABILITIES` | `0` | Set to `1` to enable the fixed capability REST and MCP endpoints. |
+| `DEVSPACE_CAPABILITY_CONFIG_DIR` | `~/.devspace/capabilities` | Administrator-managed Provider manifest directory. |
+| `DEVSPACE_CAPABILITY_MAX_CONCURRENT` | `8` | Maximum capability invocations executing across all Providers. |
+| `DEVSPACE_CAPABILITY_MAX_CONCURRENT_PER_PROVIDER` | `2` | Maximum invocations executing for one Provider. Must not exceed the global limit. |
+| `DEVSPACE_CAPABILITY_QUEUE_LIMIT` | `64` | FIFO invocation queue bound; excess work returns `rate_limited`. |
+| `DEVSPACE_CAPABILITY_DEFAULT_TIMEOUT_MS` | `30000` | Default invocation timeout. |
+| `DEVSPACE_CAPABILITY_MAX_TIMEOUT_MS` | `120000` | Maximum caller-selectable invocation timeout. |
+| `DEVSPACE_CAPABILITY_MAX_OUTPUT_BYTES` | `4194304` | Maximum serialized result size: 4 MiB. |
+| `DEVSPACE_CAPABILITY_MAX_TRACKED_INVOCATIONS` | `10000` | Maximum terminal invocation records retained in process memory. Active and queued records are never evicted. |
+| `DEVSPACE_CAPABILITY_INVOCATION_RETENTION_MS` | `86400000` | Maximum age of terminal invocation records retained in process memory: 24 hours. |
+
+The count and age bounds apply to the live lookup/idempotency index. Provider,
+invocation, and audit evidence persisted in SQLite follows the database's
+separate operational retention policy. See
+[Capability stress testing](capability-stress-testing.md) for repeatable capacity,
+recovery, process-tree, and long-run measurements.
+
 Long-lived launchers may set `DEVSPACE_ASYNC_LOG_FILE` to move structured event
 writes to a worker thread. `DEVSPACE_ASYNC_LOG_MAX_BYTES` defaults to 64 MiB,
 `DEVSPACE_ASYNC_LOG_BACKUPS` to 3, and `DEVSPACE_ASYNC_LOG_MAX_QUEUED_LINES` to

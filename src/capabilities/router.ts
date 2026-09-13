@@ -30,6 +30,8 @@ export interface CapabilityRouterOptions {
   maxOutputBytes?: number;
   defaultTimeoutMs?: number;
   maxTimeoutMs?: number;
+  maxTrackedInvocations?: number;
+  invocationRetentionMs?: number;
   onEvent?: (type: string, data: JsonObject) => void;
   sessionStateProbe?: SessionStateProbe;
 }
@@ -65,6 +67,7 @@ interface InternalInvocation {
   controller: AbortController;
   cancelRequested: boolean;
   timedOut: boolean;
+  idempotencyKey?: string;
   completion: Promise<CapabilityInvocation>;
   resolve: (value: CapabilityInvocation) => void;
   reject: (error: CapabilityError) => void;
@@ -98,14 +101,35 @@ export class CapabilityInvocationRouter {
       maxOutputBytes: options.maxOutputBytes ?? 4 * 1024 * 1024,
       defaultTimeoutMs: options.defaultTimeoutMs ?? 30_000,
       maxTimeoutMs: options.maxTimeoutMs ?? 120_000,
+      maxTrackedInvocations: options.maxTrackedInvocations ?? 10_000,
+      invocationRetentionMs: options.invocationRetentionMs ?? 24 * 60 * 60_000,
     };
     this.onEvent = options.onEvent ?? (() => {});
     this.sessionStateProbe = options.sessionStateProbe ?? new SystemSessionStateProbe();
     if (this.options.maxConcurrent < 1 || this.options.maxConcurrentPerProvider < 1
       || this.options.maxConcurrentPerProvider > this.options.maxConcurrent
-      || this.options.queueLimit < 0 || this.options.maxOutputBytes < 1) {
+      || this.options.queueLimit < 0 || this.options.maxOutputBytes < 1
+      || this.options.maxTrackedInvocations < 1 || this.options.invocationRetentionMs < 1_000) {
       throw new Error("Invalid capability router resource limits.");
     }
+  }
+
+  get stats(): {
+    active: number;
+    queued: number;
+    trackedInvocations: number;
+    activeLeases: number;
+    activeByProvider: Record<string, number>;
+  } {
+    return {
+      active: this.active,
+      queued: this.queue.length,
+      trackedInvocations: this.invocations.size,
+      activeLeases: this.leases.size,
+      activeByProvider: Object.fromEntries(
+        [...this.activeByProvider.entries()].sort(([left], [right]) => left.localeCompare(right)),
+      ),
+    };
   }
 
   async openLease(request: OpenLeaseRequest): Promise<CapabilityLease> {
@@ -239,8 +263,15 @@ export class CapabilityInvocationRouter {
         if (previous.digest !== `${descriptor.id}:${argumentsDigest}`) {
           throw new CapabilityError("conflict", "The idempotency key was reused with different input.");
         }
-        return this.getInvocation(previous.invocationId, request.principal);
+        if (this.invocations.has(previous.invocationId)) {
+          return this.getInvocation(previous.invocationId, request.principal);
+        }
+        this.idempotency.delete(key);
       }
+    }
+    this.pruneTrackedInvocations(1);
+    if (this.invocations.size >= this.options.maxTrackedInvocations) {
+      throw new CapabilityError("rate_limited", "The capability invocation history is at capacity.");
     }
     if (!this.canStart(descriptor.providerId) && this.queue.length >= this.options.queueLimit) {
       throw new CapabilityError("rate_limited", "The capability invocation queue is full.");
@@ -256,7 +287,8 @@ export class CapabilityInvocationRouter {
     internal.completion.catch(() => {});
     this.invocations.set(internal.public.id, internal);
     if (request.idempotencyKey) {
-      this.idempotency.set(`${request.principal.id}:${request.idempotencyKey}`, {
+      internal.idempotencyKey = `${request.principal.id}:${request.idempotencyKey}`;
+      this.idempotency.set(internal.idempotencyKey, {
         invocationId: internal.public.id,
         digest: `${descriptor.id}:${argumentsDigest}`,
       });
@@ -570,6 +602,29 @@ export class CapabilityInvocationRouter {
   private assertOpen(): void {
     if (this.closed) throw new CapabilityError("provider_unavailable", "Capability runtime is closed.");
   }
+
+  private pruneTrackedInvocations(reserve = 0): void {
+    const cutoff = Date.now() - this.options.invocationRetentionMs;
+    for (const [id, invocation] of this.invocations) {
+      const finishedAt = invocation.public.finishedAt
+        ? Date.parse(invocation.public.finishedAt)
+        : Number.POSITIVE_INFINITY;
+      if (isTerminal(invocation.public.status) && finishedAt <= cutoff) {
+        this.evictInvocation(id, invocation);
+      }
+    }
+    if (this.invocations.size + reserve <= this.options.maxTrackedInvocations) return;
+    for (const [id, invocation] of this.invocations) {
+      if (!isTerminal(invocation.public.status)) continue;
+      this.evictInvocation(id, invocation);
+      if (this.invocations.size + reserve <= this.options.maxTrackedInvocations) return;
+    }
+  }
+
+  private evictInvocation(id: string, invocation: InternalInvocation): void {
+    this.invocations.delete(id);
+    if (invocation.idempotencyKey) this.idempotency.delete(invocation.idempotencyKey);
+  }
 }
 
 function createInternalInvocation(input: {
@@ -604,6 +659,7 @@ function createInternalInvocation(input: {
     controller: new AbortController(),
     cancelRequested: false,
     timedOut: false,
+    idempotencyKey: undefined,
     completion,
     resolve,
     reject,

@@ -249,7 +249,51 @@ const expiring = leaseManager.create({
 now = 2_001;
 assert.throws(() => leaseManager.get(expiring.id, principal), isCapabilityError("lease_expired"));
 
-console.log("capability router tests passed: policy, leases, queue, cancel, timeout, audit");
+const boundedRoot = mkdtempSync(join(tmpdir(), "devspace-capability-history-bound-"));
+const boundedProvider = new FakeCapabilityProvider(providerId, [echo]);
+const boundedRuntime = new CapabilityRuntime({
+  stateDir: boundedRoot,
+  router: { maxTrackedInvocations: 3, invocationRetentionMs: 60_000 },
+});
+boundedRuntime.registerProvider({ provider: boundedProvider, kind: "fake", enabled: true });
+boundedRuntime.policy.addGrant({
+  id: "bounded-grant",
+  principalId: principal.id,
+  capabilityPattern: echo.id,
+  providerPattern: providerId,
+  allowedEffects: ["readOnly"],
+});
+try {
+  await boundedRuntime.start();
+  const oldest = await boundedRuntime.router.invoke({
+    ...request("bounded-0", principal, echo.id, { message: "0" }),
+    idempotencyKey: "evicted-key",
+  });
+  for (let index = 1; index <= 3; index++) {
+    await boundedRuntime.router.invoke(request(
+      `bounded-${index}`,
+      principal,
+      echo.id,
+      { message: String(index) },
+    ));
+  }
+  assert.equal(boundedRuntime.router.stats.trackedInvocations, 3);
+  assert.throws(
+    () => boundedRuntime.router.getInvocation(oldest.id, principal),
+    isCapabilityError("capability_not_found"),
+  );
+  const afterEviction = await boundedRuntime.router.invoke({
+    ...request("bounded-reuse", principal, echo.id, { message: "0" }),
+    idempotencyKey: "evicted-key",
+  });
+  assert.notEqual(afterEviction.id, oldest.id);
+  assert.equal(boundedRuntime.router.stats.trackedInvocations, 3);
+} finally {
+  await boundedRuntime.close();
+  rmSync(boundedRoot, { recursive: true, force: true });
+}
+
+console.log("capability router tests passed: policy, leases, queue, cancel, timeout, audit, bounded history");
 
 function descriptor(id: string, readOnly: boolean, requiresLease: boolean): CapabilityDescriptor {
   return {

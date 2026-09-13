@@ -1753,6 +1753,8 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
         maxOutputBytes: config.capabilities.maxOutputBytes,
         defaultTimeoutMs: config.capabilities.defaultTimeoutMs,
         maxTimeoutMs: config.capabilities.maxTimeoutMs,
+        maxTrackedInvocations: config.capabilities.maxTrackedInvocations,
+        invocationRetentionMs: config.capabilities.invocationRetentionMs,
       },
       supervisor: {
         log: (level, event, fields) => logEvent(config.logging, level, event, fields),

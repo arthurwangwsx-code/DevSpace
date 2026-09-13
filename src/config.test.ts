@@ -133,6 +133,8 @@ assert.deepEqual(loadConfig(baseEnv).capabilities, {
   maxOutputBytes: 4 * 1024 * 1024,
   defaultTimeoutMs: 30_000,
   maxTimeoutMs: 120_000,
+  maxTrackedInvocations: 10_000,
+  invocationRetentionMs: 24 * 60 * 60_000,
 });
 assert.deepEqual(
   loadConfig({
@@ -145,6 +147,8 @@ assert.deepEqual(
     DEVSPACE_CAPABILITY_MAX_OUTPUT_BYTES: "1024",
     DEVSPACE_CAPABILITY_DEFAULT_TIMEOUT_MS: "500",
     DEVSPACE_CAPABILITY_MAX_TIMEOUT_MS: "2000",
+    DEVSPACE_CAPABILITY_MAX_TRACKED_INVOCATIONS: "500",
+    DEVSPACE_CAPABILITY_INVOCATION_RETENTION_MS: "60000",
   }).capabilities,
   {
     enabled: true,
@@ -155,6 +159,8 @@ assert.deepEqual(
     maxOutputBytes: 1024,
     defaultTimeoutMs: 500,
     maxTimeoutMs: 2000,
+    maxTrackedInvocations: 500,
+    invocationRetentionMs: 60_000,
   },
 );
 assert.throws(

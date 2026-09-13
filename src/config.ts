@@ -38,6 +38,8 @@ export interface CapabilityConfig {
   maxOutputBytes: number;
   defaultTimeoutMs: number;
   maxTimeoutMs: number;
+  maxTrackedInvocations: number;
+  invocationRetentionMs: number;
 }
 
 export interface ServerConfig {
@@ -357,6 +359,16 @@ function parseCapabilityConfig(env: NodeJS.ProcessEnv): CapabilityConfig {
     ),
     defaultTimeoutMs,
     maxTimeoutMs,
+    maxTrackedInvocations: parsePositiveInteger(
+      env.DEVSPACE_CAPABILITY_MAX_TRACKED_INVOCATIONS,
+      10_000,
+      "DEVSPACE_CAPABILITY_MAX_TRACKED_INVOCATIONS",
+    ),
+    invocationRetentionMs: parsePositiveInteger(
+      env.DEVSPACE_CAPABILITY_INVOCATION_RETENTION_MS,
+      24 * 60 * 60_000,
+      "DEVSPACE_CAPABILITY_INVOCATION_RETENTION_MS",
+    ),
   };
 }
 
