@@ -213,5 +213,17 @@ npm run package:macos-release
 
 本轮完整 `npm test`、`npm run build` 和 `git diff --check` 均通过。Capability core release 首次执行时
 唯一失败项为 `runtime_source_provenance`，原因是 release gate 明确拒绝脏工作树；所有功能、性能、
-容量、恢复和资源检查均通过。整改提交后应在干净 source 上重跑 core release，并以新的 `summary.json`
-作为最终 release evidence。
+容量、恢复和资源检查均通过。
+
+整改提交 `0751a2e` 后已在干净 source 上重新执行完整 core release，最终 **5/5 gates 全通过**：
+
+- typecheck：PASS
+- unit_and_integration：PASS
+- production_build：PASS
+- capability_stress_smoke：PASS
+- real_external_mcp_mount：PASS
+
+最终回执：
+`.build/capability-release-control-center-clean/2026-09-13T15-32-28-887Z/summary.json`
+
+因此本文第 4 节 P0/P1 已全部关闭；后续这些条目只作为历史 review 记录，不再代表当前待办。
