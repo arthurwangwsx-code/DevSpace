@@ -1,6 +1,6 @@
 {
   "name": "@waishnav/devspace",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "Expose a secure local coding workspace through an MCP server.",
   "type": "module",
   "main": "dist/server.js",
@@ -62,6 +62,7 @@
     "doctor:macos-service": "node scripts/macos/doctor-service.mjs",
     "control-center": "node dist/cli.js control-center",
     "build:control-center-app": "node scripts/macos/build-control-center-app.mjs",
+    "package:macos-release": "node scripts/macos/package-release.mjs",
     "test:macos-service-self-activation": "tsx scripts/test-macos-service-self-activation.ts",
     "test:current-chrome": "tsx scripts/test-current-chrome-provider.ts",
     "test:browser-extension": "tsx scripts/test-browser-extension-matrix.ts",

@@ -4,6 +4,9 @@ import WebKit
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
+    private var statusItem: NSStatusItem!
+    private var statusTimer: Timer?
+    private var statusMenuItem: NSMenuItem!
     private var controlProcess: Process?
     private var readinessTimer: Timer?
     private let port = Int(ProcessInfo.processInfo.environment["DEVSPACE_CONTROL_PORT"] ?? "7680") ?? 7680
@@ -12,15 +15,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         buildWindow()
+        buildStatusItem()
         startControlCenter()
         NSApp.activate(ignoringOtherApps: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         readinessTimer?.invalidate()
+        statusTimer?.invalidate()
         if let process = controlProcess, process.isRunning {
             process.terminate()
         }
+    }
+
+    private func buildStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.button?.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "DevSpace status")
+        statusItem.button?.imagePosition = .imageOnly
+        statusItem.button?.contentTintColor = .systemGray
+
+        let menu = NSMenu()
+        statusMenuItem = NSMenuItem(title: "DevSpace starting…", action: nil, keyEquivalent: "")
+        statusMenuItem.isEnabled = false
+        menu.addItem(statusMenuItem)
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Show Control Center", action: #selector(showControlCenter), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Start Service", action: #selector(startService), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Restart Service", action: #selector(restartService), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Stop Service", action: #selector(stopService), keyEquivalent: ""))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Refresh Status", action: #selector(refreshStatus), keyEquivalent: ""))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Quit DevSpace", action: #selector(quitApp), keyEquivalent: "q"))
+        for item in menu.items { item.target = self }
+        statusItem.menu = menu
+
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            self?.refreshStatus()
+        }
+    }
+
+    @objc private func showControlCenter() {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func startService() { callControlAction("service.start") }
+    @objc private func restartService() { callControlAction("service.restart") }
+    @objc private func stopService() { callControlAction("service.stop") }
+    @objc private func quitApp() { NSApp.terminate(nil) }
+
+    @objc private func refreshStatus() {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/api/status") else { return }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 1.5
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+            guard let self,
+                  let http = response as? HTTPURLResponse,
+                  http.statusCode == 200,
+                  let data,
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let health = object["health"] as? [String: Any] else { return }
+            let running = (health["ok"] as? Bool) == true
+            DispatchQueue.main.async {
+                self.statusMenuItem.title = running ? "DevSpace service running" : "DevSpace service stopped"
+                self.statusItem.button?.contentTintColor = running ? .systemGreen : .systemGray
+            }
+        }.resume()
+    }
+
+    private func callControlAction(_ action: String) {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/api/actions/\(action)") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        URLSession.shared.dataTask(with: request) { [weak self] _, _, _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                self?.refreshStatus()
+            }
+        }.resume()
     }
 
     private func buildWindow() {
@@ -97,6 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
                 DispatchQueue.main.async {
                     timer.invalidate()
                     self?.webView.load(URLRequest(url: url))
+                    self?.refreshStatus()
                 }
             }.resume()
         }

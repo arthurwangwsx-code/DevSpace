@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync, chmodSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, chmodSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,6 +10,7 @@ if (process.platform !== "darwin") {
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const args = parseArgs(process.argv.slice(2));
 const output = resolve(args.output ?? join(root, ".build", "DevSpace.app"));
 const identity = args.identity ?? process.env.DEVSPACE_APP_SIGNING_IDENTITY ?? "-";
@@ -67,15 +68,19 @@ writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8
 <key>CFBundleName</key><string>DevSpace</string>
 <key>CFBundleDisplayName</key><string>DevSpace</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.0.4</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>${packageJson.version}</string>
+<key>CFBundleVersion</key><string>${bundleVersion(packageJson.version)}</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>\n`);
 execFileSync("plutil", ["-lint", join(contents, "Info.plist")], { stdio: "ignore" });
-execFileSync("codesign", ["--force", "--deep", "--sign", identity, "--timestamp=none", output], { stdio: "inherit" });
+const signArgs = ["--force", "--deep", "--sign", identity];
+if (identity === "-") signArgs.push("--timestamp=none");
+else signArgs.push("--options", "runtime", "--timestamp");
+signArgs.push(output);
+execFileSync("codesign", signArgs, { stdio: "inherit" });
 execFileSync("codesign", ["--verify", "--deep", "--strict", output], { stdio: "inherit" });
-console.log(JSON.stringify({ output, node: nodeSource, identity, bundledRuntime: true }));
+console.log(JSON.stringify({ output, version: packageJson.version, node: nodeSource, identity, bundledRuntime: true }));
 
 function parseArgs(values) {
   const result = {};
@@ -103,4 +108,9 @@ function removeNodeBinDirectories(rootDir) {
       // Ignore optional dependency entries that disappear during staging.
     }
   }
+}
+
+function bundleVersion(version) {
+  const parts = String(version).split(".").map((value) => Number.parseInt(value, 10) || 0);
+  return String((parts[0] ?? 0) * 10000 + (parts[1] ?? 0) * 100 + (parts[2] ?? 0));
 }

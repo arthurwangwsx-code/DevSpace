@@ -25,6 +25,8 @@ The product-facing macOS application is the Control Center. It owns onboarding a
 
 The app embeds a known Node executable plus the DevSpace runtime. The Swift shell starts a loopback-only Control Center server and renders it in `WKWebView`. This gives the product a native App identity while keeping configuration and action logic in the same Node code used by the CLI.
 
+The macOS app also owns a menu-bar status item. The status item is intentionally operational rather than decorative: it shows whether the Core service is running and exposes **Show Control Center**, **Start Service**, **Restart Service**, **Stop Service**, **Refresh Status**, and **Quit DevSpace**. Closing the Control Center window does not implicitly stop the Core service.
+
 ### 2.2 DevSpace Core Service
 
 The Core Service remains `devspace serve`. It owns Workspace MCP, Capability Runtime, Provider supervision, auth, persistence and the managed tunnel lifecycle. Production is launched by a DevSpace-owned LaunchAgent with `RunAtLoad` + `KeepAlive`.
@@ -107,6 +109,15 @@ The Control Center leads the user through these states:
 
 System-owned confirmation steps remain explicit. DevSpace must not bypass macOS TCC or Chrome security prompts.
 
+The steady-state Control Center is organized into four pages:
+
+1. **Overview** — Core running state, runtime architecture, managed Tunnel state, Start/Restart/Stop, and Doctor.
+2. **Settings** — workspace allowlist, port/public URL, Tunnel command/arguments/cwd/restart policy, login startup controls, and common permission actions.
+3. **Browser** — Native Host installation, Chrome extension management entry, and Browser Doctor.
+4. **Computer Use** — Desktop Host installation, Accessibility/Screen Recording permission request, and Desktop Doctor.
+
+All normal product settings must be operable from the GUI. Terminal remains a development and automation interface, not a prerequisite for routine configuration. `Save & Restart Service` persists the same config used by the CLI and then activates the service through the shared service installer.
+
 ## 6. App packaging
 
 `npm run build:control-center-app` creates `.build/DevSpace.app` with:
@@ -120,6 +131,25 @@ DevSpace.app/
 ```
 
 Release packaging should use a stable Developer ID identity and notarization. Ad-hoc signing is acceptable only for local development validation. A release pipeline should build separate arm64/x64 artifacts or a validated universal distribution and verify native dependencies against the packaged architecture.
+
+GitHub Releases should publish at least:
+
+- `DevSpace-macOS-arm64-<version>.dmg` — drag-and-drop installer containing `DevSpace.app` and an `/Applications` shortcut;
+- `DevSpace-macOS-arm64-<version>.zip` — automation-friendly archive of the App bundle;
+- `SHA256SUMS.txt` — checksums for the distributed binary artifacts.
+
+The Git tag, App version and package version must match. Public release notes must accurately describe the Apple trust state.
+
+For frictionless installation on arbitrary Macs, the production release gate is:
+
+1. sign the outer App, bundled Desktop Host and native executables with **Developer ID Application**;
+2. create DMG/ZIP artifacts;
+3. submit the distributable artifact using `xcrun notarytool`;
+4. staple the notarization ticket where applicable;
+5. verify with `codesign --verify --deep --strict` and `spctl --assess`;
+6. upload only after the above checks succeed.
+
+Apple Development / Apple Distribution identities do not replace Developer ID Application + notarization for zero-friction direct distribution. When a development release is intentionally published without Developer ID notarization, the GitHub Release must say so rather than claiming a Gatekeeper-clean install.
 
 ## 7. Migration to another Mac
 
@@ -154,6 +184,7 @@ Implemented in the repository:
 - public URL resolution from tunnel config;
 - login-service installation that no longer forces the public URL back to localhost;
 - loopback/token-protected Control Center backend and complete settings/status UI;
+- native menu-bar service state with Start/Restart/Stop/Show/Quit shortcuts;
 - Control Center actions for Browser Native Host, Chrome extension page, Browser doctor, Desktop Host install/permissions/doctor, service install/activate/doctor;
 - `devspace control-center` CLI entry;
 - native macOS `DevSpace.app` WebKit shell with embedded Node/runtime packaging;

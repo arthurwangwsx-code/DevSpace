@@ -27,7 +27,11 @@ xcrun swiftc \
   "$PWD/native/desktop-helper/main.swift" \
   -o "$executable"
 chmod 0755 "$executable"
-codesign --force --sign "$identity" --identifier "$bundle_id" --timestamp=none "$bundle_path"
+if [ "$identity" = "-" ]; then
+  codesign --force --sign "$identity" --identifier "$bundle_id" --timestamp=none "$bundle_path"
+else
+  codesign --force --sign "$identity" --identifier "$bundle_id" --options runtime --timestamp "$bundle_path"
+fi
 codesign --verify --deep --strict "$bundle_path"
 plutil -lint "$bundle_path/Contents/Info.plist" >/dev/null
 echo "$executable"
