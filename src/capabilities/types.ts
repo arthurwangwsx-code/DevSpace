@@ -85,6 +85,7 @@ export interface ProviderHealth {
   reasonCode?: string;
   retryAt?: string;
   userAction?: string;
+  unavailablePermissions?: string[];
 }
 
 export interface CapabilityPrincipal {

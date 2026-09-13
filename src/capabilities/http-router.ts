@@ -109,6 +109,7 @@ export function createCapabilityHttpRouter(options: CapabilityHttpRouterOptions)
       state: provider.health.state,
       reasonCode: provider.health.reasonCode,
       userAction: provider.health.userAction,
+      unavailablePermissions: provider.health.unavailablePermissions,
     })),
   })));
   router.get("/grants", ...admin, handle(options.runtime, (req) =>

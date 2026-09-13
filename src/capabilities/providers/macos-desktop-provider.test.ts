@@ -25,6 +25,7 @@ const manifest = parseMcpProviderManifest({
 const provider = new MacosDesktopProvider(manifest);
 await provider.start(context());
 try {
+  assert.equal((await provider.health(new AbortController().signal)).state, "ready");
   const discovered = await provider.discover(new AbortController().signal);
   const lease = await provider.open({
     resourceType: "app_window",
@@ -58,7 +59,32 @@ try {
   await provider.stop("test_complete");
 }
 
-console.log("macOS desktop provider tests passed: preset, app lease, target injection and mismatch denial");
+const deniedManifest = parseMcpProviderManifest({
+  ...generated,
+  spec: {
+    ...generated.spec,
+    transport: {
+      type: "stdio",
+      command: process.execPath,
+      args: ["--import", "tsx", fixture, "--permissions-denied"],
+    },
+  },
+});
+const deniedProvider = new MacosDesktopProvider(deniedManifest);
+await deniedProvider.start(context());
+try {
+  assert.deepEqual(await deniedProvider.health(new AbortController().signal), {
+    state: "degraded",
+    since: (await deniedProvider.health(new AbortController().signal)).since,
+    reasonCode: "permission_required",
+    unavailablePermissions: ["macos.accessibility", "macos.screen-capture"],
+    userAction: "Grant macos.accessibility and macos.screen-capture to the installed DevSpace desktop host.",
+  });
+} finally {
+  await deniedProvider.stop("test_complete");
+}
+
+console.log("macOS desktop provider tests passed: permission health, preset, app lease, target injection and mismatch denial");
 
 function context(): ProviderContext {
   return { signal: signal().signal, reportFailure: () => {}, reportCatalogChanged: () => {}, log: () => {} };

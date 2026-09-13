@@ -144,6 +144,35 @@ try {
     query: "legacy backend",
     providerIds: ["browser.chrome.devtools"],
   }).items[0]?.capability.id, "browser.chrome.take_snapshot");
+
+  const permissionAware = new CapabilityRegistry();
+  const statusCapability = capability("desktop.macos.status", "Desktop status", ["desktop"]);
+  statusCapability.descriptor.providerId = "desktop.macos.accessibility";
+  statusCapability.descriptor.permissions = [];
+  const axCapability = capability("desktop.macos.snapshot_app", "Desktop snapshot", ["desktop"]);
+  axCapability.descriptor.providerId = "desktop.macos.accessibility";
+  axCapability.descriptor.permissions = [{
+    id: "macos.accessibility",
+    required: true,
+    description: "Accessibility permission.",
+  }];
+  permissionAware.replaceProviderCatalog({
+    providerId: "desktop.macos.accessibility",
+    kind: "test-desktop",
+    health: {
+      state: "degraded",
+      since: "2026-09-13T00:00:00.000Z",
+      reasonCode: "permission_required",
+      unavailablePermissions: ["macos.accessibility"],
+    },
+    capabilities: [statusCapability, axCapability],
+  });
+  assert.equal(permissionAware.list().items.find(({ id }) => id === "desktop.macos.status")?.availability.state,
+    "ready");
+  assert.equal(permissionAware.list().items.find(({ id }) => id === "desktop.macos.snapshot_app")?.availability.state,
+    "permission_required");
+  assert.deepEqual(permissionAware.list({ availableOnly: true }).items.map(({ id }) => id),
+    ["desktop.macos.status"]);
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

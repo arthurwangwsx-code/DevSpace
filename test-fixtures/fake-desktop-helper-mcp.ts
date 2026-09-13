@@ -2,8 +2,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
 
+const permissionsDenied = process.argv.includes("--permissions-denied");
 const server = new McpServer({ name: "fake-desktop-helper", version: "1.0.0" });
-server.registerTool("desktop_status", { inputSchema: z.object({}) }, async () => result({ accessibilityTrusted: true }));
+server.registerTool("desktop_status", { inputSchema: z.object({}) }, async () => result({
+  accessibilityTrusted: !permissionsDenied,
+  screenCaptureGranted: !permissionsDenied,
+}));
 server.registerTool("desktop_list_apps", { inputSchema: z.object({}) }, async () => result({
   apps: [{ bundleId: "com.example.fixture", name: "Fixture", frontmost: true }],
 }));

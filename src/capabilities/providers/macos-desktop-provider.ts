@@ -8,7 +8,7 @@ import type {
   ProviderLease,
   ProviderOpenRequest,
 } from "../provider.js";
-import type { JsonObject, JsonValue } from "../types.js";
+import type { JsonObject, JsonValue, ProviderHealth } from "../types.js";
 import { McpClientProvider } from "./mcp-client-provider.js";
 
 const PROVIDER_ID = "desktop.macos.accessibility";
@@ -29,6 +29,21 @@ const MUTATION = { readOnly: false, destructive: false, idempotent: false, openW
 
 export class MacosDesktopProvider extends McpClientProvider {
   private serial = Promise.resolve();
+
+  override async health(signal: AbortSignal): Promise<ProviderHealth> {
+    const transportHealth = await super.health(signal);
+    if (transportHealth.state !== "ready") return transportHealth;
+    const status = await this.callDownstreamTool("desktop_status", {}, signal);
+    const unavailablePermissions = desktopUnavailablePermissions(status);
+    if (unavailablePermissions.length === 0) return transportHealth;
+    return {
+      state: "degraded",
+      since: transportHealth.since,
+      reasonCode: "permission_required",
+      unavailablePermissions,
+      userAction: `Grant ${unavailablePermissions.join(" and ")} to the installed DevSpace desktop host.`,
+    };
+  }
 
   async open(request: ProviderOpenRequest, context: ProviderInvocationContext): Promise<ProviderLease> {
     if (request.resourceType !== "app_window") {
@@ -170,4 +185,14 @@ function findApp(value: JsonValue, bundleId: string): { name?: string } | undefi
     }
   }
   return undefined;
+}
+
+function desktopUnavailablePermissions(value: JsonValue): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CapabilityError("internal_error", "Desktop status returned an invalid result.");
+  }
+  const unavailable: string[] = [];
+  if (value.accessibilityTrusted !== true) unavailable.push("macos.accessibility");
+  if (value.screenCaptureGranted !== true) unavailable.push("macos.screen-capture");
+  return unavailable;
 }

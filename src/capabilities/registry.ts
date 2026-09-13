@@ -228,7 +228,13 @@ export class CapabilityRegistry {
     const health = this.providerHealth.get(entry.descriptor.providerId);
     let state: CapabilitySummary["availability"]["state"] = "unavailable";
     if (entry.persistedOnly) state = "unavailable";
-    else if (health?.state === "ready" || health?.state === "degraded") state = "ready";
+    else if (health?.state === "ready") state = "ready";
+    else if (health?.state === "degraded") {
+      const unavailablePermissions = new Set(health.unavailablePermissions ?? []);
+      const permissionUnavailable = entry.descriptor.permissions.some((permission) =>
+        permission.required && unavailablePermissions.has(permission.id));
+      state = permissionUnavailable ? "permission_required" : "ready";
+    }
     else if (health?.state === "needs_user_action") state = "permission_required";
     else if (health?.state === "starting" || health?.state === "backoff") {
       state = "temporarily_unavailable";
