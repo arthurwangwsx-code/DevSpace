@@ -15,6 +15,7 @@ import { CapabilityError } from "./errors.js";
 
 export interface CapabilityRuntimeOptions {
   stateDir: string;
+  enforcePolicy?: boolean;
   supervisor?: ProviderSupervisorOptions;
   router?: CapabilityRouterOptions;
   providers?: ProviderRegistration[];
@@ -32,8 +33,10 @@ export class CapabilityRuntime {
   private readonly grants: SqliteCapabilityGrantStore;
   private started = false;
   private closed = false;
+  private readonly enforcePolicy: boolean;
 
   constructor(options: CapabilityRuntimeOptions) {
+    this.enforcePolicy = options.enforcePolicy ?? true;
     this.store = new SqliteCapabilityCatalogStore(options.stateDir);
     this.audit = new SqliteCapabilityAuditStore(options.stateDir);
     this.grants = new SqliteCapabilityGrantStore(options.stateDir);
@@ -50,7 +53,7 @@ export class CapabilityRuntime {
         });
       },
     });
-    this.policy = new CapabilityPolicyEngine();
+    this.policy = new CapabilityPolicyEngine(this.enforcePolicy);
     for (const grant of this.grants.loadAll()) this.policy.addGrant(grant);
     this.leases = new CapabilityLeaseManager();
     this.router = new CapabilityInvocationRouter(
@@ -75,6 +78,46 @@ export class CapabilityRuntime {
     this.supervisor.register(registration);
   }
 
+  async installProvider(principal: CapabilityPrincipal, registration: ProviderRegistration): Promise<void> {
+    requireAdmin(principal, this.enforcePolicy);
+    if (this.closed) throw new CapabilityError("provider_unavailable", "Capability runtime is closed.");
+    if (this.started) await this.supervisor.add(registration);
+    else this.supervisor.register(registration);
+    this.recordProviderAdminEvent(principal, "capability.provider.installed", registration.provider.id, {
+      enabled: registration.enabled,
+      kind: registration.kind,
+    });
+  }
+
+  async reloadProvider(principal: CapabilityPrincipal, registration: ProviderRegistration): Promise<void> {
+    requireAdmin(principal, this.enforcePolicy);
+    if (!this.started) throw new CapabilityError("provider_unavailable", "Capability runtime is not started.");
+    await this.supervisor.replace(registration);
+    this.recordProviderAdminEvent(principal, "capability.provider.reloaded", registration.provider.id, {
+      enabled: registration.enabled,
+      kind: registration.kind,
+    });
+  }
+
+  async setProviderEnabled(
+    principal: CapabilityPrincipal,
+    providerId: string,
+    enabled: boolean,
+  ): Promise<void> {
+    requireAdmin(principal, this.enforcePolicy);
+    await this.supervisor.setEnabled(providerId, enabled);
+    this.recordProviderAdminEvent(principal, enabled
+      ? "capability.provider.enabled"
+      : "capability.provider.disabled", providerId, { enabled });
+  }
+
+  async removeProvider(principal: CapabilityPrincipal, providerId: string): Promise<void> {
+    requireAdmin(principal, this.enforcePolicy);
+    await this.supervisor.unregister(providerId);
+    this.leases.removeProvider(providerId);
+    this.recordProviderAdminEvent(principal, "capability.provider.removed", providerId, {});
+  }
+
   async start(): Promise<void> {
     if (this.closed) throw new Error("Capability runtime is closed.");
     if (this.started) return;
@@ -93,7 +136,7 @@ export class CapabilityRuntime {
   }
 
   listGrants(principal: CapabilityPrincipal): StoredCapabilityGrant[] {
-    requireAdmin(principal);
+    requireAdmin(principal, this.enforcePolicy);
     const stored = new Map(this.grants.loadAll().map((grant) => [grant.id, grant]));
     return this.policy.listGrants().map((grant) => ({
       ...grant,
@@ -106,7 +149,7 @@ export class CapabilityRuntime {
     principal: CapabilityPrincipal,
     input: Omit<CapabilityGrant, "id" | "revokedAt"> & { id?: string },
   ): StoredCapabilityGrant {
-    requireAdmin(principal);
+    requireAdmin(principal, this.enforcePolicy);
     if (input.expiresAt
       && (!Number.isFinite(Date.parse(input.expiresAt)) || Date.parse(input.expiresAt) <= Date.now())) {
       throw new CapabilityError("invalid_arguments", "Grant expiresAt must be a future ISO timestamp.");
@@ -141,7 +184,7 @@ export class CapabilityRuntime {
   }
 
   revokeGrant(principal: CapabilityPrincipal, grantId: string): void {
-    requireAdmin(principal);
+    requireAdmin(principal, this.enforcePolicy);
     const revokedAt = new Date().toISOString();
     if (!this.grants.revoke(grantId, revokedAt)) {
       throw new CapabilityError("capability_not_found", "Unknown or already revoked grant.");
@@ -156,10 +199,27 @@ export class CapabilityRuntime {
     });
     this.events.publish("grant.revoked", { grantId });
   }
+
+  private recordProviderAdminEvent(
+    principal: CapabilityPrincipal,
+    eventType: string,
+    providerId: string,
+    summary: Record<string, string | boolean>,
+  ): void {
+    this.audit.recordEvent({
+      requestId: `provider:${randomUUID()}`,
+      principalId: principal.id,
+      eventType,
+      providerId,
+      decision: "allowed",
+      summary,
+    });
+    this.events.publish(eventType, { providerId, ...summary, catalogRevision: this.registry.revision });
+  }
 }
 
-function requireAdmin(principal: CapabilityPrincipal): void {
-  if (!principal.scopes.includes("capabilities:admin")) {
+function requireAdmin(principal: CapabilityPrincipal, enforcePolicy = true): void {
+  if (enforcePolicy && !principal.scopes.includes("capabilities:admin")) {
     throw new CapabilityError("policy_denied", "The principal lacks capabilities:admin.");
   }
 }

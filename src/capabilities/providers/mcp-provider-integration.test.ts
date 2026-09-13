@@ -29,7 +29,7 @@ writeFileSync(join(providerDir, "fake.json"), JSON.stringify({
       effects: { readOnly: true, destructive: false, idempotent: true, openWorld: false },
     }],
   },
-}, null, 2));
+}, null, 2), { mode: 0o600 });
 const config = loadConfig({
   DEVSPACE_CONFIG_DIR: join(root, "config"),
   DEVSPACE_STATE_DIR: join(root, "state"),
@@ -53,16 +53,10 @@ try {
   const catalogResponse = await fetch(`${base}/capabilities?availableOnly=true`);
   assert.equal(catalogResponse.status, 200);
   const catalog = await catalogResponse.json() as any;
-  assert.equal(catalog.data.items[0].id, "test.mounted.echo");
-  assert.equal(running.capabilityRuntime!.supervisor.list()[0]!.kind, "mcp:stdio");
-
-  running.capabilityRuntime!.policy.addGrant({
-    id: "mounted-mcp-read",
-    principalId: `local:${process.getuid?.() ?? "user"}`,
-    capabilityPattern: "test.mounted.echo",
-    providerPattern: "test.mounted.mcp",
-    allowedEffects: ["readOnly"],
-  });
+  assert.equal(catalog.data.items.some((item: any) => item.id === "test.mounted.echo"), true);
+  assert.equal(running.capabilityRuntime!.supervisor.list().find(
+    ({ id }) => id === "test.mounted.mcp",
+  )?.kind, "mcp:stdio");
   const invocationResponse = await fetch(`${base}/invocations`, {
     method: "POST",
     headers: { "content-type": "application/json" },

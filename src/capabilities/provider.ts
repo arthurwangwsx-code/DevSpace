@@ -1,5 +1,6 @@
 import type {
   CapabilityDescriptor,
+  CapabilityPrincipal,
   JsonObject,
   JsonValue,
   ProviderHealth,
@@ -21,6 +22,7 @@ export interface ProviderInvocation {
 
 export interface ProviderInvocationContext {
   signal: AbortSignal;
+  principal?: CapabilityPrincipal;
 }
 
 export interface ProviderOpenRequest {

@@ -45,11 +45,12 @@ try {
 
   const providers = await getJson(`${base}/providers`);
   assert.equal(providers.response.status, 200);
-  assert.equal(providers.body.data.items[0].id, "test.fake.provider");
-  assert.equal(providers.body.data.items[0].health.state, "ready");
+  const fakeProvider = providers.body.data.items.find((item: any) => item.id === "test.fake.provider");
+  assert.equal(fakeProvider.id, "test.fake.provider");
+  assert.equal(fakeProvider.health.state, "ready");
 
   const capabilities = await getJson(`${base}/capabilities?availableOnly=true`);
-  assert.equal(capabilities.body.data.items[0].id, "test.fake.echo");
+  assert.equal(capabilities.body.data.items.some((item: any) => item.id === "test.fake.echo"), true);
   assert.equal(typeof capabilities.body.meta.catalogRevision, "number");
 
   const search = await postJson(`${base}/capabilities/search`, {

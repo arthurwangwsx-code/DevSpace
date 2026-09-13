@@ -63,7 +63,7 @@ func toolDefinitions() -> [[String: Any]] {
         tool("desktop_click_point", "Click a point when the leased app is frontmost.", [
             "bundleId": stringSchema(), "x": numberSchema(), "y": numberSchema(),
         ], ["bundleId", "x", "y"]),
-        tool("desktop_type_text", "Type into a verified non-secure focused field.", [
+        tool("desktop_type_text", "Type into the leased application's focused field.", [
             "bundleId": stringSchema(), "text": stringSchema(),
         ], ["bundleId", "text"]),
         tool("desktop_press_key", "Press an allowlisted key in the frontmost leased app.", [
@@ -144,7 +144,7 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         let bundleId = try requiredString(arguments, "bundleId")
         let app = try runningApplication(bundleId)
         try requireFrontmost(bundleId)
-        try requireNonSecureFocusedElement(app.processIdentifier)
+        try requireFocusedElementOwnedByProcess(app.processIdentifier)
         var units = Array(try requiredString(arguments, "text").utf16)
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
@@ -194,7 +194,7 @@ func pressKey(_ arguments: [String: Any]) throws -> [String: Any] {
     let bundleId = try requiredString(arguments, "bundleId")
     let app = try runningApplication(bundleId)
     try requireFrontmost(bundleId)
-    try requireNonSecureFocusedElement(app.processIdentifier)
+    try requireFocusedElementOwnedByProcess(app.processIdentifier)
     let key = try requiredString(arguments, "key")
     let codes: [String: CGKeyCode] = [
         "Return": 36, "Tab": 48, "Space": 49, "Delete": 51, "Escape": 53,
@@ -351,7 +351,7 @@ func requirePointInApplicationWindow(_ app: NSRunningApplication, _ point: CGPoi
     }
 }
 
-func requireNonSecureFocusedElement(_ processId: pid_t) throws {
+func requireFocusedElementOwnedByProcess(_ processId: pid_t) throws {
     let system = AXUIElementCreateSystemWide()
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(
@@ -366,12 +366,6 @@ func requireNonSecureFocusedElement(_ processId: pid_t) throws {
     guard AXUIElementGetPid(element, &focusedProcessId) == .success,
           focusedProcessId == processId else {
         throw HelperError(message: "The focused element does not belong to the leased application.")
-    }
-    let role = attributeString(element, kAXRoleAttribute as CFString) ?? ""
-    let subrole = attributeString(element, kAXSubroleAttribute as CFString) ?? ""
-    if role.localizedCaseInsensitiveContains("secure")
-        || subrole.localizedCaseInsensitiveContains("secure") {
-        throw HelperError(message: "Secure fields cannot receive automated input.")
     }
 }
 

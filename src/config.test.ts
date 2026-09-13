@@ -19,6 +19,7 @@ assert.equal(loadConfig({ ...baseEnv, DEVSPACE_WIDGETS: "off" }).widgets, "off")
 assert.equal(loadConfig(baseEnv).toolMode, "minimal");
 assert.equal(loadConfig(baseEnv).authMode, "oauth");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_AUTH_MODE: "trusted-local" }).authMode, "trusted-local");
+assert.equal(loadConfig({ ...baseEnv, DEVSPACE_CAPABILITY_ENFORCE_POLICY: "1" }).capabilities.enforcePolicy, true);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "minimal" }).toolMode, "minimal");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "full" }).toolMode, "full");
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TOOL_MODE: "codex" }).toolMode, "codex");
@@ -127,6 +128,8 @@ assert.deepEqual(loadConfig(baseEnv).resources, {
 assert.deepEqual(loadConfig(baseEnv).capabilities, {
   enabled: false,
   configDir: join(process.env.HOME!, ".devspace", "capabilities"),
+  adminApiEnabled: false,
+  enforcePolicy: false,
   maxConcurrent: 8,
   maxConcurrentPerProvider: 2,
   queueLimit: 64,
@@ -153,6 +156,8 @@ assert.deepEqual(
   {
     enabled: true,
     configDir: "/tmp/devspace-capabilities",
+    adminApiEnabled: true,
+    enforcePolicy: false,
     maxConcurrent: 4,
     maxConcurrentPerProvider: 1,
     queueLimit: 0,

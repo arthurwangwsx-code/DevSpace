@@ -25,8 +25,9 @@ Catalog 数据，不改变外部 API 形状。
    `CapabilityRuntime`，不能各自实现一套行为。
 5. Provider 是进程级常驻对象，调用者通过短期 `lease` 使用浏览器页面、App、窗口或设备；
    不把整个 Provider 生命周期绑定到某个 HTTP/MCP 会话。
-6. Provider 安装、注册、启用属于管理员动作。模型可以发现和调用已批准的能力，但 v1
-   不允许模型下载任意包、注册任意命令或扩大权限。
+6. Provider 安装、注册、启用由已认证的上层审批 Agent 通过固定管理 API 或 Catalog 管理能力
+   完成。默认 delegated-approval 不叠加 Grant、逐 executable/来源/secure-field/动作审批；
+   `capabilities:admin` 与 Grant 仅在显式开启 enforced-policy 兼容模式时生效。
 7. OS 权限和 DevSpace 授权是两层边界。DevSpace 可以保持已授权进程和 refresh token，
    但不能绕过 Chrome 首次连接确认、macOS TCC、用户登录和锁屏边界。
 8. 第一种 Provider 是当前用户 Chrome 的 Chrome DevTools MCP；第二种 Provider 是基于
@@ -51,7 +52,6 @@ MCP 的常驻进程、Munim 的标签页所有权，以及 Qwen Open Computer Us
 
 ### 2.2 明确非目标
 
-- 不在 v1 允许远程 Agent 动态执行 `npm install` 或注册任意 stdio 命令。
 - 不把 `exec_command` 当作日常能力网关。
 - 不在 v1 做第三方 Provider 商店、在线安装、自动升级或依赖解析。
 - 不在 v1 做 embedding/向量数据库；先用确定性的过滤和 BM25。
@@ -136,8 +136,11 @@ REST 根路径固定为 `/api/capabilities/v1`。v1 内只允许向响应增加�
 | `GET` | `/permissions` | 查询 Provider 权限和解锁要求 | `capabilities:discover` |
 | `GET` | `/events` | SSE：Catalog/Provider/Invocation 状态变化 | `capabilities:discover` |
 
-Provider 安装和配置不进入远程 v1 API。首版管理员入口仅为本机 CLI 和配置文件；将来如
-确需远程管理，应在独立 `capabilities:admin` scope 下新增 `/admin`，而不是扩张调用 API。
+Provider 动态管理进入固定的管理员控制面：`GET/POST /admin/providers`、
+`POST /admin/providers/:id/actions` 和 `DELETE /admin/providers/:id`。同一能力也作为
+`devspace.providers.*` Catalog 条目，通过既有 `capability_invoke` 使用；因此安装新 MCP
+不会改变固定八个 MCP 元工具。默认只验证调用者已认证，审批责任由上层 Agent 承担；显式开启
+enforced-policy 兼容模式后才要求 `capabilities:admin`。
 
 ### 4.2 通用响应和错误
 
@@ -523,8 +526,8 @@ DEVSPACE_CAPABILITY_INVOCATION_RETENTION_MS=86400000
 DEVSPACE_CAPABILITY_RESTART_MAX_DELAY_MS=60000
 ```
 
-不要使用 env 开关直接接受任意命令字符串。可执行文件、参数和 secret 引用放进管理员拥有的
-Manifest；配置加载时校验绝对路径、文件 ownership 和权限。
+不要使用 env 开关直接接受拼接后的 shell 字符串。可执行文件、参数和环境变量引用放进
+Agent 提交的 Manifest；配置加载时校验结构、绝对路径、文件 ownership 和权限。
 
 ### 7.2 Provider Manifest
 
@@ -556,11 +559,11 @@ Manifest；配置加载时校验绝对路径、文件 ownership 和权限。
 安全要求：
 
 - 使用 `spawn(command, args, { shell: false })`，禁止 `sh -c`。
-- `command` 必须是允许目录中的绝对路径，启动前解析并验证实际文件。
-- 环境变量采用 allowlist；secret 只保存 Keychain/secret store 引用。
+- `command` 必须是绝对路径并以 `shell=false` 启动；DevSpace 不维护 executable 目录白名单。
+- `envFrom` 明确映射子进程变量到服务进程中的变量；DevSpace 不做变量名审批，责任由上层 Agent 承担。
 - Provider stdout 作为协议流，不进入普通日志；stderr 逐行限长、限速并脱敏。
 - Manifest 变化先完整校验，再原子替换 Runtime 配置；失败时保留最后一个有效版本。
-- 远程 principal 不能提交、编辑或启用 Manifest。
+- 已认证 Agent 可经固定管理 API 提交、启停、重载或移除 Manifest；变更需要审计且原子持久化。
 
 ### 7.3 SQLite 迁移
 
@@ -649,11 +652,11 @@ https://<devspace-host>/capabilities/mcp
 route 上验证 token 的 exact audience 和 scope。若现有 provider 的结构不适合多 resource，
 则创建共享同一 OAuth store 的第二个 provider；不能把 `/mcp` token 无条件复用于能力入口。
 
-Scopes：
+Scope 语义：
 
-- `capabilities:discover`：列表、搜索、描述、Provider/permission 状态。
-- `capabilities:invoke`：创建 lease、调用、状态、取消、释放。
-- `capabilities:admin`：保留，不在 v1 远程 API 中使用。
+- 默认 delegated-approval 模式：token 只用于认证，不以 scope/Grant 做二次审批。
+- enforced-policy 兼容模式：`capabilities:discover` 用于发现，`capabilities:invoke` 用于调用，
+  `capabilities:admin` 用于动态 Provider 与 Grant 管理。
 
 获得 refresh token 后，客户端可以合法续期 DevSpace 授权，不需要每次 API 调用都请求用户。
 这解决的是 DevSpace 认证，不会替代 Chrome 或 macOS 的系统授权。
@@ -661,7 +664,12 @@ Scopes：
 本机 CLI 可以使用 loopback/control socket principal，但只在请求来自当前用户拥有的 socket
 或严格 loopback 时启用；远程请求不能伪装成本机 principal。
 
-### 9.2 Grant 和策略顺序
+### 9.2 审批委托与可选 Grant 兼容模式
+
+默认模式只执行身份认证、Schema、lease ownership、运行条件、并发/配额、超时、输出限制和审计；
+不检查 capability/provider/effect/target Grant，也不拦截 secure-field 参数。上层 Agent 是审批点。
+
+只有设置 `DEVSPACE_CAPABILITY_ENFORCE_POLICY=1` 时，才在 Router 中加入下列旧策略阶段：
 
 一次调用必须按固定顺序经过：
 
@@ -687,7 +695,7 @@ Scopes：
 - argument constraint（导航域名 allowlist、文件路径 allowlist 等）
 - 有效期、创建人、撤销时间
 
-默认 fail closed。建议首版默认值：
+enforced-policy 模式 fail closed；delegated-approval 是本项目默认值。旧策略能力包括：
 
 - 已认证主体可发现经过管理员启用的安全摘要。
 - Chrome 的 `list_pages`、`take_snapshot` 可在显式页面 lease 后授予只读调用。
@@ -721,7 +729,7 @@ capability.policy.denied
 
 ## 10. 通用外部 MCP Provider
 
-DevSpace 必须像 Codex/Claude 等 MCP Host 一样挂载外部 MCP Server，并把经过管理员批准的
+DevSpace 必须像 Codex/Claude 等 MCP Host 一样挂载外部 MCP Server，并把 Agent 显式映射的
 下游 tools 注册进统一 Catalog，再通过固定 REST/MCP/CLI 元接口暴露。这不是 Chrome 特例，
 而是所有 MCP Provider 的基础适配层。
 
@@ -731,7 +739,7 @@ DevSpace 必须像 Codex/Claude 等 MCP Host 一样挂载外部 MCP Server，并
 mcp-stdio
   command: 绝对可执行路径
   args: 字符串数组
-  env: allowlist + secret reference
+  env: explicit envFrom mapping
 
 mcp-streamable-http
   url: 固定 https/受控 loopback URL
@@ -740,7 +748,7 @@ mcp-streamable-http
 ```
 
 `McpClientProvider` 持有长期 MCP Client/Transport，启动后执行 `initialize` 和 `tools/list`。
-每个下游 tool 经过管理员映射或明确 allowlist 后生成稳定 Capability ID；原始 tool name、
+每个下游 tool 经过 Agent 显式映射后生成稳定 Capability ID；原始 tool name、
 inputSchema、annotations 和 server/version 只作为 binding/metadata。`tools/list_changed` 通知触发
 原子 rediscover 和 Catalog revision，不能直接修改正在执行的 registration map。
 
@@ -758,7 +766,7 @@ version。不同 Provider 的同名 tool 不冲突；同一稳定 ID 被另一 P
   不能成为 DevSpace 管理指令。
 - MCP annotations 只是风险提示，最终 readOnly/destructive/openWorld 和权限由本地 Manifest
   mapping 决定。
-- Provider 注册/启停仍是本机管理员动作；普通 Agent 只能查询和调用已批准 Capability。
+- 已认证的上层 Agent 可以注册、启停、重载和移除 Provider；DevSpace 不重复实现审批流。
 - v1 必须完整支持 tool discovery/call。resources、resource templates 和 prompts 在后续小批次
   映射为只读资产/固定元调用，但不能为了它们改变现有 `/mcp`。
 - 一个下游 MCP 断线只影响该 Provider，不能拖垮现有 workspace MCP 或其他 Providers。
@@ -877,7 +885,7 @@ Native Host 注册和高权限告知。
 | 能力 | 屏幕锁定后预期 | v1 策略 |
 | --- | --- | --- |
 | 已建立 CDP 连接上的页面 JS/DOM/网络读取 | 可能继续，取决于 Chrome/系统是否挂起 | 条件允许，必须做真实 soak |
-| 页面导航、CDP click/type | 可能继续，但会改变用户会话状态 | 仅显式 grant；记录 locked 状态 |
+| 页面导航、CDP click/type | 可能继续，但会改变用户会话状态 | 目标 lease；审批由上层 Agent 完成；记录 locked 状态 |
 | Chrome 页面截图 | 通常可由渲染管线产生，但不可假设 | 验证通过后按版本能力矩阵启用 |
 | 首次 Chrome 授权、重连时的用户确认 | 不可在锁屏完成 | `permission_required` |
 | macOS 桌面截图 | 锁屏/TCC 下通常不可可靠使用 | 拒绝或 `temporarily_unavailable` |
@@ -929,7 +937,7 @@ desktop.ui.scroll
 snapshot ID 和短期 element handles；所有 element 动作必须引用同一 App/window 的最新
 snapshot，UI 变化后返回 stale handle，而不是点击旧坐标。
 
-必须识别 AX secure text field 并默认拒绝读取/填写。用户活跃输入检测、前台 App 改变、
+必须识别 AX secure text field 并对快照值脱敏；是否填写由上层 Agent 审批。用户活跃输入检测、前台 App 改变、
 锁屏、显示睡眠或目标窗口消失时，Provider 应中止或让出控制，不与用户抢鼠标键盘。
 
 ### 12.3 跨平台预留
@@ -1085,7 +1093,7 @@ tool allowlist/mapping、list-changed 刷新和 fake downstream MCP contract tes
 
 - 只在本地测试站点/fixture 上执行，不操作真实账户或生产数据。
 - 未授权 mutation 失败；授权后按目标 lease 成功。
-- secure/password field 默认拒绝。
+- secure/password field 的快照值必须脱敏；输入审批由上层 Agent 完成。
 - 用户关闭/切换目标、并发 mutation、过期 lease 行为确定。
 - 分别验证“解锁建立连接后锁屏”和“锁屏期间 Provider 重启”场景。
 - 形成 OS/Chrome/Provider 版本化能力矩阵；未通过项保持 `requiresUnlocked=true`。
@@ -1155,15 +1163,16 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 - 通用 stdio/Streamable HTTP MCP 能挂载、筛选、注册和调用工具；下游变更只更新 Catalog
   revision，不能改变固定元 API，也不能把 Provider instructions 当作可信指令。
 - Catalog 能列出、搜索、描述 Provider 能力，动态变化只增加 revision，不改变元 API。
-- OAuth audience/scope、policy、lease ownership、并发、超时、取消和审计均有负向测试。
-- Provider 配置不能由普通远程 Agent 修改，任意 shell 不可通过 Manifest 注入。
+- OAuth audience、delegated/enforced policy、lease ownership、并发、超时、取消和审计均有测试。
+- 已认证 Agent 可以提交 stdio/HTTP Manifest；其 executable/args 权限与本机服务用户一致，
+  DevSpace 不添加 executable/origin/env/action 白名单，审批由上层 Agent 负责。
 - Chrome 只读路径已在用户当前 Chrome 真实验证，没有启动隔离 Profile。
-- Chrome mutation 只在显式 grant + lease 下工作，secure field 默认拒绝。
+- Chrome mutation 需要目标 lease；默认不需要 Grant，也不拦截 secure field，审批由上层 Agent 完成。
 - Chrome 锁屏支持形成真实版本矩阵；未验证项没有被声明为支持。
 - macOS Helper 权限绑定稳定二进制，AX/截图/输入和锁屏边界有真实证据。
 - 服务重启、Provider crash、Chrome restart、客户端并发和 shutdown 不泄漏资源。
 - 文档包含安装、授权、doctor、调用、故障恢复、禁用和卸载步骤。
-- feature flag 和 Provider 默认开关符合最小权限；尚未通过的 Provider 保持 disabled。
+- capability feature flag 和 Provider enabled 状态可显式配置；尚未通过实机验收的 Provider 不宣称可用。
 
 ## 17. 风险与缓解
 
@@ -1171,14 +1180,14 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | --- | --- | --- |
 | MCP client 缓存工具列表 | 动态工具不可见或调用失败 | v1 固定元工具，动态数据进 Catalog |
 | Chrome 当前 Profile 权限过大 | 可见全部标签、Cookie 相关页面 | 显式 lease、最小摘要、target policy、默认只读 |
-| Provider child 获得任意环境 | secret 泄漏或命令注入 | absolute executable、shell=false、env allowlist、manifest ownership |
+| Provider child 获得被映射环境变量 | secret 泄漏或命令注入 | 上层 Agent 审批、absolute executable、shell=false、显式 envFrom、manifest ownership、审计 |
 | OS/Chrome 升级改变 autoConnect | 后台连接失效 | doctor、Schema digest、状态机、Extension fallback、版本矩阵 |
 | 锁屏能力被过度承诺 | 自动化中途失败或触碰安全边界 | Descriptor runtime conditions、SessionStateProbe、真实 soak、fail closed |
 | 桌面坐标点击漂移 | 点击错误目标 | AX 语义优先、snapshot handles、窗口绑定、坐标 fallback 分级 |
 | 多 Agent 争用页面/鼠标 | 相互干扰 | principal lease、独占 mutation、冲突错误、用户活跃让出 |
 | 大截图/网页输出耗尽内存 | 服务不稳定 | 输出限制、artifact handle、独立 gate、背压 |
-| Provider 升级悄悄扩大工具 | 越权能力出现 | 显式 allowlist 映射、Schema digest、管理员审阅后启用 |
-| 把 DevSpace token 当作 OS 权限 | 反复提示或错误安全假设 | OAuth/Grant/OS permission 三层独立状态和文档 |
+| Provider 升级悄悄扩大工具 | 意外能力出现 | 显式工具映射、Schema digest、Catalog revision |
+| 把 DevSpace token 当作 OS 权限 | 反复提示或错误安全假设 | 连接认证、可选 enforced-policy、OS permission 三层独立状态和文档 |
 
 ## 18. 给后续实施 Agent 的交接指令
 
@@ -1216,9 +1225,10 @@ openWorld 策略，但不得登录、提交表单或修改真实数据。
 | 5 | 完成（2026-09-13） | 本批提交 | REST catalog/search/lease/invoke/error/SSE；OAuth token/scope/audience/expiry 与双 resource metadata；完整 test/build/旧 MCP 契约 | Fake Provider + HTTP OAuth client | SSE 采用 resync 快照恢复；持久事件回放留待硬化批次 |
 | 6 | 完成（2026-09-13） | 本批提交 | 固定 8-tool MCP contract、共享 policy/invocation、CLI JSON stdout/退出码、旧 MCP 契约 | Fake Provider 经 MCP、REST 与 CLI | CLI 通过本机 REST；OAuth 模式需 `DEVSPACE_CAPABILITY_BEARER_TOKEN` |
 | 7 | 代码完成、实机授权待验收（2026-09-13） | 本批提交 | 通用 MCP Manifest、stdio+HTTP、env 引用、allowlist、schema-version fail-closed；Chrome 当前 Profile 预置、只读固定映射、页面 lease、串行目标选择和 CLI 注册测试 | Fake Chrome MCP 已贯通；本机 Chrome 152 已确认 `DevToolsActivePort` 与授权提示，尚未由用户批准 | 批准 Chrome 提示后执行 fixture snapshot/screenshot、重启与异常页验证 |
-| 8 | 代码完成、实机锁屏待验收（2026-09-13） | 本批提交 | Chrome mutation 显式映射、secure/unverified field fail-closed、持久 Grant admin API/CLI、macOS session probe、调用与 lease 前运行条件门 | Fake Chrome/locked session；本机当前会话探针 | Chrome 授权后执行 mutation fixture；真实锁屏仍需用户安排解锁窗口 |
+| 8 | 代码完成、实机锁屏待验收（2026-09-13） | 本批提交 | Chrome mutation 显式映射、持久 Grant 兼容 API/CLI、macOS session probe、调用与 lease 前运行条件门；默认审批委托给上层 Agent | Fake Chrome/locked session；本机当前会话探针 | Chrome 授权后执行 mutation fixture；真实锁屏仍需用户安排解锁窗口 |
 | 9 | 核心路径完成、真实用户活跃/锁屏门待补（2026-09-13） | 本批提交 | 原生 Swift MCP Helper、稳定 identifier 签名脚本、应用 lease 绑定、AX 有界快照、应用所属 layer-zero 窗口截图、近期硬件输入让出、激活/点击/安全输入/按键、secure value 脱敏、Provider 单测 | 本机真实编译/MCP 握手；Accessibility/ScreenCapture 预检均为 true；空白 Fixture App 的 AX、Unicode 输入、限定窗口 PNG 截图真实 canary 通过 | 生产 Developer ID 签名、真实用户活跃让出与锁屏实测 |
-| 10 | 框架完成、长时/实机 soak 待验收（2026-09-13） | 本批提交 | 独立临时 DevSpace + 真实 stdio MCP fixture；REST/MCP 并发、固定 8-tool、session churn、队列限流/恢复、幂等、取消、超时、输出上限、secure intent、child crash/backoff/recovery、进程树 RSS/FD/socket、关机无孤儿；smoke/local/1m soak 与 2,000 条历史回收边界通过 | 仅隔离 Fixture，不等同于 Chrome/桌面实机 soak | 10m/24h soak 尚未运行；Chrome 授权、真实锁屏、桌面 screenshot/用户活跃让出仍是显式验收门 |
+| 10 | 框架与 10m soak 完成、24h/实机 soak 待验收（2026-09-13） | 本批提交 | 独立临时 DevSpace + 真实 stdio MCP fixture；REST/MCP 并发、固定 8-tool、session churn、队列限流/恢复、幂等、取消、超时、输出上限、secure intent、child crash/backoff/recovery、进程树 RSS/FD/socket、关机无孤儿；正式 10m 为 42,913/42,913 调用、5,000 churn、26 项门全通过、峰值 RSS 611.19 MiB；delegated-approval 最终 local 为 1,600/1,600、23 项门全通过 | 仅隔离 Fixture，不等同于 Chrome/桌面实机 soak | 24h soak 尚未运行；Chrome 授权、真实锁屏、真实用户活跃让出仍是显式验收门 |
+| 11 | 完成（2026-09-13） | 本批提交 | 固定 REST admin API；固定 MCP 的 `capability_invoke` 调用动态 `devspace.providers.*` 管理能力；默认 grantless delegated approval、enforced-policy 显式兼容开关；Manifest 安全存储；进程内 install/enable/disable/reload/remove；Catalog revision 与 8-tool 不变端到端测试 | 真实 stdio Fake MCP 子进程动态装载、重载和回收 | 包下载/供应链审批由上层管理 Agent 负责 |
 
 ## 20. 推荐阅读顺序
 

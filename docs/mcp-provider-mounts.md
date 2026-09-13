@@ -3,7 +3,7 @@
 For the built-in current-profile Chrome preset, see
 [`chrome-current-profile-provider.md`](./chrome-current-profile-provider.md).
 
-DevSpace can keep one downstream MCP client per configured provider, discover its allowlisted tools,
+DevSpace can keep one downstream MCP client per configured provider, discover its explicitly mapped tools,
 register them in the shared capability catalog, and expose them through both:
 
 - `POST /capabilities/mcp` — a fixed eight-tool MCP interface.
@@ -24,7 +24,8 @@ Create a JSON or YAML manifest, then validate and copy it into the protected pro
 devspace providers add-mcp --manifest /absolute/path/to/provider.json
 ```
 
-The command does not overwrite an existing provider and reports `restartRequired: true`. Provider
+The command does not overwrite an existing provider and reports `restartRequired: true` because the
+local-file CLI deliberately does not mutate a running server. Provider
 manifests default to `~/.devspace/capabilities`; override with
 `DEVSPACE_CAPABILITY_CONFIG_DIR`. After installation, restart the shared DevSpace process and check:
 
@@ -32,6 +33,11 @@ manifests default to `~/.devspace/capabilities`; override with
 devspace providers list --json
 devspace capabilities list --provider example.remote.mcp --json
 ```
+
+For install/load without a restart, use the fixed administrator REST endpoints
+or invoke the catalog capabilities `devspace.providers.install`,
+`devspace.providers.control`, and `devspace.providers.remove` through
+`capability_invoke`. See [Dynamic Provider management](dynamic-provider-management.md).
 
 In OAuth mode, the CLI accepts an audience-bound token through
 `DEVSPACE_CAPABILITY_BEARER_TOKEN`. In `trusted-local` mode it connects directly to the loopback API.
@@ -93,7 +99,7 @@ Plain HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1`. Stdio comman
 directories must be absolute, no shell is involved, and only the SDK safe environment plus declared
 `envFrom` entries reaches the child process. Secrets belong in environment variables, not manifests.
 
-Capability input/output schema is learned from the allowlisted downstream tool. A schema change with
+Capability input/output schema is learned from the explicitly mapped downstream tool. A schema change with
 an unchanged capability version is rejected, including after a DevSpace restart because the prior
 catalog is persisted. Bump the manifest mapping's `version` only after reviewing the new contract.
 
@@ -102,9 +108,12 @@ catalog is persisted. Bump the manifest mapping's `version` only after reviewing
 - All MCP, REST, and CLI callers share one supervised provider process/connection.
 - Provider crashes use bounded exponential backoff; existing workspace `/mcp` remains available.
 - Tool-list change notifications trigger catalog refresh.
-- Invocation still passes through DevSpace scope, grant, schema, queue, timeout, output-limit,
-  cancellation, lease, and redacted audit enforcement.
-- A downstream MCP's prompts, resources, instructions, and non-allowlisted tools are not re-exported.
+- Invocation still passes through schema, queue, timeout, output-limit, cancellation, lease ownership,
+  and redacted audit enforcement. Scope/Grant checks are opt-in with
+  `DEVSPACE_CAPABILITY_ENFORCE_POLICY=1`; by default approval is delegated to the connected Agent.
+- A downstream MCP's prompts, resources, instructions, and non-mapped tools are not re-exported.
+- Admin API installation, enable/disable, reload, and recoverable removal update the running
+  supervisor and Catalog revision atomically from the caller's perspective; the outer eight MCP tools stay fixed.
 
 The capability feature remains off by default while Chrome and desktop providers complete their
 real-machine permission, lock-screen, and soak matrices.

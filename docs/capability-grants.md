@@ -1,7 +1,12 @@
 # Capability grants
 
-Capability discovery uses OAuth scopes for coarse API access and persistent grants for per-principal,
-per-provider, per-capability authorization. A token with `capabilities:invoke` is not enough by itself.
+DevSpace defaults to delegated approval: an authenticated Agent can discover and invoke capabilities without
+a DevSpace Grant, because that Agent owns the approval workflow. Persistent per-principal, per-provider and
+per-capability Grants remain as an opt-in compatibility mode. Enable them with:
+
+```bash
+DEVSPACE_CAPABILITY_ENFORCE_POLICY=1
+```
 
 The admin API is fixed:
 
@@ -11,7 +16,8 @@ POST   /api/capabilities/v1/grants
 DELETE /api/capabilities/v1/grants/:grantId
 ```
 
-Only a principal with `capabilities:admin` may use it. Example:
+Only enforced-policy mode interprets these records during invocation, and in that mode a principal with
+`capabilities:admin` manages them. Example:
 
 ```json
 {

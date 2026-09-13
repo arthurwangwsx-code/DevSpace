@@ -74,6 +74,8 @@ REST and MCP endpoints share the same limits and invocation history.
 | --- | ---: | --- |
 | `DEVSPACE_CAPABILITIES` | `0` | Set to `1` to enable the fixed capability REST and MCP endpoints. |
 | `DEVSPACE_CAPABILITY_CONFIG_DIR` | `~/.devspace/capabilities` | Administrator-managed Provider manifest directory. |
+| `DEVSPACE_CAPABILITY_ADMIN_API` | same as `DEVSPACE_CAPABILITIES` | Set to `0` to disable dynamic Provider install/load APIs and their catalog capabilities. |
+| `DEVSPACE_CAPABILITY_ENFORCE_POLICY` | `0` | Default delegates approvals to the connected Agent and does not require Grants. Set to `1` only to opt into DevSpace scope/Grant/secure-field enforcement. |
 | `DEVSPACE_CAPABILITY_MAX_CONCURRENT` | `8` | Maximum capability invocations executing across all Providers. |
 | `DEVSPACE_CAPABILITY_MAX_CONCURRENT_PER_PROVIDER` | `2` | Maximum invocations executing for one Provider. Must not exceed the global limit. |
 | `DEVSPACE_CAPABILITY_QUEUE_LIMIT` | `64` | FIFO invocation queue bound; excess work returns `rate_limited`. |

@@ -2,6 +2,7 @@ import express, { type NextFunction, type Request, type RequestHandler, type Res
 import { CapabilityError, capabilityErrorEnvelope, normalizeCapabilityError } from "./errors.js";
 import type { CapabilityEvent } from "./events.js";
 import type { CapabilityRuntime } from "./runtime.js";
+import type { CapabilityProviderAdmin } from "./provider-admin.js";
 import type { CapabilityPrincipal, JsonObject, JsonValue } from "./types.js";
 
 const SSE_QUEUE_LIMIT = 64;
@@ -11,6 +12,7 @@ export interface CapabilityHttpRouterOptions {
   discoverAuth: RequestHandler;
   invokeAuth: RequestHandler;
   adminAuth: RequestHandler;
+  providerAdmin?: CapabilityProviderAdmin;
   principal(req: Request): CapabilityPrincipal;
 }
 
@@ -133,8 +135,39 @@ export function createCapabilityHttpRouter(options: CapabilityHttpRouterOptions)
     options.runtime.revokeGrant(principal(req), grantId);
     return { revoked: true, grantId };
   }));
+  router.get("/admin/providers", ...admin, handle(options.runtime, (req) =>
+    requireProviderAdmin(options).list(principal(req))));
+  router.post("/admin/providers", ...admin, handle(options.runtime, (req) => {
+    const body = objectBody(req.body);
+    if (!("manifest" in body)) {
+      throw new CapabilityError("invalid_arguments", "manifest is required.");
+    }
+    return requireProviderAdmin(options).install(principal(req), body.manifest);
+  }));
+  router.post("/admin/providers/:providerId/actions", ...admin, handle(options.runtime, (req) => {
+    const body = objectBody(req.body);
+    const action = optionalEnum(body.action, ["enable", "disable", "reload"] as const, "action");
+    if (!action) throw new CapabilityError("invalid_arguments", "action is required.");
+    return requireProviderAdmin(options).action(
+      principal(req),
+      pathParam(req.params.providerId, "providerId"),
+      action,
+    );
+  }));
+  router.delete("/admin/providers/:providerId", ...admin, handle(options.runtime, (req) =>
+    requireProviderAdmin(options).remove(
+      principal(req),
+      pathParam(req.params.providerId, "providerId"),
+    )));
   router.get("/events", ...discover, (req, res) => streamEvents(options.runtime, req, res));
   return router;
+}
+
+function requireProviderAdmin(options: CapabilityHttpRouterOptions): CapabilityProviderAdmin {
+  if (!options.providerAdmin) {
+    throw new CapabilityError("provider_unavailable", "Dynamic Provider administration is unavailable.");
+  }
+  return options.providerAdmin;
 }
 
 function handle(

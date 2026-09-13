@@ -1,5 +1,14 @@
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, extname, isAbsolute, join, resolve } from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
 import type {
@@ -111,18 +120,23 @@ export function parseMcpProviderManifest(value: unknown): McpProviderManifest {
 }
 
 export function loadMcpProviderManifests(configDir: string): LoadedMcpProviderManifest[] {
-  try {
-    if (!statSync(configDir).isDirectory()) return [];
-  } catch {
-    return [];
-  }
-  return readdirSync(configDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && /\.(?:json|ya?ml)$/i.test(entry.name))
+  if (!assertSecureProviderDirectory(configDir, false)) return [];
+  const loaded = readdirSync(configDir, { withFileTypes: true })
+    .filter((entry) => /\.(?:json|ya?ml)$/i.test(entry.name))
     .sort((left, right) => left.name.localeCompare(right.name))
     .map((entry) => {
       const path = resolve(join(configDir, entry.name));
+      assertSecureProviderFile(path);
       return { path, manifest: readMcpProviderManifest(path) };
     });
+  const providerIds = new Set<string>();
+  for (const { manifest } of loaded) {
+    if (providerIds.has(manifest.metadata.id)) {
+      throw new Error(`Duplicate MCP provider id: ${manifest.metadata.id}`);
+    }
+    providerIds.add(manifest.metadata.id);
+  }
+  return loaded;
 }
 
 export function readMcpProviderManifest(path: string): McpProviderManifest {
@@ -139,6 +153,7 @@ export function installMcpProviderManifest(sourcePath: string, configDir: string
 
 export function writeMcpProviderManifest(manifest: McpProviderManifest, configDir: string): string {
   mkdirSync(configDir, { recursive: true, mode: 0o700 });
+  assertSecureProviderDirectory(configDir, true);
   const target = join(configDir, `${manifest.metadata.id}.json`);
   writeFileSync(target, `${JSON.stringify(manifest, null, 2)}\n`, {
     encoding: "utf8",
@@ -146,6 +161,99 @@ export function writeMcpProviderManifest(manifest: McpProviderManifest, configDi
     mode: 0o600,
   });
   return target;
+}
+
+export function setMcpProviderEnabled(providerId: string, enabled: boolean, configDir: string): string {
+  const loaded = findMcpProviderManifest(providerId, configDir);
+  replaceManifestAtomically(loaded.path, parseMcpProviderManifest({
+    ...loaded.manifest,
+    spec: { ...loaded.manifest.spec, enabled },
+  }));
+  return loaded.path;
+}
+
+export function archiveMcpProviderManifest(providerId: string, configDir: string): {
+  path: string;
+  archivedPath: string;
+} {
+  const loaded = findMcpProviderManifest(providerId, configDir);
+  const archiveDirectory = join(resolve(configDir), ".removed");
+  mkdirSync(archiveDirectory, { recursive: true, mode: 0o700 });
+  assertSecureProviderDirectory(archiveDirectory, true);
+  const extension = extname(loaded.path).toLowerCase() || ".json";
+  const archivedPath = join(archiveDirectory, `${providerId}-${Date.now()}-${randomUUID()}${extension}`);
+  renameSync(loaded.path, archivedPath);
+  return { path: loaded.path, archivedPath };
+}
+
+export function restoreArchivedMcpProviderManifest(path: string, archivedPath: string): void {
+  assertSecureProviderFile(archivedPath);
+  assertSecureProviderDirectory(dirname(resolve(path)), true);
+  renameSync(archivedPath, path);
+}
+
+function findMcpProviderManifest(providerId: string, configDir: string): LoadedMcpProviderManifest {
+  id.parse(providerId);
+  const loaded = loadMcpProviderManifests(configDir).find(({ manifest }) =>
+    manifest.metadata.id === providerId);
+  if (!loaded) throw new Error(`Unknown MCP provider: ${providerId}`);
+  return loaded;
+}
+
+function replaceManifestAtomically(path: string, manifest: McpProviderManifest): void {
+  assertSecureProviderFile(path);
+  const temporary = join(dirname(resolve(path)), `.${manifest.metadata.id}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    renameSync(temporary, path);
+  } catch (error) {
+    try { unlinkSync(temporary); } catch {}
+    throw error;
+  }
+}
+
+function assertSecureProviderDirectory(path: string, required: boolean): boolean {
+  let stats;
+  try {
+    stats = lstatSync(path);
+  } catch (error) {
+    if (!required && isMissing(error)) return false;
+    throw error;
+  }
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw new Error(`MCP provider config path must be a real directory: ${path}`);
+  }
+  assertCurrentUserOwnership(path, stats.uid);
+  if (process.platform !== "win32" && (stats.mode & 0o022) !== 0) {
+    throw new Error(`MCP provider config directory must not be group/world writable: ${path}`);
+  }
+  return true;
+}
+
+function assertSecureProviderFile(path: string): void {
+  const stats = lstatSync(path);
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new Error(`MCP provider manifest must be a regular file: ${path}`);
+  }
+  assertCurrentUserOwnership(path, stats.uid);
+  if (process.platform !== "win32" && (stats.mode & 0o077) !== 0) {
+    throw new Error(`MCP provider manifest must have mode 0600 or stricter: ${path}`);
+  }
+}
+
+function assertCurrentUserOwnership(path: string, owner: number): void {
+  const current = process.getuid?.();
+  if (current !== undefined && owner !== current) {
+    throw new Error(`MCP provider path must be owned by the current user: ${path}`);
+  }
+}
+
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function isSafeMcpUrl(value: string): boolean {

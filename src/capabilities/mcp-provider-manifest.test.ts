@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   installMcpProviderManifest,
+  archiveMcpProviderManifest,
   loadMcpProviderManifests,
   parseMcpProviderManifest,
+  setMcpProviderEnabled,
 } from "./mcp-provider-manifest.js";
 
 const fixture = {
@@ -53,12 +55,12 @@ assert.throws(() => parseMcpProviderManifest({
 const root = mkdtempSync(join(tmpdir(), "devspace-mcp-manifest-test-"));
 try {
   mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, "b.yaml"), JSON.stringify(fixture));
+  writeFileSync(join(root, "b.yaml"), JSON.stringify(fixture), { mode: 0o600 });
   writeFileSync(join(root, "a.json"), JSON.stringify({
     ...fixture,
     metadata: { id: "test.external.first" },
     spec: { ...fixture.spec, tools: [{ ...fixture.spec.tools[0], capabilityId: "test.external.first" }] },
-  }));
+  }), { mode: 0o600 });
   assert.deepEqual(
     loadMcpProviderManifests(root).map(({ manifest }) => manifest.metadata.id),
     ["test.external.first", "test.external.mcp"],
@@ -70,8 +72,27 @@ try {
     () => installMcpProviderManifest(join(root, "b.yaml"), join(root, "installed")),
     /EEXIST/,
   );
+  setMcpProviderEnabled("test.external.mcp", false, join(root, "installed"));
+  assert.equal(JSON.parse(readFileSync(installed, "utf8")).spec.enabled, false);
+  setMcpProviderEnabled("test.external.mcp", true, join(root, "installed"));
+  assert.equal(JSON.parse(readFileSync(installed, "utf8")).spec.enabled, true);
+  const archived = archiveMcpProviderManifest("test.external.mcp", join(root, "installed"));
+  assert.equal(existsSync(archived.path), false);
+  assert.equal(existsSync(archived.archivedPath), true);
+
+  if (process.platform !== "win32") {
+    const insecure = join(root, "insecure");
+    mkdirSync(insecure);
+    const insecureFile = join(insecure, "provider.json");
+    writeFileSync(insecureFile, JSON.stringify(fixture), { mode: 0o644 });
+    assert.throws(() => loadMcpProviderManifests(insecure), /mode 0600 or stricter/);
+    chmodSync(insecureFile, 0o600);
+    const linked = join(insecure, "linked.json");
+    symlinkSync(insecureFile, linked);
+    assert.throws(() => loadMcpProviderManifests(insecure), /regular file/);
+  }
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
 
-console.log("MCP provider manifest tests passed: schema, safe transports, defaults, deterministic load");
+console.log("MCP provider manifest tests passed: schema, safe transports, secure files, lifecycle, deterministic load");

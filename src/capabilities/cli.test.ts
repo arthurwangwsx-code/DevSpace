@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,12 +34,12 @@ try {
   const url = `http://127.0.0.1:${address.port}/api/capabilities/v1`;
   const listed = await runCli(["capabilities", "list", "--url", url, "--json"], env);
   assert.equal(listed.code, 0);
-  assert.equal(JSON.parse(listed.stdout).data.items[0].id, "test.fake.echo");
+  assert.equal(JSON.parse(listed.stdout).data.items.some((item: any) => item.id === "test.fake.echo"), true);
   assert.equal(listed.stderr, "");
 
   const providers = await runCli(["providers", "list", "--url", url, "--json"], env);
   assert.equal(providers.code, 0);
-  assert.equal(JSON.parse(providers.stdout).data.items[0].id, "test.fake.provider");
+  assert.equal(JSON.parse(providers.stdout).data.items.some((item: any) => item.id === "test.fake.provider"), true);
 
   const missing = await runCli([
     "capabilities", "describe", "missing.capability", "--url", url, "--json",
@@ -65,6 +65,16 @@ try {
   const installed = await runCli(["providers", "add-mcp", "--manifest", manifestPath], env);
   assert.equal(installed.code, 0);
   assert.equal(JSON.parse(installed.stdout).restartRequired, true);
+  const installedPath = JSON.parse(installed.stdout).path;
+  const enabledProvider = await runCli(["providers", "enable", "test.cli.installed"], env);
+  assert.equal(JSON.parse(enabledProvider.stdout).enabled, true);
+  assert.equal(JSON.parse(readFileSync(installedPath, "utf8")).spec.enabled, true);
+  const disabledProvider = await runCli(["providers", "disable", "test.cli.installed"], env);
+  assert.equal(JSON.parse(disabledProvider.stdout).enabled, false);
+
+  const doctor = await runCli(["capabilities", "doctor", "--url", url, "--strict", "--json"], env);
+  assert.equal(doctor.code, 0);
+  assert.equal(JSON.parse(doctor.stdout).data.healthy, true);
 
   const chrome = await runCli([
     "providers", "add-chrome", "--command", process.execPath,
@@ -79,6 +89,12 @@ try {
     assert.equal(desktop.code, 0);
     assert.equal(JSON.parse(desktop.stdout).providerId, "desktop.macos.accessibility");
   }
+
+  const removedProvider = await runCli(["providers", "remove", "test.cli.installed"], env);
+  const removedPayload = JSON.parse(removedProvider.stdout);
+  assert.equal(removedPayload.recoverable, true);
+  assert.equal(existsSync(installedPath), false);
+  assert.equal(existsSync(removedPayload.archivedPath), true);
 
   const principalId = `local:${process.getuid?.() ?? "user"}`;
   const grant = await runCli([
@@ -97,7 +113,7 @@ try {
   const revokedGrant = await runCli(["grants", "revoke", "cli-grant", "--url", url, "--json"], env);
   assert.equal(JSON.parse(revokedGrant.stdout).data.revoked, true);
 
-  console.log("capability CLI tests passed: stable JSON stdout and CI exit codes");
+  console.log("capability CLI tests passed: stable JSON, doctor, Provider lifecycle, and CI exit codes");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await running.close();

@@ -85,6 +85,16 @@ export class CapabilityLeaseManager {
     return records;
   }
 
+  removeProvider(providerId: string): number {
+    let removed = 0;
+    for (const [leaseId, record] of this.leases) {
+      if (record.lease.providerId !== providerId) continue;
+      this.leases.delete(leaseId);
+      removed += 1;
+    }
+    return removed;
+  }
+
   get size(): number {
     return this.leases.size;
   }

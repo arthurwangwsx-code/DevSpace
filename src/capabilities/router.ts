@@ -58,6 +58,7 @@ export interface InvokeCapabilityRequest {
 
 interface InternalInvocation {
   public: CapabilityInvocation;
+  principal: CapabilityPrincipal;
   requestId: string;
   arguments: JsonValue;
   descriptor: CapabilityDescriptor;
@@ -434,6 +435,7 @@ export class CapabilityInvocationRouter {
         internal.binding.invoke(internal.arguments, {
           signal: internal.controller.signal,
           lease: internal.providerLease,
+          principal: internal.principal,
         }),
         timeout,
         aborted,
@@ -641,6 +643,7 @@ function createInternalInvocation(input: {
     reject = rejectPromise;
   });
   return {
+    principal: input.request.principal,
     public: {
       id: `inv_${randomUUID()}`,
       principalId: input.request.principal.id,

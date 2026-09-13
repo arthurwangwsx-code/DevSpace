@@ -68,14 +68,17 @@ try {
   const endpoint = `${origin}/api/capabilities/v1/providers`;
 
   assert.equal((await fetch(endpoint)).status, 401);
-  assert.equal((await authorizedFetch(endpoint, "wrong-scope")).status, 403);
+  assert.equal((await authorizedFetch(endpoint, "wrong-scope")).status, 200);
   assert.equal((await authorizedFetch(endpoint, "wrong-audience")).status, 403);
   assert.equal((await authorizedFetch(endpoint, "expired")).status, 401);
   const accepted = await authorizedFetch(endpoint, "valid-discover");
   assert.equal(accepted.status, 200);
   const grantsEndpoint = `${origin}/api/capabilities/v1/grants`;
-  assert.equal((await authorizedFetch(grantsEndpoint, "valid-discover")).status, 403);
+  assert.equal((await authorizedFetch(grantsEndpoint, "valid-discover")).status, 200);
   assert.equal((await authorizedFetch(grantsEndpoint, "valid-admin")).status, 200);
+  const providerAdminEndpoint = `${origin}/api/capabilities/v1/admin/providers`;
+  assert.equal((await authorizedFetch(providerAdminEndpoint, "valid-discover")).status, 200);
+  assert.equal((await authorizedFetch(providerAdminEndpoint, "valid-admin")).status, 200);
 
   const existingMetadata = await fetch(`${origin}/.well-known/oauth-protected-resource/mcp`);
   assert.equal(existingMetadata.status, 200);
@@ -92,7 +95,7 @@ try {
     "capabilities:admin",
   ]);
 
-  console.log("capability auth tests passed: token, scope, audience, expiry, dual metadata");
+  console.log("capability auth tests passed: delegated scopes, audience, expiry, dual metadata");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await running.close();

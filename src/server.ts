@@ -76,6 +76,8 @@ import type { ProviderRegistration } from "./capabilities/provider.js";
 import { CapabilityRuntime } from "./capabilities/runtime.js";
 import type { CapabilityPrincipal } from "./capabilities/types.js";
 import { loadMcpProviderRegistrations } from "./capabilities/providers/mcp-provider-loader.js";
+import { CapabilityProviderAdmin } from "./capabilities/provider-admin.js";
+import { CapabilityManagementProvider } from "./capabilities/providers/capability-management-provider.js";
 
 type Transport = StreamableHTTPServerTransport;
 const requestContext = new AsyncLocalStorage<{ requestId: string }>();
@@ -1714,14 +1716,14 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
   const capabilityDiscoverAuth = config.authMode === "oauth"
     ? requireBearerAuth({
       verifier: oauthProvider,
-      requiredScopes: ["capabilities:discover"],
+      requiredScopes: config.capabilities.enforcePolicy ? ["capabilities:discover"] : [],
       resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(capabilityResourceServerUrl),
     })
     : passThroughAuth;
   const capabilityInvokeAuth = config.authMode === "oauth"
     ? requireBearerAuth({
       verifier: oauthProvider,
-      requiredScopes: ["capabilities:invoke"],
+      requiredScopes: config.capabilities.enforcePolicy ? ["capabilities:invoke"] : [],
       resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(capabilityResourceServerUrl),
     })
     : passThroughAuth;
@@ -1735,13 +1737,14 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
   const capabilityAdminAuth = config.authMode === "oauth"
     ? requireBearerAuth({
       verifier: oauthProvider,
-      requiredScopes: ["capabilities:admin"],
+      requiredScopes: config.capabilities.enforcePolicy ? ["capabilities:admin"] : [],
       resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(capabilityResourceServerUrl),
     })
     : passThroughAuth;
   const capabilityRuntime = config.capabilities.enabled
     ? new CapabilityRuntime({
       stateDir: config.stateDir,
+      enforcePolicy: config.capabilities.enforcePolicy,
       providers: [
         ...loadMcpProviderRegistrations(config.capabilities.configDir),
         ...(options.capabilityProviders ?? []),
@@ -1761,6 +1764,16 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
       },
     })
     : undefined;
+  const capabilityProviderAdmin = capabilityRuntime
+    ? new CapabilityProviderAdmin(capabilityRuntime, config.capabilities)
+    : undefined;
+  if (capabilityRuntime && capabilityProviderAdmin && config.capabilities.adminApiEnabled) {
+    capabilityRuntime.registerProvider({
+      provider: new CapabilityManagementProvider(capabilityProviderAdmin),
+      kind: "builtin:provider-admin",
+      enabled: true,
+    });
+  }
   const capabilityReady = capabilityRuntime?.start();
   const workspaceStore = createWorkspaceStore(config.stateDir);
   const workspaces = new WorkspaceRegistry(config, workspaceStore);
@@ -2007,6 +2020,7 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
         discoverAuth: capabilityDiscoverAuth,
         invokeAuth: capabilityInvokeAuth,
         adminAuth: capabilityAdminAuth,
+        providerAdmin: capabilityProviderAdmin,
         principal: (req) => capabilityPrincipal(
           req,
           config.authMode,

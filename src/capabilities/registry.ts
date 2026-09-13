@@ -7,6 +7,7 @@ import type { ProviderLease } from "./provider.js";
 import type {
   CapabilityDescriptor,
   CapabilityListQuery,
+  CapabilityPrincipal,
   CapabilitySearchQuery,
   CapabilitySummary,
   CapabilityRuntimeRequirements,
@@ -17,7 +18,7 @@ import type {
 export interface CapabilityBinding {
   invoke(
     argumentsValue: JsonValue,
-    context: { signal: AbortSignal; lease?: ProviderLease },
+    context: { signal: AbortSignal; lease?: ProviderLease; principal?: CapabilityPrincipal },
   ): Promise<JsonValue>;
 }
 

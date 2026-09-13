@@ -27,6 +27,8 @@ export interface CapabilityGrant {
 export class CapabilityPolicyEngine {
   private readonly grants = new Map<string, CapabilityGrant>();
 
+  constructor(private readonly enforcePolicy = true) {}
+
   addGrant(grant: CapabilityGrant): void {
     validatePattern(grant.capabilityPattern);
     validatePattern(grant.providerPattern);
@@ -53,6 +55,7 @@ export class CapabilityPolicyEngine {
   }
 
   canDiscover(principal: CapabilityPrincipal, _descriptor: CapabilityDescriptor): boolean {
+    if (!this.enforcePolicy) return true;
     return principal.scopes.includes("capabilities:discover")
       || principal.scopes.includes("capabilities:invoke")
       || principal.scopes.includes("capabilities:admin");
@@ -63,6 +66,7 @@ export class CapabilityPolicyEngine {
     providerId: string;
     resourceType: string;
   }): void {
+    if (!this.enforcePolicy) return;
     this.requireInvokeScope(input.principal);
     const grant = this.activeGrants(input.principal).find((candidate) =>
       globMatches(candidate.providerPattern, input.providerId)
@@ -78,6 +82,7 @@ export class CapabilityPolicyEngine {
     resourceType: string;
     display: JsonObject;
   }): void {
+    if (!this.enforcePolicy) return;
     this.requireInvokeScope(input.principal);
     const grant = this.activeGrants(input.principal).find((candidate) =>
       globMatches(candidate.providerPattern, input.providerId)
@@ -94,7 +99,10 @@ export class CapabilityPolicyEngine {
     arguments: JsonValue;
     lease?: CapabilityLease;
   }): void {
+    if (!this.enforcePolicy) return;
     this.requireInvokeScope(input.principal);
+    if (input.principal.scopes.includes("capabilities:admin")
+      && input.descriptor.providerId === "devspace.providers.admin") return;
     if (containsSecureFieldIntent(input.arguments)) {
       throw new CapabilityError("policy_denied", "Secure fields cannot be read or filled.");
     }

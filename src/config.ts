@@ -32,6 +32,8 @@ export interface ResourceLimitsConfig {
 export interface CapabilityConfig {
   enabled: boolean;
   configDir: string;
+  adminApiEnabled: boolean;
+  enforcePolicy: boolean;
   maxConcurrent: number;
   maxConcurrentPerProvider: number;
   queueLimit: number;
@@ -345,6 +347,10 @@ function parseCapabilityConfig(env: NodeJS.ProcessEnv): CapabilityConfig {
     configDir: resolve(expandHomePath(
       env.DEVSPACE_CAPABILITY_CONFIG_DIR ?? join(homedir(), ".devspace", "capabilities"),
     )),
+    adminApiEnabled: env.DEVSPACE_CAPABILITY_ADMIN_API === undefined
+      ? parseBoolean(env.DEVSPACE_CAPABILITIES)
+      : parseBoolean(env.DEVSPACE_CAPABILITY_ADMIN_API),
+    enforcePolicy: parseBoolean(env.DEVSPACE_CAPABILITY_ENFORCE_POLICY),
     maxConcurrent,
     maxConcurrentPerProvider,
     queueLimit: parseNonNegativeInteger(

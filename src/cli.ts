@@ -40,7 +40,12 @@ import {
 import { expandHomePath } from "./roots.js";
 import { shutdownHttpServer } from "./server-shutdown.js";
 import { runMcpCanary } from "./mcp-canary.js";
-import { installMcpProviderManifest, writeMcpProviderManifest } from "./capabilities/mcp-provider-manifest.js";
+import {
+  archiveMcpProviderManifest,
+  installMcpProviderManifest,
+  setMcpProviderEnabled,
+  writeMcpProviderManifest,
+} from "./capabilities/mcp-provider-manifest.js";
 import {
   createChromeDevToolsManifest,
   findChromeDevToolsMcpCommand,
@@ -390,8 +395,8 @@ function printHelp(): void {
       "  devspace agents ls       List subagent sessions",
       "  devspace agents run <profile-or-provider-or-id> [--model <model>] <prompt>",
       "  devspace agents show <id>",
-      "  devspace capabilities list|search|describe|open|call|status|cancel|close [options]",
-      "  devspace providers list [--json]",
+      "  devspace capabilities list|search|describe|open|call|status|cancel|close|doctor [options]",
+      "  devspace providers list|enable|disable|remove [options]",
       "  devspace providers add-chrome [--command <absolute-path>]",
       "  devspace providers add-desktop --command <absolute-path>",
       "  devspace grants list|add|revoke [options]",
@@ -487,6 +492,29 @@ async function runCapabilitiesCommand(args: string[]): Promise<void> {
       ), options);
       return;
     }
+    case "doctor": {
+      const positionalProvider = options.positionals[0];
+      if (options.positionals.length > 1 || (positionalProvider && options.values.provider)) {
+        throw new Error("Usage: devspace capabilities doctor [--provider PROVIDER_ID] [--strict] [--json]");
+      }
+      const providerId = options.values.provider ?? positionalProvider;
+      const [providerResponse, permissionResponse] = await Promise.all([
+        capabilityFetch(providerId ? `/providers/${encodeURIComponent(providerId)}` : "/providers", options),
+        capabilityFetch("/permissions", options),
+      ]);
+      const providerData = capabilityEnvelopeData(providerResponse);
+      const permissionData = capabilityEnvelopeData(permissionResponse);
+      const providers = providerId ? [providerData] : capabilityItems(providerData);
+      const permissions = capabilityPermissionItems(permissionData)
+        .filter((entry) => !providerId || entry.providerId === providerId);
+      const healthy = providers.every((entry) => capabilityHealthState(entry) === "ready");
+      await printCapabilityResponse({
+        data: { healthy, providers, permissions },
+        meta: { checkedAt: new Date().toISOString() },
+      }, options);
+      if (options.flags.has("strict") && !healthy) process.exitCode = 1;
+      return;
+    }
     case undefined:
     case "help":
     case "--help":
@@ -499,6 +527,31 @@ async function runCapabilitiesCommand(args: string[]): Promise<void> {
 
 async function runProvidersCommand(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
+  if (subcommand === "enable" || subcommand === "disable") {
+    if (rest.length !== 1) throw new Error(`Usage: devspace providers ${subcommand} <provider-id>`);
+    const config = loadConfig();
+    const path = setMcpProviderEnabled(rest[0]!, subcommand === "enable", config.capabilities.configDir);
+    console.log(JSON.stringify({
+      providerId: rest[0],
+      enabled: subcommand === "enable",
+      path,
+      restartRequired: true,
+    }));
+    return;
+  }
+  if (subcommand === "remove") {
+    if (rest.length !== 1) throw new Error("Usage: devspace providers remove <provider-id>");
+    const config = loadConfig();
+    const archived = archiveMcpProviderManifest(rest[0]!, config.capabilities.configDir);
+    console.log(JSON.stringify({
+      providerId: rest[0],
+      removed: true,
+      recoverable: true,
+      ...archived,
+      restartRequired: true,
+    }));
+    return;
+  }
   if (subcommand === "add-desktop") {
     if (rest[0] !== "--command" || !rest[1] || rest.length !== 2 || !isAbsolute(rest[1])) {
       throw new Error("Usage: devspace providers add-desktop --command <absolute-path>");
@@ -551,7 +604,7 @@ async function runProvidersCommand(args: string[]): Promise<void> {
     return;
   }
   if (subcommand !== "list" && subcommand !== "ls") {
-    throw new Error("Usage: devspace providers list [--json] | add-mcp --manifest <absolute-path> | add-chrome [--command <absolute-path>] | add-desktop --command <absolute-path>");
+    throw new Error("Usage: devspace providers list [--json] | enable|disable|remove <provider-id> | add-mcp --manifest <absolute-path> | add-chrome [--command <absolute-path>] | add-desktop --command <absolute-path>");
   }
   const options = capabilityCliOptions(rest);
   await printCapabilityResponse(await capabilityFetch("/providers", options), options);
@@ -620,7 +673,7 @@ function capabilityCliOptions(args: string[]): ParsedCapabilityCliOptions {
       const value = args[++index];
       if (!value) throw new Error(`--${name} requires a value`);
       values[name] = value;
-    } else if (["json", "available-only", "async"].includes(name)) {
+    } else if (["json", "available-only", "async", "strict"].includes(name)) {
       flags.add(name);
     } else {
       throw new Error(`Unknown capability option: --${name}`);
@@ -691,10 +744,38 @@ function printCapabilitiesHelp(): void {
   console.log([
     "DevSpace capabilities",
     "",
-    "Commands: list, search, describe, open, call, status, cancel, close",
+    "Commands: list, search, describe, open, call, status, cancel, close, doctor",
     "Common options: --url URL --json",
     "OAuth mode: set DEVSPACE_CAPABILITY_BEARER_TOKEN for a capability-resource token.",
   ].join("\n"));
+}
+
+function capabilityEnvelopeData(value: unknown): unknown {
+  if (!value || typeof value !== "object" || !("data" in value)) {
+    throw new Error("Capability API returned an invalid response envelope.");
+  }
+  return value.data;
+}
+
+function capabilityItems(value: unknown): unknown[] {
+  if (!value || typeof value !== "object" || !("items" in value) || !Array.isArray(value.items)) {
+    throw new Error("Capability API returned an invalid provider list.");
+  }
+  return value.items;
+}
+
+function capabilityPermissionItems(value: unknown): Array<Record<string, unknown>> {
+  if (!value || typeof value !== "object" || !("providers" in value) || !Array.isArray(value.providers)) {
+    throw new Error("Capability API returned an invalid permission list.");
+  }
+  return value.providers.filter((entry): entry is Record<string, unknown> =>
+    Boolean(entry && typeof entry === "object"));
+}
+
+function capabilityHealthState(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || !("health" in value)
+      || !value.health || typeof value.health !== "object" || !("state" in value.health)) return undefined;
+  return typeof value.health.state === "string" ? value.health.state : undefined;
 }
 
 async function runAgentsCommand(args: string[]): Promise<void> {

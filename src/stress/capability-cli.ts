@@ -82,8 +82,6 @@ try {
   sampleTimer.unref();
 
   const restUrl = `http://127.0.0.1:${port}/api/capabilities/v1`;
-  phase = "create_grant";
-  await createFixtureGrant(restUrl);
   phase = "run_workload";
   const workload = await runCapabilityStressWorkload({
     restUrl,
@@ -323,22 +321,6 @@ function startDevSpace(
   child.stdout.on("data", (chunk) => output.append(chunk));
   child.stderr.on("data", (chunk) => output.append(chunk));
   return child;
-}
-
-async function createFixtureGrant(restUrl: string): Promise<void> {
-  const response = await fetch(`${restUrl}/grants`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      id: "stress-fixture-grant",
-      principalId: `local:${process.getuid?.() ?? "user"}`,
-      capabilityPattern: "stress.fixture.*",
-      providerPattern: "stress.fixture.mcp",
-      allowedEffects: ["readOnly", "mutation"],
-    }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) throw new Error(`fixture grant failed: ${response.status} ${await response.text()}`);
 }
 
 function summarizeMemory(samples: ProcessTreeSample[]) {

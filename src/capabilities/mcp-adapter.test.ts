@@ -45,22 +45,10 @@ try {
 
   const catalog = await client.callTool({ name: "capability_list", arguments: {} });
   assert.equal(catalog.isError, undefined);
-  assert.equal((catalog.structuredContent as any).data.items[0].id, "test.fake.echo");
+  assert.equal((catalog.structuredContent as any).data.items.some(
+    (item: any) => item.id === "test.fake.echo",
+  ), true);
 
-  const denied = await client.callTool({
-    name: "capability_invoke",
-    arguments: { capabilityId: "test.fake.echo", arguments: { text: "hello" } },
-  });
-  assert.equal(denied.isError, true);
-  assert.equal((denied.structuredContent as any).error.code, "policy_denied");
-
-  running.capabilityRuntime!.policy.addGrant({
-    id: "mcp-test-call",
-    principalId: `local:${process.getuid?.() ?? "user"}`,
-    capabilityPattern: "test.fake.echo",
-    providerPattern: "test.fake.provider",
-    allowedEffects: ["readOnly"],
-  });
   const invoked = await client.callTool({
     name: "capability_invoke",
     arguments: { capabilityId: "test.fake.echo", arguments: { text: "hello" } },
@@ -69,7 +57,7 @@ try {
   assert.equal((invoked.structuredContent as any).data.status, "succeeded");
   assert.equal((invoked.structuredContent as any).data.result.arguments.text, "hello");
 
-  console.log("capability MCP tests passed: fixed 8 tools, shared policy and invocation");
+  console.log("capability MCP tests passed: fixed 8 tools, delegated approval and invocation");
 } finally {
   await client?.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));

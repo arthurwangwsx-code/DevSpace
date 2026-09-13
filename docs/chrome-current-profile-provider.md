@@ -63,9 +63,10 @@ DevSpace 不会点击、绕过或持久化这个安全确认。Chrome/系统重�
 调用串行执行，并在调用前重新选择 lease 中的 `pageId`，避免共享 MCP 的隐式 selected-page
 状态造成跨 Agent 串页。
 
-Mutation 能力还必须命中包含 `mutation` 与 `openWorld` 的显式 grant。`type_text` 和
-`press_key` 调用前会通过页面内脚本检查当前焦点；密码框、password autocomplete 或无法确认
-目标类型时一律拒绝。v1 不暴露无法可靠关联 AX UID 与 DOM input type 的 `fill`。
+Mutation 能力需要页面 lease，以保证每次调用重新选择同一 `pageId`。默认 delegated-approval
+模式不要求 Grant，也不拦截密码框输入，是否调用由上层 Agent 审批。设置
+`DEVSPACE_CAPABILITY_ENFORCE_POLICY=1` 后，才恢复 effect/target Grant 与 secure-field 拒绝策略。
+v1 不暴露无法可靠关联 AX UID 与 DOM input type 的 `fill`。
 
 ## CLI / CI 调用
 
@@ -79,12 +80,13 @@ devspace capabilities call browser.chrome.take_snapshot \
   --lease '<leaseId>' --arguments '{}' --json
 ```
 
-OAuth 部署中，发现端使用 `capabilities:discover`，调用和 lease 使用
-`capabilities:invoke`，Grant 管理使用 `capabilities:admin`。CI 应通过
+OAuth 部署中默认只要求有效的 capability resource token；显式开启 enforced-policy 后，
+发现端使用 `capabilities:discover`，调用和 lease 使用 `capabilities:invoke`，Grant 管理使用
+`capabilities:admin`。CI 应通过
 `DEVSPACE_CAPABILITY_BEARER_TOKEN` 注入短期 token；不得把 Chrome Cookie、URL query、
 页面内容或 bearer token 写入 manifest 和日志。
 
-管理员可以给一个外部 Agent/CI 创建有期限的最小 Grant：
+若开启 enforced-policy，管理员可以给一个外部 Agent/CI 创建有期限的最小 Grant：
 
 ```bash
 devspace grants add \
@@ -101,14 +103,14 @@ Grant 持久化在 DevSpace state database 中；创建、拒绝和撤销都会�
 
 ## 已知边界
 
-- 当前 Profile 的 CDP 权限天然很大；DevSpace 的 catalog allowlist 和 page lease 是外部 Agent
-  的授权边界，但不能降低下游进程本身对 Chrome 的权限。
+- 当前 Profile 的 CDP 权限天然很大；显式 Catalog 映射控制稳定能力面，page lease 保证目标
+  一致性，但二者不能降低下游进程本身对 Chrome 的权限。
 - 上游 `chrome-devtools-mcp` 会初始化可见页面。冻结/异常页面、很多标签页或其他调试客户端
   可能导致 `list_pages` 超时。不要用增加无限超时掩盖问题。
 - 当前所有 Chrome 能力仍声明 `requiresUnlocked=true`。只有完成“解锁建立连接 -> 锁屏持续
   调用 -> 解锁后验证”的真实版本矩阵后，才允许对具体只读能力放宽。
-- 页面 title/URL、DOM、截图、Console 和 Network 都可能含敏感信息；调用者必须具备明确的
-  discover/invoke grant，结果不应进入普通请求日志。
+- 页面 title/URL、DOM、截图、Console 和 Network 都可能含敏感信息；审批由上层 Agent 负责，
+  结果不应进入普通请求日志。
 
 ## 诊断
 

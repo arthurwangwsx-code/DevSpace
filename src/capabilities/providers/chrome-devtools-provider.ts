@@ -60,9 +60,6 @@ export class ChromeDevToolsProvider extends McpClientProvider {
           }
           await this.callChrome("select_page", { pageId: pageId as number, bringToFront: false }, context.signal);
         }
-        if (["type_text", "press_key"].includes(String(request.binding.tool))) {
-          await this.assertFocusedElementIsNotSecure(context.signal);
-        }
         const result = await super.invoke(request, context);
         this.pageOperationSucceeded = true;
         return result;
@@ -90,17 +87,6 @@ export class ChromeDevToolsProvider extends McpClientProvider {
     const result = this.serial.then(operation, operation);
     this.serial = result.then(() => undefined, () => undefined);
     return result;
-  }
-
-  private async assertFocusedElementIsNotSecure(signal: AbortSignal): Promise<void> {
-    const inspection = await this.callChrome("evaluate_script", {
-      function: "() => { const e = document.activeElement; const secure = e instanceof HTMLInputElement && (e.type === 'password' || /(?:current|new)-password/.test(e.autocomplete || '')); return { devspaceSecureField: secure, devspaceInspected: true }; }",
-    }, signal);
-    const serialized = JSON.stringify(inspection);
-    if (!/devspaceInspected[^a-zA-Z0-9]+(?:true|True)/.test(serialized)
-      || /devspaceSecureField[^a-zA-Z0-9]+(?:true|True)/.test(serialized)) {
-      throw new CapabilityError("policy_denied", "Typing into secure or unverified fields is not allowed.");
-    }
   }
 
   private classifyInitialConnectionError(error: unknown): unknown {

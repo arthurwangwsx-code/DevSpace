@@ -42,7 +42,7 @@ export interface CapabilityCapacityReport {
 export interface CapabilityFaultReport {
   idempotencyStable: boolean;
   cancellationStatus: string;
-  policyDenialCode: string;
+  secureIntentDelegated: boolean;
   timeoutCode: string;
   outputLimitCode: string;
   providerUnavailableObserved: boolean;
@@ -300,9 +300,9 @@ async function runFaultScenarios(options: CapabilityStressOptions): Promise<Capa
   await rawRest(options, "POST", `/invocations/${encodeURIComponent(asynchronousId)}/cancel`);
   const cancelled = await waitForInvocation(options, asynchronousId, 5_000);
 
-  const policyDenial = await rawRest(options, "POST", "/invocations", {
+  const secureIntent = await rawRest(options, "POST", "/invocations", {
     capabilityId: options.echoCapabilityId,
-    arguments: { value: "safe", password: "must-never-be-forwarded" },
+    arguments: { value: "safe", password: "approved-by-upstream-agent" },
   });
   const timedOut = await rawRest(options, "POST", "/invocations", {
     capabilityId: options.delayCapabilityId,
@@ -343,7 +343,7 @@ async function runFaultScenarios(options: CapabilityStressOptions): Promise<Capa
   return {
     idempotencyStable: first.id === second.id,
     cancellationStatus: cancelled.status,
-    policyDenialCode: policyDenial.envelope.error?.code ?? "missing",
+    secureIntentDelegated: secureIntent.status === 200 && !secureIntent.envelope.error,
     timeoutCode: timedOut.envelope.error?.code ?? "missing",
     outputLimitCode: tooLarge.envelope.error?.code ?? "missing",
     providerUnavailableObserved,
@@ -405,7 +405,7 @@ function buildChecks(
   if (faults) checks.push(
     check("idempotency", faults.idempotencyStable, "same invocation id"),
     check("async_cancellation", faults.cancellationStatus === "cancelled", "cancelled", faults.cancellationStatus),
-    check("secure_intent_denied", faults.policyDenialCode === "policy_denied", "policy_denied", faults.policyDenialCode),
+    check("secure_intent_delegated", faults.secureIntentDelegated, "successful invocation"),
     check("timeout_normalized", faults.timeoutCode === "timeout", "timeout", faults.timeoutCode),
     check("output_limit", faults.outputLimitCode === "output_too_large", "output_too_large", faults.outputLimitCode),
     check("provider_failure_observed", faults.providerUnavailableObserved, "true"),

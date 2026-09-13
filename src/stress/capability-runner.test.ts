@@ -78,13 +78,6 @@ try {
   });
   try {
     await running.capabilityRuntime!.start();
-    running.capabilityRuntime!.policy.addGrant({
-      id: "capability-stress-test-grant",
-      principalId: `local:${process.getuid?.() ?? "user"}`,
-      capabilityPattern: "test.stress.*",
-      providerPattern: providerId,
-      allowedEffects: ["readOnly"],
-    });
     const port = (server.address() as AddressInfo).port;
     const report = await runCapabilityStressWorkload({
       restUrl: `http://127.0.0.1:${port}/api/capabilities/v1`,

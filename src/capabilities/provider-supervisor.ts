@@ -86,6 +86,45 @@ export class ProviderSupervisor {
     this.registry.setProviderHealth(registration.provider.id, health);
   }
 
+  async add(registration: ProviderRegistration): Promise<void> {
+    this.register(registration);
+    await this.start(registration.provider.id);
+  }
+
+  async replace(registration: ProviderRegistration): Promise<void> {
+    const existing = this.get(registration.provider.id);
+    await this.stop(existing.provider.id, "provider_reload");
+    this.providers.delete(existing.provider.id);
+    this.retireCatalog(existing, healthFor("stopped"));
+    this.register(registration);
+    await this.start(registration.provider.id);
+  }
+
+  async setEnabled(providerId: string, enabled: boolean): Promise<void> {
+    const managed = this.get(providerId);
+    if (managed.enabled === enabled) {
+      if (enabled) await this.restart(providerId);
+      return;
+    }
+    managed.enabled = enabled;
+    if (enabled) {
+      this.transition(managed, healthFor("stopped"));
+      await this.start(providerId);
+      return;
+    }
+    await this.stop(providerId, "provider_disabled");
+    const health = healthFor("disabled");
+    this.transition(managed, health);
+    this.retireCatalog(managed, health);
+  }
+
+  async unregister(providerId: string): Promise<void> {
+    const managed = this.get(providerId);
+    await this.stop(providerId, "provider_removed");
+    this.providers.delete(providerId);
+    this.retireCatalog(managed, healthFor("stopped"));
+  }
+
   list(): Array<{ id: string; kind: string; enabled: boolean; health: ProviderHealth }> {
     return [...this.providers.values()]
       .map((managed) => ({
@@ -163,7 +202,7 @@ export class ProviderSupervisor {
             binding: capability.binding,
             arguments: argumentsValue,
             lease: context.lease,
-          }, { signal: context.signal }),
+          }, { signal: context.signal, principal: context.principal }),
         },
       })),
     });
@@ -287,7 +326,7 @@ export class ProviderSupervisor {
               binding: capability.binding,
               arguments: argumentsValue,
               lease: context.lease,
-            }, { signal: context.signal }),
+            }, { signal: context.signal, principal: context.principal }),
           },
         })),
       });
@@ -366,6 +405,17 @@ export class ProviderSupervisor {
         ...(health.reasonCode ? { reasonCode: health.reasonCode } : {}),
       },
     );
+  }
+
+  private retireCatalog(managed: ManagedProvider, health: ProviderHealth): void {
+    this.registry.replaceProviderCatalog({
+      providerId: managed.provider.id,
+      kind: managed.kind,
+      enabled: managed.enabled,
+      health,
+      manifestDigest: managed.manifestDigest,
+      capabilities: [],
+    });
   }
 
   private clearRetry(managed: ManagedProvider): void {
