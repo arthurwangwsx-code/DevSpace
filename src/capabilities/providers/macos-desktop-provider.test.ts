@@ -10,6 +10,7 @@ const generated = createMacosDesktopManifest(process.execPath, "darwin");
 assert.equal(generated.metadata.id, "desktop.macos.accessibility");
 assert.equal(generated.spec.tools.length, 8);
 assert.equal(generated.spec.tools[2]!.requiresLease, true);
+assert.equal(generated.spec.tools[2]!.version, "2.0.0");
 assert.equal(generated.spec.tools[3]!.effects.readOnly, true);
 assert.equal(generated.spec.tools[3]!.permissions[0]!.id, "macos.screen-capture");
 assert.equal(generated.spec.tools[4]!.effects.readOnly, false);
@@ -31,7 +32,7 @@ try {
     resourceType: "app_window",
     selector: { bundleId: "com.example.fixture" },
   }, signal());
-  assert.deepEqual(lease.display, { bundleId: "com.example.fixture", name: "Fixture" });
+  assert.deepEqual(lease.display, { bundleId: "com.example.fixture", processId: 4242, name: "Fixture" });
   const snapshot = discovered.find(({ descriptor }) => descriptor.id === "desktop.macos.snapshot_app")!;
   assert.deepEqual(await provider.invoke({
     capabilityId: snapshot.descriptor.id,
@@ -39,7 +40,7 @@ try {
     binding: snapshot.binding,
     arguments: { maxDepth: 2 },
     lease,
-  }, signal()), { tool: "snapshot", bundleId: "com.example.fixture" });
+  }, signal()), { tool: "snapshot", bundleId: "com.example.fixture", processId: 4242 });
   const screenshot = discovered.find(({ descriptor }) => descriptor.id === "desktop.macos.screenshot_app")!;
   assert.deepEqual(await provider.invoke({
     capabilityId: screenshot.descriptor.id,
@@ -47,7 +48,13 @@ try {
     binding: screenshot.binding,
     arguments: { maxWidth: 800 },
     lease,
-  }, signal()), { tool: "screenshot", bundleId: "com.example.fixture", mimeType: "image/png", data: "fixture" });
+  }, signal()), {
+    tool: "screenshot",
+    bundleId: "com.example.fixture",
+    processId: 4242,
+    mimeType: "image/png",
+    data: "fixture",
+  });
   await assert.rejects(provider.invoke({
     capabilityId: snapshot.descriptor.id,
     descriptor: snapshot.descriptor,
@@ -55,6 +62,20 @@ try {
     arguments: { bundleId: "com.example.other" },
     lease,
   }, signal()), (error) => error instanceof CapabilityError && error.code === "policy_denied");
+  await assert.rejects(provider.invoke({
+    capabilityId: snapshot.descriptor.id,
+    descriptor: snapshot.descriptor,
+    binding: snapshot.binding,
+    arguments: { processId: 9999 },
+    lease,
+  }, signal()), (error) => error instanceof CapabilityError && error.code === "policy_denied");
+  await assert.rejects(provider.invoke({
+    capabilityId: snapshot.descriptor.id,
+    descriptor: snapshot.descriptor,
+    binding: snapshot.binding,
+    arguments: {},
+    lease: { handle: { bundleId: "com.example.fixture", processId: 9999 }, display: {} },
+  }, signal()), (error) => error instanceof CapabilityError && error.code === "lease_expired");
 } finally {
   await provider.stop("test_complete");
 }
@@ -84,7 +105,7 @@ try {
   await deniedProvider.stop("test_complete");
 }
 
-console.log("macOS desktop provider tests passed: permission health, preset, app lease, target injection and mismatch denial");
+console.log("macOS desktop provider tests passed: permission health, process-bound lease, target injection and stale denial");
 
 function context(): ProviderContext {
   return { signal: signal().signal, reportFailure: () => {}, reportCatalogChanged: () => {}, log: () => {} };

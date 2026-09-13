@@ -46,8 +46,12 @@ alive by the same supervisor used for Chrome and external MCP servers.
 - `desktop.macos.type_text` types only into a focused element owned by the leased app.
 - `desktop.macos.press_key` accepts only Return, Tab, Space, Delete, Escape and arrow keys.
 
-All operations except status and app listing require an `app_window` lease. The specialized Provider injects
-the lease's `bundleId` and rejects argument attempts to target a different app. In the default delegated-
+All operations except status and app listing require an `app_window` lease. The specialized Provider binds
+the lease to both the app's `bundleId` and exact process ID, revalidates the process before every call, and
+injects both values into the native Helper. The Helper repeats that validation at execution time and checks
+the exact process—not merely another instance with the same bundle ID—is frontmost. An app restart therefore
+expires the old lease instead of silently retargeting the new process. Argument attempts to replace either
+identity are rejected. In the default delegated-
 approval mode, mutation and secure-field input do not require a DevSpace Grant; the upper Agent approves
 them. The Helper yields mutations while recent hardware input indicates that the local user is active, and
 the Router rejects all desktop operations while the macOS session is locked.

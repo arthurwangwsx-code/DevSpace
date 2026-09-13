@@ -3,7 +3,7 @@ import ApplicationServices
 import Foundation
 import ScreenCaptureKit
 
-let helperVersion = "0.2.0"
+let helperVersion = "0.3.0"
 let userActivityYieldSeconds = 1.0
 
 struct HelperError: Error {
@@ -49,25 +49,31 @@ func toolDefinitions() -> [[String: Any]] {
         tool("desktop_list_apps", "List running GUI applications without window titles.", [:], []),
         tool("desktop_snapshot_app", "Read a bounded accessibility tree for one application.", [
             "bundleId": stringSchema(),
+            "processId": integerSchema(1, Int(Int32.max)),
             "maxDepth": integerSchema(1, 12),
             "maxNodes": integerSchema(1, 2_000),
         ], ["bundleId"]),
         tool("desktop_screenshot_app", "Capture only the largest visible window of one application.", [
             "bundleId": stringSchema(),
+            "processId": integerSchema(1, Int(Int32.max)),
             "maxWidth": integerSchema(64, 4_096),
             "maxHeight": integerSchema(64, 4_096),
         ], ["bundleId"]),
         tool("desktop_activate_app", "Bring the leased application to the foreground.", [
             "bundleId": stringSchema(),
+            "processId": integerSchema(1, Int(Int32.max)),
         ], ["bundleId"]),
         tool("desktop_click_point", "Click a point when the leased app is frontmost.", [
-            "bundleId": stringSchema(), "x": numberSchema(), "y": numberSchema(),
+            "bundleId": stringSchema(), "processId": integerSchema(1, Int(Int32.max)),
+            "x": numberSchema(), "y": numberSchema(),
         ], ["bundleId", "x", "y"]),
         tool("desktop_type_text", "Type into the leased application's focused field.", [
-            "bundleId": stringSchema(), "text": stringSchema(),
+            "bundleId": stringSchema(), "processId": integerSchema(1, Int(Int32.max)),
+            "text": stringSchema(),
         ], ["bundleId", "text"]),
         tool("desktop_press_key", "Press an allowlisted key in the frontmost leased app.", [
-            "bundleId": stringSchema(), "key": stringSchema(),
+            "bundleId": stringSchema(), "processId": integerSchema(1, Int(Int32.max)),
+            "key": stringSchema(),
         ], ["bundleId", "key"]),
     ]
 }
@@ -100,7 +106,7 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
     case "desktop_snapshot_app":
         try requireAccessibility()
         let bundleId = try requiredString(arguments, "bundleId")
-        let app = try runningApplication(bundleId)
+        let app = try runningApplication(bundleId, expectedProcessId(arguments))
         let maxDepth = boundedInt(arguments["maxDepth"], 6, 1, 12)
         let maxNodes = boundedInt(arguments["maxNodes"], 500, 1, 2_000)
         var count = 0
@@ -109,7 +115,7 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
     case "desktop_screenshot_app":
         try requireScreenCapture()
         let bundleId = try requiredString(arguments, "bundleId")
-        let app = try runningApplication(bundleId)
+        let app = try runningApplication(bundleId, expectedProcessId(arguments))
         return try screenshotApplication(
             app,
             bundleId,
@@ -119,17 +125,17 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
     case "desktop_activate_app":
         try requireUserIdle()
         let bundleId = try requiredString(arguments, "bundleId")
-        let app = try runningApplication(bundleId)
+        let app = try runningApplication(bundleId, expectedProcessId(arguments))
         guard app.activate(options: [.activateAllWindows]) else {
             throw HelperError(message: "The leased application could not be activated.")
         }
-        return ["activated": true, "bundleId": bundleId]
+        return ["activated": true, "bundleId": bundleId, "processId": app.processIdentifier]
     case "desktop_click_point":
         try requireAccessibility()
         try requireUserIdle()
         let bundleId = try requiredString(arguments, "bundleId")
-        let app = try runningApplication(bundleId)
-        try requireFrontmost(bundleId)
+        let app = try runningApplication(bundleId, expectedProcessId(arguments))
+        try requireFrontmost(app)
         let point = CGPoint(x: try requiredNumber(arguments, "x"), y: try requiredNumber(arguments, "y"))
         try requirePointInApplicationWindow(app, point)
         guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
@@ -137,13 +143,13 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         else { throw HelperError(message: "Could not create mouse events.") }
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
-        return ["clicked": true, "bundleId": bundleId]
+        return ["clicked": true, "bundleId": bundleId, "processId": app.processIdentifier]
     case "desktop_type_text":
         try requireAccessibility()
         try requireUserIdle()
         let bundleId = try requiredString(arguments, "bundleId")
-        let app = try runningApplication(bundleId)
-        try requireFrontmost(bundleId)
+        let app = try runningApplication(bundleId, expectedProcessId(arguments))
+        try requireFrontmost(app)
         try requireFocusedElementOwnedByProcess(app.processIdentifier)
         var units = Array(try requiredString(arguments, "text").utf16)
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
@@ -153,7 +159,12 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: &units)
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
-        return ["typed": true, "characters": units.count, "bundleId": bundleId]
+        return [
+            "typed": true,
+            "characters": units.count,
+            "bundleId": bundleId,
+            "processId": app.processIdentifier,
+        ]
     case "desktop_press_key":
         return try pressKey(arguments)
     default:
@@ -192,8 +203,8 @@ func pressKey(_ arguments: [String: Any]) throws -> [String: Any] {
     try requireAccessibility()
     try requireUserIdle()
     let bundleId = try requiredString(arguments, "bundleId")
-    let app = try runningApplication(bundleId)
-    try requireFrontmost(bundleId)
+    let app = try runningApplication(bundleId, expectedProcessId(arguments))
+    try requireFrontmost(app)
     try requireFocusedElementOwnedByProcess(app.processIdentifier)
     let key = try requiredString(arguments, "key")
     let codes: [String: CGKeyCode] = [
@@ -203,7 +214,7 @@ func pressKey(_ arguments: [String: Any]) throws -> [String: Any] {
     guard let code = codes[key] else { throw HelperError(message: "Key is not allowlisted.") }
     CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true)?.post(tap: .cghidEventTap)
     CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false)?.post(tap: .cghidEventTap)
-    return ["pressed": key, "bundleId": bundleId]
+    return ["pressed": key, "bundleId": bundleId, "processId": app.processIdentifier]
 }
 
 func requireAccessibility() throws {
@@ -275,6 +286,7 @@ func screenshotApplication(
     }
     return [
         "bundleId": bundleId,
+        "processId": app.processIdentifier,
         "windowId": selected.windowID,
         "mimeType": "image/png",
         "width": width,
@@ -325,16 +337,34 @@ func captureImage(_ filter: SCContentFilter, _ configuration: SCStreamConfigurat
     return captured
 }
 
-func runningApplication(_ bundleId: String) throws -> NSRunningApplication {
-    guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first,
-          !app.isTerminated else {
+func runningApplication(_ bundleId: String, _ expectedProcessId: pid_t? = nil) throws -> NSRunningApplication {
+    let applications = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+        .filter { !$0.isTerminated }
+    guard let app = expectedProcessId == nil
+        ? applications.first
+        : applications.first(where: { $0.processIdentifier == expectedProcessId }) else {
+        if expectedProcessId != nil {
+            throw HelperError(message: "The leased application process is no longer running.")
+        }
         throw HelperError(message: "The leased application is not running.")
     }
     return app
 }
 
-func requireFrontmost(_ bundleId: String) throws {
-    guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleId else {
+func expectedProcessId(_ arguments: [String: Any]) throws -> pid_t? {
+    guard let value = arguments["processId"] else { return nil }
+    guard let number = value as? NSNumber else {
+        throw HelperError(message: "processId must be a positive integer.")
+    }
+    let integer = number.int64Value
+    guard integer > 0, integer <= Int64(Int32.max), number.doubleValue == Double(integer) else {
+        throw HelperError(message: "processId must be a positive integer.")
+    }
+    return pid_t(integer)
+}
+
+func requireFrontmost(_ app: NSRunningApplication) throws {
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else {
         throw HelperError(message: "The leased application is not frontmost; refusing global input.")
     }
 }

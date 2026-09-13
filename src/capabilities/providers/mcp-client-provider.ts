@@ -191,6 +191,9 @@ export class McpClientProvider implements CapabilityProvider {
           details: { action: "Retry after the local user has been idle." },
         });
       }
+      if (/leased application process is no longer running/i.test(text)) {
+        throw new CapabilityError("lease_expired", "The leased application process is no longer running.");
+      }
       throw new CapabilityError("internal_error", "The downstream MCP tool returned an error.");
     }
     return result.structuredContent

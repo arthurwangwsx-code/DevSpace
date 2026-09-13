@@ -56,9 +56,12 @@ export class MacosDesktopProvider extends McpClientProvider {
     const apps = await this.runSerialized(() => this.callDownstreamTool("desktop_list_apps", {}, context.signal));
     const app = findApp(apps, bundleId);
     if (!app) throw new CapabilityError("invalid_arguments", "The selected application is not running.");
+    if (!Number.isInteger(app.processId) || app.processId <= 0) {
+      throw new CapabilityError("internal_error", "The desktop helper returned an invalid application process ID.");
+    }
     return {
-      handle: { bundleId },
-      display: { bundleId, ...(app.name ? { name: app.name } : {}) },
+      handle: { bundleId, processId: app.processId },
+      display: { bundleId, processId: app.processId, ...(app.name ? { name: app.name } : {}) },
     };
   }
 
@@ -67,7 +70,8 @@ export class MacosDesktopProvider extends McpClientProvider {
       let argumentsValue = request.arguments;
       if (request.descriptor.execution.requiresLease) {
         const bundleId = request.lease?.handle.bundleId;
-        if (typeof bundleId !== "string") {
+        const processId = request.lease?.handle.processId;
+        if (typeof bundleId !== "string" || !Number.isInteger(processId) || Number(processId) <= 0) {
           throw new CapabilityError("lease_required", "A valid app_window lease is required.");
         }
         if (!argumentsValue || typeof argumentsValue !== "object" || Array.isArray(argumentsValue)) {
@@ -77,7 +81,18 @@ export class MacosDesktopProvider extends McpClientProvider {
         if (requestedBundleId !== undefined && requestedBundleId !== bundleId) {
           throw new CapabilityError("policy_denied", "Arguments cannot override the leased application.");
         }
-        argumentsValue = { ...argumentsValue, bundleId };
+        const requestedProcessId = argumentsValue.processId;
+        if (requestedProcessId !== undefined && requestedProcessId !== processId) {
+          throw new CapabilityError("policy_denied", "Arguments cannot override the leased application process.");
+        }
+        const apps = await this.callDownstreamTool("desktop_list_apps", {}, context.signal);
+        const current = findApp(apps, bundleId, Number(processId));
+        if (!current) {
+          throw new CapabilityError("lease_expired", "The leased application process is no longer running.", {
+            details: { bundleId, processId: Number(processId) },
+          });
+        }
+        argumentsValue = { ...argumentsValue, bundleId, processId: Number(processId) };
       }
       try {
         return await super.invoke({ ...request, arguments: argumentsValue }, context);
@@ -136,7 +151,7 @@ function mapping(
     tool,
     capabilityId,
     title,
-    version: "1.0.0",
+    version: requiresLease ? "2.0.0" : "1.0.0",
     tags: ["desktop", "macos", effects.readOnly ? "read" : "mutation"],
     aliases: [],
     effects,
@@ -169,18 +184,27 @@ function desktopExecutable(command: string): string {
   return realpathSync(command);
 }
 
-function findApp(value: JsonValue, bundleId: string): { name?: string } | undefined {
+function findApp(
+  value: JsonValue,
+  bundleId: string,
+  processId?: number,
+): { name?: string; processId: number } | undefined {
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = findApp(item, bundleId);
+      const found = findApp(item, bundleId, processId);
       if (found) return found;
     }
   } else if (value && typeof value === "object") {
-    if (value.bundleId === bundleId) {
-      return { ...(typeof value.name === "string" ? { name: value.name } : {}) };
+    if (value.bundleId === bundleId
+        && typeof value.processId === "number"
+        && (processId === undefined || value.processId === processId)) {
+      return {
+        processId: value.processId,
+        ...(typeof value.name === "string" ? { name: value.name } : {}),
+      };
     }
     for (const item of Object.values(value)) {
-      const found = findApp(item, bundleId);
+      const found = findApp(item, bundleId, processId);
       if (found) return found;
     }
   }

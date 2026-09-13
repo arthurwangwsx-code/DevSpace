@@ -9,26 +9,26 @@ server.registerTool("desktop_status", { inputSchema: z.object({}) }, async () =>
   screenCaptureGranted: !permissionsDenied,
 }));
 server.registerTool("desktop_list_apps", { inputSchema: z.object({}) }, async () => result({
-  apps: [{ bundleId: "com.example.fixture", name: "Fixture", frontmost: true }],
+  apps: [{ bundleId: "com.example.fixture", name: "Fixture", processId: 4242, frontmost: true }],
 }));
 server.registerTool("desktop_snapshot_app", {
-  inputSchema: z.object({ bundleId: z.string(), maxDepth: z.number().optional(), maxNodes: z.number().optional() }),
-}, async ({ bundleId }) => result({ tool: "snapshot", bundleId }));
+  inputSchema: z.object({ bundleId: z.string(), processId: z.number().int().optional(), maxDepth: z.number().optional(), maxNodes: z.number().optional() }),
+}, async ({ bundleId, processId }) => result({ tool: "snapshot", bundleId, processId }));
 server.registerTool("desktop_screenshot_app", {
-  inputSchema: z.object({ bundleId: z.string(), maxWidth: z.number().optional(), maxHeight: z.number().optional() }),
-}, async ({ bundleId }) => result({ tool: "screenshot", bundleId, mimeType: "image/png", data: "fixture" }));
+  inputSchema: z.object({ bundleId: z.string(), processId: z.number().int().optional(), maxWidth: z.number().optional(), maxHeight: z.number().optional() }),
+}, async ({ bundleId, processId }) => result({ tool: "screenshot", bundleId, processId, mimeType: "image/png", data: "fixture" }));
 server.registerTool("desktop_activate_app", {
-  inputSchema: z.object({ bundleId: z.string() }),
-}, async ({ bundleId }) => result({ tool: "activate", bundleId }));
+  inputSchema: z.object({ bundleId: z.string(), processId: z.number().int().optional() }),
+}, async ({ bundleId, processId }) => result({ tool: "activate", bundleId, processId }));
 server.registerTool("desktop_click_point", {
-  inputSchema: z.object({ bundleId: z.string(), x: z.number(), y: z.number() }),
-}, async ({ bundleId }) => result({ tool: "click", bundleId }));
+  inputSchema: z.object({ bundleId: z.string(), processId: z.number().int().optional(), x: z.number(), y: z.number() }),
+}, async ({ bundleId, processId }) => result({ tool: "click", bundleId, processId }));
 server.registerTool("desktop_type_text", {
-  inputSchema: z.object({ bundleId: z.string(), text: z.string() }),
-}, async ({ bundleId }) => result({ tool: "type", bundleId }));
+  inputSchema: z.object({ bundleId: z.string(), processId: z.number().int().optional(), text: z.string() }),
+}, async ({ bundleId, processId }) => result({ tool: "type", bundleId, processId }));
 server.registerTool("desktop_press_key", {
-  inputSchema: z.object({ bundleId: z.string(), key: z.string() }),
-}, async ({ bundleId }) => result({ tool: "key", bundleId }));
+  inputSchema: z.object({ bundleId: z.string(), processId: z.number().int().optional(), key: z.string() }),
+}, async ({ bundleId, processId }) => result({ tool: "key", bundleId, processId }));
 await server.connect(new StdioServerTransport());
 
 function result(value: Record<string, unknown>) {
