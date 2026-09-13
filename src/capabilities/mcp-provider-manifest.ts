@@ -2,7 +2,11 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "n
 import { isAbsolute, join, resolve } from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
-import type { CapabilityEffects, CapabilityRuntimeRequirements } from "./types.js";
+import type {
+  CapabilityEffects,
+  CapabilityPermissionRequirement,
+  CapabilityRuntimeRequirements,
+} from "./types.js";
 
 const id = z.string().regex(/^[a-z0-9_-]+(?:\.[a-z0-9_-]+){2,}$/);
 const effects = z.object({
@@ -46,10 +50,25 @@ const toolMapping = z.object({
   aliases: z.array(z.string()).default([]),
   effects,
   availability,
+  permissions: z.array(z.object({
+    id: z.string().min(1),
+    required: z.boolean(),
+    description: z.string().min(1),
+  }).strict()).default([]),
+  requiresLease: z.boolean().default(false),
+  resourceTypes: z.array(z.string().min(1)).default([]),
   defaultTimeoutMs: z.number().int().positive().max(120_000).default(30_000),
   maxTimeoutMs: z.number().int().positive().max(600_000).default(120_000),
-}).strict().refine((value) => value.defaultTimeoutMs <= value.maxTimeoutMs, {
-  message: "defaultTimeoutMs must not exceed maxTimeoutMs",
+}).strict().superRefine((value, context) => {
+  if (value.defaultTimeoutMs > value.maxTimeoutMs) {
+    context.addIssue({ code: "custom", message: "defaultTimeoutMs must not exceed maxTimeoutMs" });
+  }
+  if (value.requiresLease && value.resourceTypes.length === 0) {
+    context.addIssue({ code: "custom", path: ["resourceTypes"], message: "lease-bound tools require resourceTypes" });
+  }
+  if (!value.requiresLease && value.resourceTypes.length > 0) {
+    context.addIssue({ code: "custom", path: ["resourceTypes"], message: "resourceTypes require requiresLease=true" });
+  }
 });
 
 export const mcpProviderManifestSchema = z.object({
@@ -79,6 +98,7 @@ export type McpProviderManifest = z.infer<typeof mcpProviderManifestSchema>;
 export type McpToolMapping = McpProviderManifest["spec"]["tools"][number] & {
   effects: CapabilityEffects;
   availability: CapabilityRuntimeRequirements;
+  permissions: CapabilityPermissionRequirement[];
 };
 
 export interface LoadedMcpProviderManifest {
@@ -114,6 +134,10 @@ export function readMcpProviderManifest(path: string): McpProviderManifest {
 
 export function installMcpProviderManifest(sourcePath: string, configDir: string): string {
   const manifest = readMcpProviderManifest(sourcePath);
+  return writeMcpProviderManifest(manifest, configDir);
+}
+
+export function writeMcpProviderManifest(manifest: McpProviderManifest, configDir: string): string {
   mkdirSync(configDir, { recursive: true, mode: 0o700 });
   const target = join(configDir, `${manifest.metadata.id}.json`);
   writeFileSync(target, `${JSON.stringify(manifest, null, 2)}\n`, {

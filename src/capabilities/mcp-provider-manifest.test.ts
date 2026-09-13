@@ -30,6 +30,9 @@ assert.deepEqual(parsed.spec.tools[0]!.availability, {
   requiresUnlocked: false,
   requiresForegroundApp: false,
 });
+assert.deepEqual(parsed.spec.tools[0]!.permissions, []);
+assert.equal(parsed.spec.tools[0]!.requiresLease, false);
+assert.deepEqual(parsed.spec.tools[0]!.resourceTypes, []);
 assert.throws(() => parseMcpProviderManifest({
   ...fixture,
   spec: { ...fixture.spec, transport: { type: "stdio", command: "npx" } },
@@ -42,6 +45,10 @@ assert.throws(() => parseMcpProviderManifest({
   ...fixture,
   spec: { ...fixture.spec, tools: [fixture.spec.tools[0], fixture.spec.tools[0]] },
 }), /duplicate/);
+assert.throws(() => parseMcpProviderManifest({
+  ...fixture,
+  spec: { ...fixture.spec, tools: [{ ...fixture.spec.tools[0], requiresLease: true }] },
+}), /lease-bound tools require resourceTypes/);
 
 const root = mkdtempSync(join(tmpdir(), "devspace-mcp-manifest-test-"));
 try {

@@ -18,7 +18,7 @@ export class McpClientProvider implements CapabilityProvider {
   readonly id: string;
   private client?: Client;
   private transport?: Transport;
-  private context?: ProviderContext;
+  protected context?: ProviderContext;
   private tools?: Tool[];
   private startedAt?: string;
   private stopping = false;
@@ -120,14 +120,14 @@ export class McpClientProvider implements CapabilityProvider {
             outputSchema: jsonObject(tool.outputSchema, `${tool.name} output schema`),
           } : {}),
           effects: { ...mapping.effects },
-          permissions: [],
+          permissions: mapping.permissions.map((permission) => ({ ...permission })),
           availability: { ...mapping.availability },
           execution: {
             modes: ["sync", "async"],
             defaultTimeoutMs: mapping.defaultTimeoutMs,
             maxTimeoutMs: mapping.maxTimeoutMs,
-            requiresLease: false,
-            resourceTypes: [],
+            requiresLease: mapping.requiresLease,
+            resourceTypes: [...mapping.resourceTypes],
           },
           metadata: {
             downstreamProtocol: "mcp",
@@ -145,7 +145,6 @@ export class McpClientProvider implements CapabilityProvider {
     request: ProviderInvocation,
     context: ProviderInvocationContext,
   ): Promise<JsonValue> {
-    const client = this.requireClient();
     const toolName = typeof request.binding.tool === "string" ? request.binding.tool : undefined;
     const mapping = this.manifest.spec.tools.find((candidate) => candidate.tool === toolName);
     if (!toolName || !mapping || mapping.capabilityId !== request.capabilityId) {
@@ -154,11 +153,20 @@ export class McpClientProvider implements CapabilityProvider {
     if (!request.arguments || typeof request.arguments !== "object" || Array.isArray(request.arguments)) {
       throw new CapabilityError("invalid_arguments", "MCP tool arguments must be a JSON object.");
     }
-    if (context.signal.aborted) throw new CapabilityError("cancelled", "MCP tool call cancelled.");
+    return this.callDownstreamTool(toolName, request.arguments as Record<string, unknown>, context.signal);
+  }
+
+  protected async callDownstreamTool(
+    toolName: string,
+    argumentsValue: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<JsonValue> {
+    const client = this.requireClient();
+    if (signal.aborted) throw new CapabilityError("cancelled", "MCP tool call cancelled.");
     const result = await client.callTool(
-      { name: toolName, arguments: request.arguments as Record<string, unknown> },
+      { name: toolName, arguments: argumentsValue },
       undefined,
-      { signal: context.signal },
+      { signal },
     );
     if (result.isError) {
       throw new CapabilityError("internal_error", "The downstream MCP tool returned an error.");
@@ -208,7 +216,7 @@ export class McpClientProvider implements CapabilityProvider {
     }
   }
 
-  private requireClient(): Client {
+  protected requireClient(): Client {
     if (!this.client) throw new CapabilityError("provider_unavailable", "Downstream MCP is not connected.");
     return this.client;
   }

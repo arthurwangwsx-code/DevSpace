@@ -1,5 +1,8 @@
 # Mount external MCP servers as DevSpace capabilities
 
+For the built-in current-profile Chrome preset, see
+[`chrome-current-profile-provider.md`](./chrome-current-profile-provider.md).
+
 DevSpace can keep one downstream MCP client per configured provider, discover its allowlisted tools,
 register them in the shared capability catalog, and expose them through both:
 

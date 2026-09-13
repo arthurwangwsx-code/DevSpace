@@ -66,6 +66,12 @@ try {
   assert.equal(installed.code, 0);
   assert.equal(JSON.parse(installed.stdout).restartRequired, true);
 
+  const chrome = await runCli([
+    "providers", "add-chrome", "--command", process.execPath,
+  ], { ...env, DEVSPACE_CAPABILITY_CONFIG_DIR: join(root, "chrome-providers") });
+  assert.equal(chrome.code, 0);
+  assert.equal(JSON.parse(chrome.stdout).connection, "current-chrome-auto-connect");
+
   console.log("capability CLI tests passed: stable JSON stdout and CI exit codes");
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));

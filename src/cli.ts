@@ -40,7 +40,11 @@ import {
 import { expandHomePath } from "./roots.js";
 import { shutdownHttpServer } from "./server-shutdown.js";
 import { runMcpCanary } from "./mcp-canary.js";
-import { installMcpProviderManifest } from "./capabilities/mcp-provider-manifest.js";
+import { installMcpProviderManifest, writeMcpProviderManifest } from "./capabilities/mcp-provider-manifest.js";
+import {
+  createChromeDevToolsManifest,
+  findChromeDevToolsMcpCommand,
+} from "./capabilities/providers/chrome-devtools-provider.js";
 
 type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "help" | "version";
 const require = createRequire(import.meta.url);
@@ -384,6 +388,7 @@ function printHelp(): void {
       "  devspace agents show <id>",
       "  devspace capabilities list|search|describe|open|call|status|cancel|close [options]",
       "  devspace providers list [--json]",
+      "  devspace providers add-chrome [--command <absolute-path>]",
       "  devspace -v, --version   Print the installed version",
       "",
       "For temporary tunnels:",
@@ -488,6 +493,28 @@ async function runCapabilitiesCommand(args: string[]): Promise<void> {
 
 async function runProvidersCommand(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
+  if (subcommand === "add-chrome") {
+    let command: string | undefined;
+    if (rest.length > 0) {
+      if (rest[0] !== "--command" || !rest[1] || rest.length !== 2) {
+        throw new Error("Usage: devspace providers add-chrome [--command <absolute-path>]");
+      }
+      command = rest[1];
+    }
+    const config = loadConfig();
+    const resolvedCommand = command
+      ? findChromeDevToolsMcpCommand({ ...process.env, DEVSPACE_CHROME_MCP_COMMAND: command })
+      : findChromeDevToolsMcpCommand();
+    const target = writeMcpProviderManifest(createChromeDevToolsManifest(resolvedCommand), config.capabilities.configDir);
+    console.log(JSON.stringify({
+      installed: true,
+      path: target,
+      providerId: "browser.chrome.devtools",
+      connection: "current-chrome-auto-connect",
+      restartRequired: true,
+    }));
+    return;
+  }
   if (subcommand === "add-mcp") {
     if (rest[0] !== "--manifest" || !rest[1] || rest.length !== 2) {
       throw new Error("Usage: devspace providers add-mcp --manifest <absolute-path>");
@@ -501,7 +528,7 @@ async function runProvidersCommand(args: string[]): Promise<void> {
     return;
   }
   if (subcommand !== "list" && subcommand !== "ls") {
-    throw new Error("Usage: devspace providers list [--json] | add-mcp --manifest <absolute-path>");
+    throw new Error("Usage: devspace providers list [--json] | add-mcp --manifest <absolute-path> | add-chrome [--command <absolute-path>]");
   }
   const options = capabilityCliOptions(rest);
   await printCapabilityResponse(await capabilityFetch("/providers", options), options);
