@@ -200,6 +200,21 @@ failed release gate before commit was `runtime_source_provenance`, because the h
 deliberately rejects a dirty source tree. Rerun the same profile from the final clean
 commit before treating it as release evidence.
 
+### Release evidence integrity
+
+Complete lane receipts are checked against the verifier's current, built-in gate list;
+the verifier does not trust an older receipt to declare which gates are required. Every
+production lane verifies that the DevSpace-owned LaunchAgent is running the release built
+from the current Git HEAD. The unlocked lane additionally includes the real current-profile
+browser smoke, while the lock-transition lane remains an explicit, separately scheduled
+human-transition test.
+
+Runtime provenance comparisons cover implementation source, native hosts, browser
+extension, scripts, test fixtures, package manifests, and build configuration. A commit
+that changes any of those paths invalidates older lane receipts even when the public MCP
+surface remains the same. The service doctor supports `--require-current-source` so a
+stale installed release fails closed before a production-path lane starts.
+
 ## Framework and protocol decisions
 
 Do not replace Express based only on framework microbenchmarks. The observed stalls

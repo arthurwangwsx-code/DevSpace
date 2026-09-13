@@ -106,22 +106,31 @@ function allGates(): Record<Lane, Gate[]> {
     "run", "test:desktop-provider-performance", "--", "--output", join(childOutputRoot, "desktop-provider"),
     "--rest-samples", "20", "--mcp-samples", "10", "--reload-provider",
   ]);
+  const productionService = npmGate("production_service_identity", [
+    "run", "doctor:macos-service", "--", "--require-current-source",
+  ]);
+  const productionBrowser = npmGate("production_browser_real_smoke", [
+    "run", "test:browser-control:real",
+  ]);
   return {
     core,
     locked: [
       ...core,
+      productionService,
       { ...npmGate("desktop_lock_boundary", ["run", "test:desktop-lock-boundary"]), state: "locked" },
       { ...productionDesktop, state: "locked" },
     ],
     unlocked: [
       ...core,
+      productionService,
+      { ...productionBrowser, state: "unlocked" },
       { ...npmGate("direct_desktop_helper_fixture", ["run", "test:desktop-helper"]), state: "unlocked" },
       { ...npmGate("production_desktop_fixture", [
         "run", "test:desktop-runtime-fixture", "--", "--output", join(childOutputRoot, "desktop-runtime-fixture"),
       ]), state: "unlocked" },
       { ...productionDesktop, state: "unlocked" },
     ],
-    "browser-transition": [{
+    "browser-transition": [productionService, {
       ...npmGate("production_browser_lock_matrix", [
         "run", "test:browser-extension", "--", "--base-url", options.baseUrl,
         "--output", join(childOutputRoot, "browser-extension-matrix"),

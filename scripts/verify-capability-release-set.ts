@@ -8,6 +8,35 @@ type Lane = "locked" | "unlocked" | "browser-transition";
 type Check = { name: string; passed: boolean; actual: unknown; expected: string };
 type Component = { name: string; path: string; checks: Check[]; passed: boolean };
 
+const EXPECTED_LANE_GATES: Record<Lane, string[]> = {
+  locked: [
+    "typecheck",
+    "unit_and_integration",
+    "production_build",
+    "capability_stress_smoke",
+    "real_external_mcp_mount",
+    "production_service_identity",
+    "desktop_lock_boundary",
+    "production_desktop_reload",
+  ],
+  unlocked: [
+    "typecheck",
+    "unit_and_integration",
+    "production_build",
+    "capability_stress_smoke",
+    "real_external_mcp_mount",
+    "production_service_identity",
+    "production_browser_real_smoke",
+    "direct_desktop_helper_fixture",
+    "production_desktop_fixture",
+    "production_desktop_reload",
+  ],
+  "browser-transition": [
+    "production_service_identity",
+    "production_browser_lock_matrix",
+  ],
+};
+
 const execFileAsync = promisify(execFile);
 const options = parseOptions(process.argv.slice(2));
 const runId = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
@@ -55,6 +84,7 @@ async function validateLane(expectedLane: Lane, path: string): Promise<Component
     check(checks, "all_lane_gates_passed", gates.every((gate) => gate.passed === true), true);
     const required = array(value.requiredGates).map(String).sort();
     const executed = gates.map((gate) => String(gate.name)).sort();
+    check(checks, "current_required_gates", required, [...EXPECTED_LANE_GATES[expectedLane]].sort());
     check(checks, "all_required_gates_executed", executed, required);
     if (commit) {
       check(checks, "lane_runtime_matches_head", await runtimeMatchesHead(commit), true);
@@ -109,7 +139,8 @@ async function runtimeMatchesHead(commit: string): Promise<boolean> {
   try {
     await execFileAsync("git", [
       "diff", "--quiet", commit, "HEAD", "--",
-      "src", "native", "native-host", "browser-extension", "package-lock.json",
+      "src", "native", "native-host", "browser-extension", "scripts", "test-fixtures",
+      "package.json", "package-lock.json", "tsconfig.json", "tsconfig.build.json", "vite.config.ts",
     ], { cwd: process.cwd() });
     return true;
   } catch (error) {

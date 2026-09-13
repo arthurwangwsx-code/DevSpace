@@ -2,7 +2,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 if (process.platform !== "darwin") {
   console.log(JSON.stringify({ supported: false, platform: process.platform }));
@@ -15,6 +16,9 @@ const port = Number(args.port ?? 7676);
 const label = args.label ?? `com.devspace.${uid}.${port}`;
 const plistPath = resolve(args["plist-path"] ?? join(homedir(), "Library", "LaunchAgents", `${label}.plist`));
 const url = args.url ?? `http://127.0.0.1:${port}/healthz`;
+const requireCurrentSource = args["require-current-source"] === "true";
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const expectedSourceCommit = requireCurrentSource ? sourceRevision(packageRoot) : undefined;
 
 let plist;
 if (existsSync(plistPath)) {
@@ -50,7 +54,11 @@ const plistOwnedByDevSpace = typeof supervisorPath === "string"
   && supervisorPath.includes("/Application Support/DevSpace/runtime/");
 const releaseId = plist?.EnvironmentVariables?.DEVSPACE_RELEASE_ID;
 const runningReleaseId = health?.release?.id;
-const restartRequired = Boolean(plistOwnedByDevSpace && launchctl.loaded && releaseId && runningReleaseId !== releaseId);
+const sourceMatchesCurrent = !requireCurrentSource
+  || health?.release?.sourceCommit === expectedSourceCommit;
+const restartRequired = Boolean(plistOwnedByDevSpace && launchctl.loaded && (
+  (releaseId && runningReleaseId !== releaseId) || !sourceMatchesCurrent
+));
 const healthy = Boolean(
   plistOwnedByDevSpace
   && launchctl.loaded
@@ -69,6 +77,8 @@ console.log(JSON.stringify({
   plistOwnedByDevSpace,
   supervisorPath,
   releaseId,
+  expectedSourceCommit,
+  sourceMatchesCurrent,
   launchctl,
   health,
 }));
@@ -79,9 +89,18 @@ function parseArgs(values) {
   for (let index = 0; index < values.length; index += 1) {
     const token = values[index];
     if (!token.startsWith("--")) throw new Error(`Unexpected argument: ${token}`);
+    if (token === "--require-current-source") {
+      result["require-current-source"] = "true";
+      continue;
+    }
     const value = values[++index];
     if (!value) throw new Error(`${token} requires a value`);
     result[token.slice(2)] = value;
   }
   return result;
+}
+
+function sourceRevision(root) {
+  try { return execFileSync("git", ["-C", root, "rev-parse", "--short=12", "HEAD"], { encoding: "utf8" }).trim(); }
+  catch { return "unknown"; }
 }
