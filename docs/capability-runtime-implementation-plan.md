@@ -165,7 +165,7 @@ enforced-policy 兼容模式后才要求 `capabilities:admin`。
     "message": "Chrome requires approval from an unlocked user session.",
     "retryable": false,
     "details": {
-      "providerId": "browser.chrome.devtools",
+      "providerId": "browser.control",
       "action": "Approve the connection prompt in Chrome"
     }
   },
@@ -198,7 +198,7 @@ HTTP status 与错误码一一映射；Provider 的原始异常不能直接透�
 ### 4.3 列表和搜索示例
 
 ```http
-GET /api/capabilities/v1/capabilities?providerId=browser.chrome.devtools&tag=snapshot&limit=20
+GET /api/capabilities/v1/capabilities?providerId=browser.control&tag=snapshot&limit=20
 ```
 
 ```json
@@ -206,12 +206,12 @@ GET /api/capabilities/v1/capabilities?providerId=browser.chrome.devtools&tag=sna
   "data": {
     "items": [
       {
-        "id": "browser.chrome.take_snapshot",
-        "version": "1.0.0",
+        "id": "browser.page.snapshot",
+        "version": "2.0.0",
         "title": "读取页面可访问性快照",
         "description": "读取所选 Chrome 页面中可交互元素的语义快照。",
-        "providerId": "browser.chrome.devtools",
-        "tags": ["browser", "chrome", "snapshot"],
+        "providerId": "browser.control",
+        "tags": ["browser", "page", "snapshot"],
         "effects": { "readOnly": true, "destructive": false, "openWorld": true },
         "availability": { "state": "ready" }
       }
@@ -228,7 +228,7 @@ GET /api/capabilities/v1/capabilities?providerId=browser.chrome.devtools&tag=sna
 {
   "query": "读取当前 Chrome 页面上可点击的按钮",
   "filters": {
-    "providerIds": ["browser.chrome.devtools"],
+    "providerIds": ["browser.control"],
     "effects": ["readOnly"],
     "availableOnly": true
   },
@@ -244,7 +244,7 @@ GET /api/capabilities/v1/capabilities?providerId=browser.chrome.devtools&tag=sna
 ```json
 POST /api/capabilities/v1/leases
 {
-  "providerId": "browser.chrome.devtools",
+  "providerId": "browser.control",
   "resourceType": "browser_page",
   "selector": {
     "pageId": 1
@@ -257,7 +257,7 @@ POST /api/capabilities/v1/leases
 {
   "data": {
     "leaseId": "lease_01...",
-    "providerId": "browser.chrome.devtools",
+    "providerId": "browser.control",
     "resourceType": "browser_page",
     "display": { "title": "DevSpace", "urlOrigin": "https://example.test" },
     "expiresAt": "2026-09-13T10:15:00Z"
@@ -275,7 +275,7 @@ POST /api/capabilities/v1/leases
 ```json
 POST /api/capabilities/v1/invocations
 {
-  "capabilityId": "browser.chrome.take_snapshot",
+  "capabilityId": "browser.page.snapshot",
   "leaseId": "lease_01...",
   "arguments": { "verbose": false },
   "mode": "sync",
@@ -321,9 +321,9 @@ MCP adapter 只做协议转换、Schema 校验和 principal 注入，不实现�
 调用 `CapabilityRuntime`。MCP 结果内容需同时提供短文本摘要和结构化 JSON，避免模型只能
 解析日志字符串。
 
-暂不实现“每个 Capability 都变成一个 MCP tool”。未来若有高频原生投影需求，只能作为
-可选的独立 endpoint，例如 `/capabilities/native-mcp/:profile`，并固定 profile 后再建立会话；
-不能改变本方案的元工具 endpoint。
+不实现“每个 Capability 都变成一个 MCP tool”，也不另建按领域或 profile 扩张的 MCP
+endpoint。未来若确实需要改变一级协议，必须作为显式架构版本变更处理，不能绕过固定八工具
+契约。
 
 ### 4.7 本机 CLI
 
@@ -346,8 +346,8 @@ devspace providers restart <provider-id>
 ```
 
 调用类 CLI 应优先连接正在运行的 DevSpace 本机 control socket/loopback API，保证和远程
-调用共享同一个 Runtime。只有管理员命令可以修改 Provider 配置，且必须验证调用者是配置
-目录所有者。
+调用共享同一个 Runtime。Provider 管理调用默认只验证调用者已认证，具体审批由上层 Agent
+负责；落盘配置仍必须校验本机目录 ownership 和文件权限，防止其他 OS 用户篡改运行时配置。
 
 ## 5. 核心数据模型
 
@@ -359,7 +359,7 @@ Schema，避免 TypeScript 和对外 Schema 分叉。
 
 ```ts
 interface CapabilityDescriptor {
-  id: string;                    // 稳定 ID，如 browser.chrome.take_snapshot
+  id: string;                    // 稳定 ID，如 browser.page.snapshot
   version: string;               // Descriptor/行为的 semver
   providerId: string;            // 稳定 Provider ID
   title: string;
@@ -397,8 +397,9 @@ interface CapabilityDescriptor {
 
 命名规则：
 
-- Capability ID 使用 `<domain>.<product>.<verb>`，全局小写，段只允许 `[a-z0-9_-]`。
-- Provider ID 使用 `<domain>.<product>.<adapter>`，如 `browser.chrome.devtools`。
+- Capability ID 使用 `<domain>.<resource>.<action>`，全局小写，段只允许 `[a-z0-9_-]`。
+- 公共 Provider ID 描述稳定路由域，例如 `browser.control`；实现型 Provider ID（如
+  `browser.chrome.devtools`）只用于内部 backend、诊断和迁移。
 - 底层 MCP 的原始 tool name 只放在 Provider 私有 binding 中，不作为外部稳定 ID。
 - 语义不兼容时发布新 Capability ID 或 major version；不能静默修改旧 Schema。
 - `metadata` 扩展键使用反向域名或项目 namespace，客户端必须容忍未知字段。
