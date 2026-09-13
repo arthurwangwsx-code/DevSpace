@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import { join } from "node:path";
+import { CapabilityRegistry } from "../registry.js";
 import { BrowserExtensionProvider, browserExtensionShouldEnable } from "./browser-extension-provider.js";
 
 const root = await mkdtemp(join(os.tmpdir(), "devspace-browser-provider-"));
@@ -70,6 +71,18 @@ assert.equal(capabilities.every(({ descriptor }) => descriptor.id.startsWith("br
 assert.equal(capabilities.some(({ descriptor }) => descriptor.id.includes(".extension.")), false);
 assert.equal(capabilities.some(({ descriptor }) => descriptor.id.includes(".chrome.")), false);
 assert.equal(capabilities.every(({ descriptor }) => descriptor.providerId === "browser.control"), true);
+const registry = new CapabilityRegistry();
+registry.replaceProviderCatalog({
+  providerId: "browser.control",
+  kind: "native:browser-control",
+  health: { state: "ready", since: new Date().toISOString() },
+  capabilities: capabilities.map(({ descriptor, aliases }) => ({
+    descriptor,
+    aliases,
+    binding: { invoke: async () => ({ ok: true }) },
+  })),
+});
+assert.equal(registry.capabilityCountForProvider("browser.control"), 25);
 const byId = new Map(capabilities.map((entry) => [entry.descriptor.id, entry]));
 const profiles = byId.get("browser.profile.list")!;
 assert.deepEqual(await provider.invoke({

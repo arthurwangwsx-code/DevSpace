@@ -41,12 +41,20 @@ const validDescriptor = {
 };
 
 assert.deepEqual(parseCapabilityDescriptor(validDescriptor), validDescriptor);
+assert.equal(parseCapabilityDescriptor({
+  ...validDescriptor,
+  providerId: "browser.control",
+}).providerId, "browser.control");
 assert.throws(
   () => parseCapabilityDescriptor({ ...validDescriptor, id: "snapshot" }),
   /Invalid string/,
 );
 assert.throws(
   () => parseCapabilityDescriptor({ ...validDescriptor, version: "latest" }),
+  /Invalid string/,
+);
+assert.throws(
+  () => parseCapabilityDescriptor({ ...validDescriptor, providerId: "browser" }),
   /Invalid string/,
 );
 assert.throws(

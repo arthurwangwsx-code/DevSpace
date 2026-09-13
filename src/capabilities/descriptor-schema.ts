@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { CapabilityDescriptor, JsonValue } from "./types.js";
 
 const CAPABILITY_ID_PATTERN = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+){2,}$/;
+const PROVIDER_ID_PATTERN = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)+$/;
 const PERMISSION_ID_PATTERN = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)+$/;
 const RESOURCE_TYPE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 const SEMVER_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -23,7 +24,7 @@ export const capabilityDescriptorSchema: z.ZodType<CapabilityDescriptor> = z
   .object({
     id: z.string().regex(CAPABILITY_ID_PATTERN),
     version: z.string().regex(SEMVER_PATTERN),
-    providerId: z.string().regex(CAPABILITY_ID_PATTERN),
+    providerId: z.string().regex(PROVIDER_ID_PATTERN),
     title: z.string().trim().min(1).max(200),
     description: z.string().trim().min(1).max(4_000),
     tags: z.array(z.string().regex(/^[a-z0-9_-]+$/)).max(64),
