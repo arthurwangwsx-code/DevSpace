@@ -38,7 +38,10 @@ import {
   type DevspaceUserConfig,
 } from "./user-config.js";
 import { expandHomePath } from "./roots.js";
-import { shutdownHttpServer } from "./server-shutdown.js";
+import {
+  shutdownHttpServer,
+  waitForHttpServerListening,
+} from "./server-shutdown.js";
 import { runMcpCanary } from "./mcp-canary.js";
 import {
   archiveMcpProviderManifest,
@@ -238,30 +241,35 @@ async function serve(): Promise<void> {
   const { createServer } = await import("./server.js");
   const config = loadConfig();
   const { app, close, localAgentProviders } = createServer(config);
-  const httpServer = app.listen(config.port, config.host, () => {
-    console.log(`devspace listening on http://${config.host}:${config.port}/mcp`);
-    console.log(`public base url: ${config.publicBaseUrl}`);
-    if (config.capabilities.enabled) {
-      console.log(`capability MCP: ${new URL("/capabilities/mcp", config.publicBaseUrl)}`);
-      console.log(`capability REST: ${new URL("/api/capabilities/v1", config.publicBaseUrl)}`);
-    }
-    console.log(`allowed roots: ${config.allowedRoots.join(", ")}`);
-    console.log(`allowed hosts: ${config.allowedHosts.join(", ")}`);
-    if (config.allowedHosts.includes("*")) {
-      console.warn("warning: Host header allowlist is disabled because DEVSPACE_ALLOWED_HOSTS=*");
-    }
-    console.log(`auth: ${config.authMode === "oauth" ? "Owner password approval required" : "trusted local tunnel"}`);
-    console.log(`logging: ${config.logging.level} ${config.logging.format}`);
-    console.log(
-      `mcp resources: sessions=${config.resources.mcpMaxSessions} idle=${config.resources.mcpMaxIdleSessions} requests=${config.resources.mcpMaxConcurrentRequests}+${config.resources.mcpMaxQueuedRequests}`,
-    );
-    console.log(
-      `process resources: active=${config.resources.processMaxConcurrent} per-workspace=${config.resources.processMaxConcurrentPerWorkspace} retained=${config.resources.processMaxSessions} buffer=${config.resources.processBufferCharacters}`,
-    );
-    if (config.subagents) {
-      console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);
-    }
-  });
+  const httpServer = app.listen(config.port, config.host);
+  try {
+    await waitForHttpServerListening(httpServer);
+  } catch (error) {
+    await close();
+    throw error;
+  }
+  console.log(`devspace listening on http://${config.host}:${config.port}/mcp`);
+  console.log(`public base url: ${config.publicBaseUrl}`);
+  if (config.capabilities.enabled) {
+    console.log(`capability MCP: ${new URL("/capabilities/mcp", config.publicBaseUrl)}`);
+    console.log(`capability REST: ${new URL("/api/capabilities/v1", config.publicBaseUrl)}`);
+  }
+  console.log(`allowed roots: ${config.allowedRoots.join(", ")}`);
+  console.log(`allowed hosts: ${config.allowedHosts.join(", ")}`);
+  if (config.allowedHosts.includes("*")) {
+    console.warn("warning: Host header allowlist is disabled because DEVSPACE_ALLOWED_HOSTS=*");
+  }
+  console.log(`auth: ${config.authMode === "oauth" ? "Owner password approval required" : "trusted local tunnel"}`);
+  console.log(`logging: ${config.logging.level} ${config.logging.format}`);
+  console.log(
+    `mcp resources: sessions=${config.resources.mcpMaxSessions} idle=${config.resources.mcpMaxIdleSessions} requests=${config.resources.mcpMaxConcurrentRequests}+${config.resources.mcpMaxQueuedRequests}`,
+  );
+  console.log(
+    `process resources: active=${config.resources.processMaxConcurrent} per-workspace=${config.resources.processMaxConcurrentPerWorkspace} retained=${config.resources.processMaxSessions} buffer=${config.resources.processBufferCharacters}`,
+  );
+  if (config.subagents) {
+    console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);
+  }
 
   let shuttingDown = false;
   const shutdown = async () => {

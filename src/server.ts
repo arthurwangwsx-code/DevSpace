@@ -59,7 +59,10 @@ import {
 } from "./mcp-resource-control.js";
 import { ProcessSessionManager, type ProcessSnapshot } from "./process-sessions.js";
 import { createReviewCheckpointManager } from "./review-checkpoints.js";
-import { shutdownHttpServer } from "./server-shutdown.js";
+import {
+  shutdownHttpServer,
+  waitForHttpServerListening,
+} from "./server-shutdown.js";
 import { formatPathForPrompt } from "./skills.js";
 import { createWorkspaceStore } from "./workspace-store.js";
 import { formatAgentsPath, WorkspaceRegistry } from "./workspaces.js";
@@ -2302,29 +2305,34 @@ async function isMainModule(): Promise<boolean> {
 
 if (await isMainModule()) {
   const { app, config, close, localAgentProviders } = createServer();
-  const httpServer = app.listen(config.port, config.host, () => {
-    console.log(
-      `devspace listening on http://${config.host}:${config.port}/mcp`,
-    );
-    if (config.capabilities.enabled) {
-      console.log(`capabilities listening on http://${config.host}:${config.port}/capabilities/mcp`);
-    }
-    console.log(`allowed roots: ${config.allowedRoots.join(", ")}`);
-    console.log(`auth: ${config.authMode === "oauth" ? "oauth owner-token flow required" : "trusted local tunnel"}`);
-    console.log(`logging: ${config.logging.level} ${config.logging.format}`);
-    console.log(`request logging: ${config.logging.requests ? "enabled" : "disabled"}`);
-    console.log(`asset logging: ${config.logging.assets ? "enabled" : "disabled"}`);
-    console.log(`trust proxy: ${config.logging.trustProxy ? "enabled" : "disabled"}`);
-    console.log(
-      `mcp resources: sessions=${config.resources.mcpMaxSessions} idle=${config.resources.mcpMaxIdleSessions} requests=${config.resources.mcpMaxConcurrentRequests}+${config.resources.mcpMaxQueuedRequests}`,
-    );
-    console.log(
-      `process resources: active=${config.resources.processMaxConcurrent} per-workspace=${config.resources.processMaxConcurrentPerWorkspace} retained=${config.resources.processMaxSessions} buffer=${config.resources.processBufferCharacters}`,
-    );
-    if (config.subagents) {
-      console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);
-    }
-  });
+  const httpServer = app.listen(config.port, config.host);
+  try {
+    await waitForHttpServerListening(httpServer);
+  } catch (error) {
+    await close();
+    throw error;
+  }
+  console.log(
+    `devspace listening on http://${config.host}:${config.port}/mcp`,
+  );
+  if (config.capabilities.enabled) {
+    console.log(`capabilities listening on http://${config.host}:${config.port}/capabilities/mcp`);
+  }
+  console.log(`allowed roots: ${config.allowedRoots.join(", ")}`);
+  console.log(`auth: ${config.authMode === "oauth" ? "oauth owner-token flow required" : "trusted local tunnel"}`);
+  console.log(`logging: ${config.logging.level} ${config.logging.format}`);
+  console.log(`request logging: ${config.logging.requests ? "enabled" : "disabled"}`);
+  console.log(`asset logging: ${config.logging.assets ? "enabled" : "disabled"}`);
+  console.log(`trust proxy: ${config.logging.trustProxy ? "enabled" : "disabled"}`);
+  console.log(
+    `mcp resources: sessions=${config.resources.mcpMaxSessions} idle=${config.resources.mcpMaxIdleSessions} requests=${config.resources.mcpMaxConcurrentRequests}+${config.resources.mcpMaxQueuedRequests}`,
+  );
+  console.log(
+    `process resources: active=${config.resources.processMaxConcurrent} per-workspace=${config.resources.processMaxConcurrentPerWorkspace} retained=${config.resources.processMaxSessions} buffer=${config.resources.processBufferCharacters}`,
+  );
+  if (config.subagents) {
+    console.log(`subagent providers: ${formatLocalAgentProviderAvailabilitySummary(localAgentProviders)}`);
+  }
 
   let shuttingDown = false;
   const shutdown = async () => {

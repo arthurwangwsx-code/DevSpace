@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { shutdownHttpServer } from "./server-shutdown.js";
+import { createServer } from "node:net";
+import {
+  shutdownHttpServer,
+  waitForHttpServerListening,
+} from "./server-shutdown.js";
 
 let finishHttpClose: (() => void) | undefined;
 let applicationCloseStarted = false;
@@ -95,3 +99,28 @@ await assert.rejects(
   ),
   httpCloseError,
 );
+
+let cleanupAfterUnstarted = false;
+const notRunningError = Object.assign(new Error("Server is not running."), {
+  code: "ERR_SERVER_NOT_RUNNING",
+});
+await shutdownHttpServer(
+  { close(callback) { callback(notRunningError); } },
+  async () => { cleanupAfterUnstarted = true; },
+);
+assert.equal(cleanupAfterUnstarted, true);
+
+const occupied = createServer();
+occupied.listen(0, "127.0.0.1");
+await waitForHttpServerListening(occupied);
+const address = occupied.address();
+assert.ok(address && typeof address === "object");
+const conflicting = createServer();
+conflicting.listen(address.port, "127.0.0.1");
+await assert.rejects(
+  waitForHttpServerListening(conflicting),
+  (error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "EADDRINUSE"),
+);
+await new Promise<void>((resolve, reject) => occupied.close((error) => error ? reject(error) : resolve()));
+
+console.log("server shutdown tests passed: drain, cleanup, unstarted close, startup conflict");
