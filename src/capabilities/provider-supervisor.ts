@@ -95,7 +95,7 @@ export class ProviderSupervisor {
     const existing = this.get(registration.provider.id);
     await this.stop(existing.provider.id, "provider_reload");
     this.providers.delete(existing.provider.id);
-    this.retireCatalog(existing, healthFor("stopped"));
+    if (!registration.enabled) this.retireCatalog(existing, healthFor("disabled"));
     this.register(registration);
     await this.start(registration.provider.id);
   }

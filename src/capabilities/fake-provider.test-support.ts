@@ -19,6 +19,7 @@ export class FakeCapabilityProvider implements CapabilityProvider {
   closeCount = 0;
   failStartTimes = 0;
   permissionRequired = false;
+  startBarrier?: Promise<void>;
   invokeBarrier?: Promise<void>;
   invokeResult?: JsonValue;
   private context?: ProviderContext;
@@ -42,6 +43,7 @@ export class FakeCapabilityProvider implements CapabilityProvider {
       });
     }
     if (this.startCount <= this.failStartTimes) throw new Error("fake start failure");
+    if (this.startBarrier) await this.startBarrier;
     this.ready = true;
   }
 

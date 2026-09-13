@@ -57,15 +57,39 @@ try {
     { capabilityId: "test.fake.echo", arguments: { hello: "world" } },
   );
 
-  provider.crash();
+  let releaseReplacement!: () => void;
+  const replacement = new FakeCapabilityProvider();
+  replacement.startBarrier = new Promise<void>((resolve) => { releaseReplacement = resolve; });
+  const replacing = runtime.supervisor.replace({ provider: replacement, kind: "fake-v2", enabled: true });
+  await waitFor(() => runtime.supervisor.getHealth(provider.id)?.state === "starting");
+  assert.ok(runtime.registry.getDescriptor("test.fake.echo"), "reload must preserve the capability identity");
+  assert.equal(runtime.registry.list().items[0]?.availability.state, "temporarily_unavailable");
+  await assert.rejects(runtime.router.invoke({
+    requestId: "reload-window",
+    principal: {
+      id: "test:reload",
+      kind: "test",
+      resource: "test:reload",
+      scopes: [],
+    },
+    capabilityId: "test.fake.echo",
+    arguments: {},
+  }), (error) => error instanceof CapabilityError && error.code === "provider_unavailable");
+  releaseReplacement();
+  await replacing;
+  assert.equal(runtime.supervisor.getHealth(provider.id)?.state, "ready");
+  assert.equal(runtime.registry.list({ availableOnly: true }).items.length, 1);
+
+  replacement.crash();
   await waitFor(() => runtime.supervisor.getHealth(provider.id)?.state === "backoff");
   assert.equal(scheduler.tasks.length, 1);
   assert.equal(scheduler.runNext(), 100);
   await waitFor(() => runtime.supervisor.getHealth(provider.id)?.state === "ready");
-  assert.equal(provider.startCount, 2);
+  assert.equal(replacement.startCount, 2);
 
   await runtime.close();
-  assert.ok(provider.stopCount >= 2);
+  assert.ok(provider.stopCount >= 1);
+  assert.ok(replacement.stopCount >= 2);
   assert.equal(scheduler.tasks.filter((task) => !task.cancelled).length, 0);
 } finally {
   await runtime.close();
@@ -108,7 +132,7 @@ try {
   rmSync(disabledRoot, { recursive: true, force: true });
 }
 
-console.log("provider supervisor tests passed: singleton, crash recovery, permission, disabled, close");
+console.log("provider supervisor tests passed: singleton, gapless reload, crash recovery, permission, disabled, close");
 
 async function waitFor(condition: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt += 1) {
