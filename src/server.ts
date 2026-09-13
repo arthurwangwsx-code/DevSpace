@@ -78,6 +78,7 @@ import type { CapabilityPrincipal } from "./capabilities/types.js";
 import { loadMcpProviderRegistrations } from "./capabilities/providers/mcp-provider-loader.js";
 import { CapabilityProviderAdmin } from "./capabilities/provider-admin.js";
 import { CapabilityManagementProvider } from "./capabilities/providers/capability-management-provider.js";
+import { BrowserExtensionProvider } from "./capabilities/providers/browser-extension-provider.js";
 
 type Transport = StreamableHTTPServerTransport;
 const requestContext = new AsyncLocalStorage<{ requestId: string }>();
@@ -1746,6 +1747,9 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
       stateDir: config.stateDir,
       enforcePolicy: config.capabilities.enforcePolicy,
       providers: [
+        ...(process.env.DEVSPACE_BROWSER_EXTENSION === "1"
+          ? [{ provider: new BrowserExtensionProvider(process.env), kind: "native:chrome-extension", enabled: true }]
+          : []),
         ...loadMcpProviderRegistrations(config.capabilities.configDir),
         ...(options.capabilityProviders ?? []),
       ],

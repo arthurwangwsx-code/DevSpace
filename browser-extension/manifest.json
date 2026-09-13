@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "DevSpace Browser Bridge",
+  "version": "0.1.0",
+  "description": "Lets DevSpace agents use explicitly acquired tabs in your signed-in Chrome profile.",
+  "minimum_chrome_version": "116",
+  "permissions": ["tabs", "debugger", "nativeMessaging", "storage", "alarms"],
+  "background": { "service_worker": "background.js" }
+}
