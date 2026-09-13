@@ -103,9 +103,30 @@ contract is intentional. It does not place owner tokens,
 tunnel keys or other secrets in the plist. Pass `--activate` only when an immediate service cutover is
 intended; without it the launch configuration is safely staged for the next launch/restart.
 
+Activation is deliberately two-phase. The installer first writes the complete plist and returns an
+`activationId` plus `activationStatusPath`; a detached, runtime-copied activator then performs
+`bootout → bootstrap → enable → /healthz`. This matters when an Agent invokes installation through
+DevSpace's own `exec_command`: stopping the old service must not terminate the only process capable of
+starting its replacement. The latest activation state is written atomically as `scheduled`, `activating`,
+`ready`, or `failed`, and is included by the service doctor. A planned cutover can briefly interrupt
+existing MCP sessions, so clients reconnect and retry after the status becomes `ready`; it does not claim
+zero downtime.
+
+Run the real production transition gate from an independent local/CI runner:
+
+```bash
+npm run test:capability-release -- --lane service-transition
+```
+
+That lane checks the installed release, exercises the production Workspace MCP, submits `--activate`
+through production `exec_command`, requires a different healthy PID running the current source, and opens
+a fresh MCP session for a post-restart command canary. The receipt is part of the final release evidence
+set.
+
 `doctor:macos-service` checks launchd state, the DevSpace-owned supervisor path, `/healthz`, and whether the
 running release matches the plist release. A release mismatch is reported as `restartRequired` rather than
-silently claiming newly installed code is already running.
+silently claiming newly installed code is already running. It also reports the latest activation record so
+an interrupted or failed cutover is distinguishable from an ordinary unhealthy process.
 
 ## Permissions and boundaries
 
