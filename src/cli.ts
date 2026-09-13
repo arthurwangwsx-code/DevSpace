@@ -56,7 +56,7 @@ import {
 import { createMacosDesktopManifest } from "./capabilities/providers/macos-desktop-provider.js";
 import { TunnelSupervisor } from "./tunnel-supervisor.js";
 
-type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "grants" | "browser" | "control-center" | "help" | "version";
+type Command = "serve" | "init" | "install" | "update" | "rollback" | "uninstall" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "grants" | "browser" | "control-center" | "help" | "version";
 const require = createRequire(import.meta.url);
 const SUPPORTED_NODE_RANGE = ">=20.12 <27";
 
@@ -73,6 +73,18 @@ async function main(argv: string[]): Promise<void> {
       return;
     case "init":
       await runInit({ force: args.includes("--force") });
+      return;
+    case "install":
+      await runInstallCommand(args);
+      return;
+    case "update":
+      await runUpdateCommand(args);
+      return;
+    case "rollback":
+      await runRollbackCommand(args);
+      return;
+    case "uninstall":
+      await runUninstallCommand(args);
       return;
     case "doctor":
       await runDoctor();
@@ -112,7 +124,7 @@ async function main(argv: string[]): Promise<void> {
 
 function normalizeCommand(command: string | undefined): Command {
   if (!command || command === "serve" || command === "start") return "serve";
-  if (command === "init" || command === "doctor" || command === "verify" || command === "config" || command === "agents" || command === "capabilities" || command === "providers" || command === "grants" || command === "browser" || command === "control-center") return command;
+  if (command === "init" || command === "install" || command === "update" || command === "rollback" || command === "uninstall" || command === "doctor" || command === "verify" || command === "config" || command === "agents" || command === "capabilities" || command === "providers" || command === "grants" || command === "browser" || command === "control-center") return command;
   if (command === "help" || command === "--help" || command === "-h") return "help";
   if (command === "version" || command === "--version" || command === "-v") return "version";
   throw new Error(`Unknown command: ${command}`);
@@ -407,6 +419,93 @@ function runConfigCommand(args: string[]): void {
   console.log(`Updated ${files.configPath}`);
 }
 
+async function runInstallCommand(args: string[]): Promise<void> {
+  const { installApp } = await import("./update-manager.js");
+  let source: string | undefined;
+  let target: string | undefined;
+  let launch = false;
+  let activateService = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--source" || argument === "--target") {
+      const value = args[++index];
+      if (!value) throw new Error(`${argument} requires a value`);
+      if (argument === "--source") source = value;
+      else target = value;
+      continue;
+    }
+    if (argument === "--launch") { launch = true; continue; }
+    if (argument === "--activate-service") { activateService = true; continue; }
+    throw new Error(`Unknown install option: ${argument}`);
+  }
+  if (!source) throw new Error("Usage: devspace install --source <DevSpace.app> [--target <path>] [--launch] [--activate-service]");
+  console.log(JSON.stringify(installApp({ sourceApp: source, targetApp: target, launchApp: launch, activateService }), null, 2));
+}
+
+async function runUpdateCommand(args: string[]): Promise<void> {
+  const { checkForUpdates, updateDevSpace } = await import("./update-manager.js");
+  let checkOnly = false;
+  let force = false;
+  let target: string | undefined;
+  let manifestUrl: string | undefined;
+  let launch = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--check") { checkOnly = true; continue; }
+    if (argument === "--force") { force = true; continue; }
+    if (argument === "--launch") { launch = true; continue; }
+    if (argument === "--target" || argument === "--manifest-url") {
+      const value = args[++index];
+      if (!value) throw new Error(`${argument} requires a value`);
+      if (argument === "--target") target = value;
+      else manifestUrl = value;
+      continue;
+    }
+    throw new Error(`Unknown update option: ${argument}`);
+  }
+  if (checkOnly) {
+    console.log(JSON.stringify(await checkForUpdates({ manifestUrl }), null, 2));
+    return;
+  }
+  console.log(JSON.stringify(await updateDevSpace({ targetApp: target, manifestUrl, force, launchApp: launch }), null, 2));
+}
+
+async function runRollbackCommand(args: string[]): Promise<void> {
+  const { rollbackDevSpace } = await import("./update-manager.js");
+  let target: string | undefined;
+  let launch = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--launch") { launch = true; continue; }
+    if (argument === "--target") {
+      const value = args[++index];
+      if (!value) throw new Error("--target requires a value");
+      target = value;
+      continue;
+    }
+    throw new Error(`Unknown rollback option: ${argument}`);
+  }
+  console.log(JSON.stringify(rollbackDevSpace({ targetApp: target, launchApp: launch }), null, 2));
+}
+
+async function runUninstallCommand(args: string[]): Promise<void> {
+  const { uninstallDevSpace } = await import("./update-manager.js");
+  let target: string | undefined;
+  let purgeConfig = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--purge-config") { purgeConfig = true; continue; }
+    if (argument === "--target") {
+      const value = args[++index];
+      if (!value) throw new Error("--target requires a value");
+      target = value;
+      continue;
+    }
+    throw new Error(`Unknown uninstall option: ${argument}`);
+  }
+  console.log(JSON.stringify(uninstallDevSpace({ targetApp: target, purgeConfig }), null, 2));
+}
+
 async function runControlCenter(args: string[]): Promise<void> {
   let host = "127.0.0.1";
   let port = 7680;
@@ -446,6 +545,10 @@ function printHelp(): void {
       "  devspace                 Run first-time setup if needed, then start the server",
       "  devspace serve           Start the server",
       "  devspace init            Create or update ~/.devspace/config.json and auth.json",
+      "  devspace install --source <DevSpace.app> [--launch]",
+      "  devspace update [--check] [--force] [--launch]",
+      "  devspace rollback [--launch]",
+      "  devspace uninstall [--purge-config]",
       "  devspace doctor          Show config, runtime, and native dependency status",
       "  devspace verify [path]   Run a real local MCP tool canary (use --url/--file to override)",
       "  devspace config get      Print persisted config",

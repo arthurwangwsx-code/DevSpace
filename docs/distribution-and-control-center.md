@@ -189,8 +189,12 @@ Implemented in the repository:
 - `devspace control-center` CLI entry;
 - native macOS `DevSpace.app` WebKit shell with embedded Node/runtime packaging;
 - CLI/script development path remains available.
+- release bootstrap `install.sh` plus machine-readable `release.json`;
+- shared Updater Core for App install, GitHub release update, rollback and uninstall;
+- Control Center `Updates` page over the same update manager;
+- transactional previous-version retention under `~/.devspace/releases/`.
 
-Release engineering still has a separate production responsibility: stable Developer ID signing, notarization, universal/dual-architecture release artifacts, automatic update/rollback distribution and clean-machine release qualification.
+Release engineering still has separate optional/production responsibilities: Developer ID signing/notarization when desired, universal/dual-architecture release artifacts, scheduled background auto-update policy, and clean-machine release qualification.
 
 ## 10. Definition of done for a public release
 
@@ -206,3 +210,48 @@ A release is portable only when all of the following are proven on a clean Mac u
 - upgrade preserves config/auth and TCC identity;
 - rollback restores the previous runnable release;
 - uninstall removes service/runtime registrations without deleting user projects.
+
+## 11. Script installation and transactional updates
+
+Every release publishes `install.sh`, `release.json`, `SHA256SUMS.txt`, and the architecture-specific App
+archives. `install.sh` is intentionally a thin bootstrap: it resolves the latest GitHub tag, selects the host
+architecture, downloads the ZIP and checksum file, verifies SHA-256, extracts the App, then invokes the
+**Updater Core inside the downloaded DevSpace runtime**. Installation policy therefore does not live in shell.
+
+The shared update surface is:
+
+```text
+install.sh                    first install / repeatable bootstrap update
+devspace install              transactional App placement used by bootstrap
+devspace update --check       inspect latest release manifest
+devspace update               download, verify and install latest release
+devspace rollback             restore the retained previous App
+devspace uninstall            remove App + login service, preserve ~/.devspace
+Control Center > Updates      GUI over the same update manager
+```
+
+Normal installation targets `~/Applications/DevSpace.app`, avoiding an administrator-password requirement.
+Users may still drag the DMG App into `/Applications`; when DevSpace is running from an App bundle the updater
+uses that bundle path as its default target.
+
+Update transaction:
+
+```text
+fetch release.json
+  -> choose darwin-arm64 / darwin-x64 artifact
+  -> download ZIP
+  -> verify SHA-256
+  -> codesign --verify staged DevSpace.app
+  -> move existing App into ~/.devspace/releases/<version>/
+  -> place the staged App at the stable target
+  -> rewrite/restart the login service when already installed
+  -> record ~/.devspace/update-state.json
+```
+
+Rollback uses `update-state.json` and the retained App backup. Configuration, owner credentials, workspace
+state and user projects are deliberately outside the App bundle and are not replaced by an upgrade. The
+uninstaller preserves `~/.devspace` unless the explicit `--purge-config` option is supplied.
+
+`release.json` is the machine-readable update contract (`schemaVersion: 1`). New release metadata should be
+added compatibly; incompatible manifest changes require a schema-version increment and updater compatibility
+window rather than silently changing field meaning.

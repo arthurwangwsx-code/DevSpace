@@ -65,6 +65,26 @@ to Applications, and open it. The App bundles its own Node runtime and provides 
 workspace roots, managed Tunnel, Browser control, Computer Use permissions, login startup, service status,
 and diagnostics.
 
+For a repeatable one-command install or update, use the release bootstrap. It installs into
+`~/Applications/DevSpace.app`, verifies the published SHA-256 checksum, and delegates the actual replacement
+to DevSpace's transactional updater:
+
+```bash
+curl -fsSL https://github.com/arthurwangwsx-code/DevSpace/releases/latest/download/install.sh | bash
+```
+
+After installation, updates and rollback are also available through the App or CLI:
+
+```bash
+devspace update --check
+devspace update
+devspace rollback
+devspace uninstall
+```
+
+Normal uninstall preserves `~/.devspace` configuration and credentials; use `--purge-config` only when an
+explicit full reset is desired.
+
 Development-signed releases may require **Control-click → Open** on first launch until the project has a
 Developer ID Application certificate and notarization configured. The Release notes state the trust status
 for each build.
