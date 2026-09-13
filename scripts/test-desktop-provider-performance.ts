@@ -105,14 +105,22 @@ try {
   });
 
   if (options.reloadProvider) {
-    const reload = await metrics.measure("mcp.reload_provider", () => client!.callTool({
+    let reloadFinished = false;
+    const reloadPromise = metrics.measure("mcp.reload_provider", () => client!.callTool({
       name: "capability_invoke",
       arguments: {
         capabilityId: "devspace.providers.control",
         arguments: { providerId: PROVIDER_ID, action: "reload" },
         mode: "sync",
       },
-    }));
+    })).finally(() => { reloadFinished = true; });
+    let catalogProbeCount = 0;
+    while (!reloadFinished || catalogProbeCount === 0) {
+      await metrics.measure("rest.catalog_during_reload", () =>
+        fetchJson(`/capabilities/${encodeURIComponent(STATUS_CAPABILITY)}`));
+      catalogProbeCount += 1;
+    }
+    const reload = await reloadPromise;
     assert.equal(reload.isError, undefined);
     assert.equal(object(object(reload.structuredContent).data).status, "succeeded");
     const recoveredStatus = await metrics.measure("rest.desktop_status_after_reload", invokeRestStatus);
@@ -124,7 +132,11 @@ try {
     const oldPidExited = !(await processExists(providerPid));
     assert.equal(oldPidExited, true, `old desktop Provider PID ${providerPid} is still running`);
     recovery = { oldPid: providerPid, newPid: recoveredStatus.processId, oldPidExited };
-    steps.push({ name: "provider_reload_recovered", passed: true, details: recovery });
+    steps.push({
+      name: "provider_reload_recovered",
+      passed: true,
+      details: { ...recovery, catalogProbeCount },
+    });
   }
 } catch (error) {
   failure = safeError(error);
