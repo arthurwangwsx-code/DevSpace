@@ -112,17 +112,21 @@ function allGates(): Record<Lane, Gate[]> {
   const productionBrowser = npmGate("production_browser_real_smoke", [
     "run", "test:browser-control:real",
   ]);
+  const productionDesktopPermissions = npmGate("production_desktop_permissions", [
+    "run", "doctor:desktop-host", "--", "--require-permissions",
+  ]);
   return {
     core,
     locked: [
-      ...core,
       productionService,
+      ...core,
       { ...npmGate("desktop_lock_boundary", ["run", "test:desktop-lock-boundary"]), state: "locked" },
       { ...productionDesktop, state: "locked" },
     ],
     unlocked: [
-      ...core,
       productionService,
+      productionDesktopPermissions,
+      ...core,
       { ...productionBrowser, state: "unlocked" },
       { ...npmGate("direct_desktop_helper_fixture", ["run", "test:desktop-helper"]), state: "unlocked" },
       { ...npmGate("production_desktop_fixture", [

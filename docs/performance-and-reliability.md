@@ -215,6 +215,12 @@ that changes any of those paths invalidates older lane receipts even when the pu
 surface remains the same. The service doctor supports `--require-current-source` so a
 stale installed release fails closed before a production-path lane starts.
 
+Expensive lane work is ordered after cheap production preflights. Locked and unlocked
+lanes first reject a stale service release; the unlocked lane then requires both macOS
+desktop permissions before running typecheck, the full test suite, builds, stress, or
+real browser work. This preserves a complete final lane while turning a known permission
+block from a minute-scale late failure into a sub-second, separately logged failure.
+
 ## Framework and protocol decisions
 
 Do not replace Express based only on framework microbenchmarks. The observed stalls

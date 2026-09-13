@@ -10,6 +10,7 @@ if (process.platform !== "darwin") {
 }
 
 const requestPermissions = process.argv.includes("--request-permissions");
+const requirePermissions = process.argv.includes("--require-permissions");
 const positional = process.argv.slice(2).find((value) => !value.startsWith("--"));
 const bundlePath = resolve(positional ?? join(homedir(), "Applications", "DevSpaceDesktopHost.app"));
 const infoPath = join(bundlePath, "Contents", "Info.plist");
@@ -44,12 +45,13 @@ if (!existsSync(infoPath) || !existsSync(executablePath)) {
     stableSigningIdentity: verify.status === 0 && !adHoc && Boolean(teamIdentifier && teamIdentifier !== "not set"),
     permissions,
     permissionsReady,
+    permissionsRequired: requirePermissions,
     permissionRequestAttempted: requestPermissions,
     permissionProbeTransport: "launch-services",
     infoPlistBytes: readFileSync(infoPath).byteLength,
   }));
-  if (verify.status !== 0) process.exitCode = 1;
-  if (permissionProbe.failed) process.exitCode = 1;
+  if (verify.status !== 0 || permissionProbe.failed) process.exitCode = 1;
+  else if (requirePermissions && !permissionsReady) process.exitCode = 3;
 }
 
 function probeAppPermissions(bundlePath, requestPermissions) {

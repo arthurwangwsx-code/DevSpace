@@ -13,14 +13,15 @@ try {
   const commit = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
   const expected = {
     locked: [
-      "typecheck", "unit_and_integration", "production_build", "capability_stress_smoke",
-      "real_external_mcp_mount", "production_service_identity", "desktop_lock_boundary",
+      "production_service_identity", "typecheck", "unit_and_integration", "production_build",
+      "capability_stress_smoke", "real_external_mcp_mount", "desktop_lock_boundary",
       "production_desktop_reload",
     ],
     unlocked: [
-      "typecheck", "unit_and_integration", "production_build", "capability_stress_smoke",
-      "real_external_mcp_mount", "production_service_identity", "production_browser_real_smoke",
-      "direct_desktop_helper_fixture", "production_desktop_fixture", "production_desktop_reload",
+      "production_service_identity", "production_desktop_permissions", "typecheck",
+      "unit_and_integration", "production_build", "capability_stress_smoke",
+      "real_external_mcp_mount", "production_browser_real_smoke", "direct_desktop_helper_fixture",
+      "production_desktop_fixture", "production_desktop_reload",
     ],
     "browser-transition": ["production_service_identity", "production_browser_lock_matrix"],
   };

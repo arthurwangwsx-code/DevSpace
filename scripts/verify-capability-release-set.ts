@@ -10,22 +10,23 @@ type Component = { name: string; path: string; checks: Check[]; passed: boolean 
 
 const EXPECTED_LANE_GATES: Record<Lane, string[]> = {
   locked: [
+    "production_service_identity",
     "typecheck",
     "unit_and_integration",
     "production_build",
     "capability_stress_smoke",
     "real_external_mcp_mount",
-    "production_service_identity",
     "desktop_lock_boundary",
     "production_desktop_reload",
   ],
   unlocked: [
+    "production_service_identity",
+    "production_desktop_permissions",
     "typecheck",
     "unit_and_integration",
     "production_build",
     "capability_stress_smoke",
     "real_external_mcp_mount",
-    "production_service_identity",
     "production_browser_real_smoke",
     "direct_desktop_helper_fixture",
     "production_desktop_fixture",
