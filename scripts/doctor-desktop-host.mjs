@@ -58,12 +58,14 @@ function probeAppPermissions(bundlePath, requestPermissions) {
   const root = mkdtempSync(join(tmpdir(), "devspace-desktop-permission-probe-"));
   const stdoutPath = join(root, "stdout.json");
   const stderrPath = join(root, "stderr.log");
+  const resultPath = join(root, "permission-result.json");
   try {
     const launched = spawnSync("/usr/bin/open", [
       "-n", "-j", bundlePath,
       "--stdout", stdoutPath,
       "--stderr", stderrPath,
       "--args", requestPermissions ? "--request-permissions" : "--permission-status",
+      "--permission-output", resultPath,
     ], { encoding: "utf8", timeout: 10_000 });
     if (launched.error || launched.status !== 0) {
       return {
@@ -76,14 +78,15 @@ function probeAppPermissions(bundlePath, requestPermissions) {
       };
     }
     const deadline = Date.now() + 30_000;
-    while ((!existsSync(stdoutPath) || readFileSync(stdoutPath).byteLength === 0) && Date.now() < deadline) {
+    while (!hasContent(resultPath) && !hasContent(stdoutPath) && Date.now() < deadline) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }
-    if (!existsSync(stdoutPath)) {
+    const responsePath = hasContent(resultPath) ? resultPath : hasContent(stdoutPath) ? stdoutPath : undefined;
+    if (!responsePath) {
       return { failed: true, permissions: { probeFailed: true, stderr: "permission probe timed out" } };
     }
     try {
-      return { failed: false, permissions: JSON.parse(readFileSync(stdoutPath, "utf8").trim()) };
+      return { failed: false, permissions: JSON.parse(readFileSync(responsePath, "utf8").trim()) };
     } catch {
       return {
         failed: true,
@@ -96,4 +99,8 @@ function probeAppPermissions(bundlePath, requestPermissions) {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+function hasContent(path) {
+  return existsSync(path) && readFileSync(path).byteLength > 0;
 }

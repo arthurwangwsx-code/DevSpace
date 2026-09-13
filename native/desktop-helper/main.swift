@@ -3,7 +3,7 @@ import ApplicationServices
 import Foundation
 import ScreenCaptureKit
 
-let helperVersion = "0.4.0"
+let helperVersion = "0.4.1"
 let userActivityYieldSeconds = 1.0
 let snapshotMaxAgeSeconds = 30.0
 let snapshotCacheLimit = 16
@@ -22,7 +22,7 @@ struct SnapshotEntry {
 var snapshotCache: [String: SnapshotEntry] = [:]
 
 if CommandLine.arguments.contains("--permission-status") {
-    print(jsonString(desktopStatus()))
+    emitPermissionResult(desktopStatus())
     exit(0)
 }
 
@@ -32,13 +32,14 @@ if CommandLine.arguments.contains("--request-permissions") {
     ] as CFDictionary
     let accessibilityTrusted = AXIsProcessTrustedWithOptions(accessibilityOptions)
     let screenCaptureGranted = CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
-    print(jsonString([
+    let result: [String: Any] = [
         "platform": "macOS",
         "accessibilityTrusted": accessibilityTrusted,
         "screenCaptureGranted": screenCaptureGranted,
         "requested": true,
         "version": helperVersion,
-    ]))
+    ]
+    emitPermissionResult(result)
     exit(accessibilityTrusted && screenCaptureGranted ? 0 : 2)
 }
 
@@ -981,4 +982,23 @@ func jsonString(_ value: Any) -> String {
         return "{}"
     }
     return String(data: data, encoding: .utf8) ?? "{}"
+}
+
+func emitPermissionResult(_ value: [String: Any]) {
+    let output = jsonString(value) + "\n"
+    guard let index = CommandLine.arguments.firstIndex(of: "--permission-output"),
+          CommandLine.arguments.indices.contains(index + 1)
+    else {
+        print(output, terminator: "")
+        return
+    }
+    do {
+        try Data(output.utf8).write(
+            to: URL(fileURLWithPath: CommandLine.arguments[index + 1]),
+            options: .atomic
+        )
+    } catch {
+        FileHandle.standardError.write(Data("Could not write permission result.\n".utf8))
+        exit(1)
+    }
 }

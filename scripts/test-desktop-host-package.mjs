@@ -14,6 +14,7 @@ if (process.platform !== "darwin") {
 
 const root = mkdtempSync(join(tmpdir(), "devspace-desktop-host-package-"));
 const bundle = join(root, "DevSpaceDesktopHost.app");
+const executable = join(bundle, "Contents", "MacOS", "devspace-desktop-helper");
 try {
   const build = spawnSync("sh", ["scripts/build-desktop-host.sh", bundle], {
     cwd: process.cwd(),
@@ -33,7 +34,8 @@ try {
   assert.equal(result.adHoc, true);
   assert.equal(result.stableSigningIdentity, false);
   assert.equal(result.permissionProbeTransport, "launch-services");
-  const executable = join(bundle, "Contents", "MacOS", "devspace-desktop-helper");
+  assert.equal(result.permissions?.version, "0.4.1");
+  assert.equal(waitForProcessExit(executable, 3_000), true, "permission probe helper remained running");
   const client = new Client({ name: "desktop-host-package-test", version: "1.0.0" });
   const transport = new StdioClientTransport({ command: executable, args: [], stderr: "pipe" });
   try {
@@ -44,7 +46,7 @@ try {
     }
     const status = await client.callTool({ name: "desktop_status", arguments: {} });
     assert.equal(status.isError, undefined);
-    assert.equal(status.structuredContent?.version, "0.4.0");
+    assert.equal(status.structuredContent?.version, "0.4.1");
   } finally {
     await client.close().catch(() => {});
     await transport.close().catch(() => {});
@@ -58,4 +60,16 @@ try {
   console.log("desktop host package tests passed: bundle metadata, PID schema, signature verification, and no overwrite");
 } finally {
   rmSync(root, { recursive: true, force: true });
+}
+
+function waitForProcessExit(executable, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const processes = spawnSync("ps", ["-axo", "command="], { encoding: "utf8" }).stdout
+      .split("\n")
+      .map((line) => line.trim());
+    if (!processes.some((command) => command === executable || command.startsWith(`${executable} `))) return true;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+  }
+  return false;
 }
