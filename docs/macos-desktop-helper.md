@@ -96,7 +96,10 @@ npm run doctor:macos-service -- --label com.devspace.$(id -u).7676
 
 The installer copies the watchdog into `~/Library/Application Support/DevSpace/runtime`, writes a
 `RunAtLoad` + `KeepAlive` LaunchAgent with `ProcessType=Standard`, keeps the bounded production resource
-profile, and records `DEVSPACE_RELEASE_ID` / `DEVSPACE_SOURCE_COMMIT`. It does not place owner tokens,
+profile, explicitly selects `DEVSPACE_TOOL_MODE=codex` so external coding clients receive
+`apply_patch`, `exec_command`, and `write_stdin`, and records `DEVSPACE_RELEASE_ID` /
+`DEVSPACE_SOURCE_COMMIT`. Pass `--tool-mode minimal|full|codex` only when a different public tool
+contract is intentional. It does not place owner tokens,
 tunnel keys or other secrets in the plist. Pass `--activate` only when an immediate service cutover is
 intended; without it the launch configuration is safely staged for the next launch/restart.
 

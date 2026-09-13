@@ -18,6 +18,7 @@ const node = resolve(args.node ?? process.execPath);
 const devspaceBin = resolve(args["devspace-bin"] ?? findExecutable("devspace") ?? join(packageRoot, "dist", "cli.js"));
 const host = args.host ?? "127.0.0.1";
 const port = integer(args.port ?? "7676", "port", 1, 65535);
+const toolMode = choice(args["tool-mode"] ?? "codex", "tool-mode", ["minimal", "full", "codex"]);
 const roots = args.root ?? join(homedir(), "project");
 const configDir = resolve(args["config-dir"] ?? join(homedir(), ".devspace"));
 const stateDir = resolve(args["state-dir"] ?? join(homedir(), ".local", "share", "devspace"));
@@ -49,6 +50,7 @@ const environment = {
   DEVSPACE_PUBLIC_BASE_URL: `http://${host}:${port}`,
   DEVSPACE_STATE_DIR: stateDir,
   DEVSPACE_WORKTREE_ROOT: worktreeRoot,
+  DEVSPACE_TOOL_MODE: toolMode,
   DEVSPACE_CAPABILITIES: "1",
   DEVSPACE_BROWSER_EXTENSION: "1",
   DEVSPACE_WIDGETS: "off",
@@ -129,6 +131,7 @@ console.log(JSON.stringify({
   configDir,
   stateDir,
   worktreeRoot,
+  toolMode,
   releaseId,
 }));
 
@@ -160,6 +163,11 @@ function integer(raw, name, min, max) {
   const value = Number(raw);
   if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be ${min}-${max}`);
   return value;
+}
+
+function choice(raw, name, values) {
+  if (!values.includes(raw)) throw new Error(`${name} must be one of: ${values.join(", ")}`);
+  return raw;
 }
 
 function escapeXml(value) {

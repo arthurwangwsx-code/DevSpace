@@ -36,9 +36,11 @@ try {
   assert.equal(result.installed, true);
   assert.equal(result.activated, false);
   assert.equal(result.releaseId, "test-release");
+  assert.equal(result.toolMode, "codex");
   const plist = readFileSync(plistPath, "utf8");
   assert.match(plist, /<string>com\.devspace\.test<\/string>/);
   assert.match(plist, /DEVSPACE_CAPABILITIES/);
+  assert.match(plist, /<key>DEVSPACE_TOOL_MODE<\/key>\s*<string>codex<\/string>/);
   assert.match(plist, /DEVSPACE_RELEASE_ID/);
   assert.match(plist, /test-release/);
   assert.match(plist, /service-supervisor\.mjs/);

@@ -53,6 +53,7 @@ const supervisorPath = programArguments.find((value) => typeof value === "string
 const plistOwnedByDevSpace = typeof supervisorPath === "string"
   && supervisorPath.includes("/Application Support/DevSpace/runtime/");
 const releaseId = plist?.EnvironmentVariables?.DEVSPACE_RELEASE_ID;
+const configuredToolMode = plist?.EnvironmentVariables?.DEVSPACE_TOOL_MODE;
 const runningReleaseId = health?.release?.id;
 const sourceMatchesCurrent = !requireCurrentSource
   || health?.release?.sourceCommit === expectedSourceCommit;
@@ -64,6 +65,7 @@ const healthy = Boolean(
   && launchctl.loaded
   && launchctl.state === "running"
   && health?.ok === true
+  && configuredToolMode === health?.toolMode
   && !restartRequired,
 );
 
@@ -77,6 +79,8 @@ console.log(JSON.stringify({
   plistOwnedByDevSpace,
   supervisorPath,
   releaseId,
+  configuredToolMode,
+  runningToolMode: health?.toolMode,
   expectedSourceCommit,
   sourceMatchesCurrent,
   launchctl,

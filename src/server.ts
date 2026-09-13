@@ -2005,6 +2005,7 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
         uptimeSeconds: Math.floor(process.uptime()),
         nodeVersion: process.version,
       },
+      toolMode: config.toolMode,
       capabilities: capabilityRuntime
         ? { enabled: true, catalogRevision: capabilityRuntime.registry.revision }
         : { enabled: false },
