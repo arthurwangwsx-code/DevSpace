@@ -2,7 +2,7 @@
 import { execFile } from "node:child_process";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer as createNetServer } from "node:net";
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import { openDatabase } from "../db/client.js";
 import {
   runCapabilityStressWorkload,
+  type CapabilityStressProgress,
   type CapabilityStressReport,
 } from "./capability-runner.js";
 
@@ -24,6 +25,7 @@ interface CliOptions {
   thinkTimeMs?: number;
   capacityRequests?: number;
   cooldownMs?: number;
+  progressIntervalMs?: number;
   outputRoot: string;
   keepFixture: boolean;
 }
@@ -76,6 +78,42 @@ let server: ChildProcessWithoutNullStreams | undefined;
 let sampleTimer: NodeJS.Timeout | undefined;
 let phase = "setup";
 const wallStartedAt = Date.now();
+let observedServerPid: number | undefined;
+let latestWorkloadProgress: CapabilityStressProgress | undefined;
+
+const writeProgress = async (
+  state: "running" | "complete" | "failed",
+  error?: string,
+): Promise<void> => {
+  const persistentState = await summarizePersistentStateIfAvailable(join(fixtureRoot, "state"));
+  await writeJsonAtomic(join(artifactDir, "progress.json"), {
+    schemaVersion: 1,
+    state,
+    phase: latestWorkloadProgress
+      ? `${phase}:${latestWorkloadProgress.phase}`
+      : phase,
+    runId,
+    updatedAt: new Date().toISOString(),
+    elapsedMs: Date.now() - wallStartedAt,
+    profile: cli.profile,
+    source,
+    target: {
+      durationMs: options.durationMs,
+      invocations: options.durationMs
+        ? undefined
+        : options.concurrency * options.operations,
+    },
+    workload: latestWorkloadProgress,
+    process: {
+      serverPid: observedServerPid,
+      sampleCount: samples.length,
+      latestSample: samples.at(-1),
+      ...(samples.length === 0 ? {} : { memory: summarizeMemory(samples) }),
+    },
+    persistentState,
+    ...(error ? { error } : {}),
+  });
+};
 
 try {
   await mkdir(artifactDir, { recursive: true });
@@ -86,6 +124,7 @@ try {
   const port = await availablePort();
   phase = "start_server";
   server = startDevSpace(port, fixtureRoot, providerDirectory, serverOutput);
+  observedServerPid = server.pid;
   await waitForHealthy(`http://127.0.0.1:${port}/healthz`, server, serverOutput);
   const startedAt = Date.now();
   const initial = await sampleProcessTree(server.pid, startedAt, true);
@@ -99,6 +138,7 @@ try {
 
   const restUrl = `http://127.0.0.1:${port}/api/capabilities/v1`;
   phase = "run_workload";
+  await writeProgress("running");
   const workload = await runCapabilityStressWorkload({
     restUrl,
     mcpUrl: `http://127.0.0.1:${port}/capabilities/mcp`,
@@ -119,8 +159,14 @@ try {
     runFaultInjection: true,
     providerRecoveryTimeoutMs: 15_000,
     trackedInvocationLimit: 2_000,
+    progressIntervalMs: cli.progressIntervalMs ?? (cli.profile === "soak" ? 60_000 : 1_000),
+    onProgress: async (progress) => {
+      latestWorkloadProgress = progress;
+      await writeProgress("running");
+    },
   });
   phase = "cooldown";
+  await writeProgress("running");
   await sleep(cli.cooldownMs ?? (cli.profile === "soak" ? 60_000 : 2_000));
   const finalSample = await sampleProcessTree(server.pid, startedAt, true);
   if (finalSample) samples.push(finalSample);
@@ -149,6 +195,8 @@ try {
   await writeFile(join(artifactDir, "summary.json"), `${JSON.stringify(report, null, 2)}\n`);
   await writeFile(join(artifactDir, "summary.md"), renderMarkdown(report));
   await writeFile(join(artifactDir, "server-output.log"), serverOutput.value);
+  phase = "complete";
+  await writeProgress("complete");
   console.log(JSON.stringify({
     ok: report.ok,
     profile: cli.profile,
@@ -169,6 +217,7 @@ try {
   await Promise.all([
     writeFile(join(artifactDir, "failure.json"), `${JSON.stringify(failure, null, 2)}\n`),
     writeFile(join(artifactDir, "server-output.log"), serverOutput.value),
+    writeProgress("failed", failure.error),
   ]).catch(() => {});
   console.error(JSON.stringify({ ...failure, artifactDir }));
   process.exitCode = 1;
@@ -322,6 +371,23 @@ async function summarizePersistentState(stateDirectory: string): Promise<Persist
   }
   const bytes = await directoryBytes(stateDirectory);
   return { bytes, mib: rounded(bytes / 1_024 / 1_024), invocationRows, auditEventRows };
+}
+
+async function summarizePersistentStateIfAvailable(
+  stateDirectory: string,
+): Promise<PersistentStateSummary | undefined> {
+  try {
+    await stat(join(stateDirectory, "devspace.sqlite"));
+    return await summarizePersistentState(stateDirectory);
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+  const temporary = `${path}.tmp-${process.pid}`;
+  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await rename(temporary, path);
 }
 
 function countRows(value: unknown): number {
@@ -660,6 +726,7 @@ function parseArgs(args: string[]): CliOptions {
       case "--think-time": options.thinkTimeMs = nonNegativeInteger(value, argument); break;
       case "--capacity-requests": options.capacityRequests = positiveInteger(value, argument); break;
       case "--cooldown": options.cooldownMs = parseDuration(value); break;
+      case "--progress-interval": options.progressIntervalMs = positiveDuration(value, argument); break;
       case "--output": options.outputRoot = value; break;
       default: throw new Error(`unknown capability stress option: ${argument}`);
     }
@@ -672,6 +739,12 @@ function parseDuration(value: string): number {
   if (!match) throw new Error("duration must use ms, s, m, or h suffix");
   const multiplier = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 }[match[2] as "ms" | "s" | "m" | "h"];
   return Number(match[1]) * multiplier;
+}
+
+function positiveDuration(value: string, name: string): number {
+  const parsed = parseDuration(value);
+  if (parsed < 1) throw new Error(`${name} must be greater than zero`);
+  return parsed;
 }
 
 function positiveInteger(value: string, name: string): number {

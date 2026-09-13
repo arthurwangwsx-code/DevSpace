@@ -21,6 +21,19 @@ export interface CapabilityStressOptions {
   runFaultInjection?: boolean;
   providerRecoveryTimeoutMs?: number;
   trackedInvocationLimit?: number;
+  progressIntervalMs?: number;
+  onProgress?: (progress: CapabilityStressProgress) => void | Promise<void>;
+}
+
+export interface CapabilityStressProgress {
+  phase: "invocations" | "mcp_churn" | "capacity" | "faults" | "finalizing" | "complete";
+  elapsedMs: number;
+  attemptedInvocations: number;
+  completedInvocations: number;
+  targetInvocations?: number;
+  targetDurationMs?: number;
+  percentComplete: number;
+  metrics: ReturnType<StressMetrics["report"]>;
 }
 
 export interface CapabilityStressCheck {
@@ -55,7 +68,7 @@ export interface CapabilityStressReport {
   ok: boolean;
   startedAt: string;
   durationMs: number;
-  options: CapabilityStressOptions;
+  options: Omit<CapabilityStressOptions, "onProgress">;
   totals: {
     attemptedInvocations: number;
     completedInvocations: number;
@@ -92,6 +105,48 @@ export async function runCapabilityStressWorkload(
   let attemptedInvocations = 0;
   let completedInvocations = 0;
   const deadline = options.durationMs ? Date.now() + options.durationMs : undefined;
+  const targetInvocations = options.durationMs
+    ? undefined
+    : options.concurrency * options.operationsPerClient;
+  let nextProgressAt = 0;
+  let progressError: unknown;
+  let progressChain = Promise.resolve();
+  const emitProgress = (
+    phase: CapabilityStressProgress["phase"],
+    force = false,
+  ): void => {
+    if (!options.onProgress) return;
+    const now = Date.now();
+    if (!force && now < nextProgressAt) return;
+    nextProgressAt = now + (options.progressIntervalMs ?? 60_000);
+    const elapsedMs = rounded(performance.now() - startedMs);
+    const denominator = options.durationMs ?? targetInvocations ?? 1;
+    const numerator = options.durationMs ? elapsedMs : completedInvocations;
+    const snapshot: CapabilityStressProgress = {
+      phase,
+      elapsedMs,
+      attemptedInvocations,
+      completedInvocations,
+      ...(targetInvocations === undefined ? {} : { targetInvocations }),
+      ...(options.durationMs === undefined ? {} : { targetDurationMs: options.durationMs }),
+      percentComplete: phase === "complete"
+        ? 100
+        : rounded(Math.min(99.99, numerator / denominator * 100)),
+      metrics: metrics.report(),
+    };
+    progressChain = progressChain.then(async () => {
+      if (progressError) return;
+      try {
+        await options.onProgress!(snapshot);
+      } catch (error) {
+        progressError = error;
+      }
+    });
+  };
+  const flushProgress = async (): Promise<void> => {
+    await progressChain;
+    if (progressError) throw progressError;
+  };
 
   try {
     await parallelMap(
@@ -143,6 +198,7 @@ export async function runCapabilityStressWorkload(
     );
     rememberRevision(described, catalogRevisions);
     if (described.data?.id !== options.echoCapabilityId) throw new Error("capability descriptor mismatch");
+    emitProgress("invocations", true);
 
     await Promise.all(users.map(async (user) => {
       let operation = 0;
@@ -178,18 +234,23 @@ export async function runCapabilityStressWorkload(
           // StressMetrics retains the failure and the acceptance checks fail the run.
         }
         operation++;
+        emitProgress("invocations");
         if (options.thinkTimeMs) await sleep(options.thinkTimeMs);
       }
     }));
 
+    emitProgress("mcp_churn", true);
     await runMcpChurn(options, metrics);
+    emitProgress("capacity", true);
     const capacity = options.runFaultInjection === false
       ? undefined
       : await runCapacityBoundary(options);
+    emitProgress("faults", true);
     const faults = options.runFaultInjection === false
       ? undefined
       : await runFaultScenarios(options);
 
+    emitProgress("finalizing", true);
     const status = await users[0]!.mcp.call("capability_status", {}, "mcp_runtime_status");
     const finalRuntimeStats = mcpData<any>(status)?.router ?? {};
     const metricReport = metrics.report();
@@ -204,11 +265,12 @@ export async function runCapabilityStressWorkload(
       faults,
       finalRuntimeStats,
     );
-    return {
+    const { onProgress: _onProgress, ...reportedOptions } = options;
+    const report: CapabilityStressReport = {
       ok: checks.every((check) => check.passed),
       startedAt: startedAt.toISOString(),
       durationMs: rounded(performance.now() - startedMs),
-      options: { ...options },
+      options: reportedOptions,
       totals: { attemptedInvocations, completedInvocations, churnSessions: options.churnSessions },
       metrics: metricReport,
       checks,
@@ -217,6 +279,9 @@ export async function runCapabilityStressWorkload(
       faults,
       finalRuntimeStats,
     };
+    emitProgress("complete", true);
+    await flushProgress();
+    return report;
   } finally {
     await Promise.allSettled(users.filter(Boolean).map(({ mcp }) => mcp.close()));
   }

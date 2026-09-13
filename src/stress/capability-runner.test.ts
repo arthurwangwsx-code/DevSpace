@@ -9,6 +9,7 @@ import type { ProviderInvocation, ProviderInvocationContext } from "../capabilit
 import type { CapabilityDescriptor, JsonValue } from "../capabilities/types.js";
 import { createServer } from "../server.js";
 import { runCapabilityStressWorkload } from "./capability-runner.js";
+import type { CapabilityStressProgress } from "./capability-runner.js";
 
 const root = mkdtempSync(join(tmpdir(), "devspace-capability-runner-test-"));
 const providerId = "test.stress.provider";
@@ -79,6 +80,7 @@ try {
   try {
     await running.capabilityRuntime!.start();
     const port = (server.address() as AddressInfo).port;
+    const progress: CapabilityStressProgress[] = [];
     const report = await runCapabilityStressWorkload({
       restUrl: `http://127.0.0.1:${port}/api/capabilities/v1`,
       mcpUrl: `http://127.0.0.1:${port}/capabilities/mcp`,
@@ -93,6 +95,8 @@ try {
       discoveryP95TargetMs: 1_000,
       invocationP95TargetMs: 1_000,
       runFaultInjection: false,
+      progressIntervalMs: 1,
+      onProgress: (snapshot) => { progress.push(snapshot); },
     });
     assert.equal(report.ok, true, JSON.stringify(report, null, 2));
     assert.equal(report.totals.completedInvocations, 8);
@@ -100,6 +104,16 @@ try {
     assert.equal(report.metrics.operations.mcp_invoke?.count, 4);
     assert.equal(report.finalRuntimeStats.active, 0);
     assert.equal(report.finalRuntimeStats.queued, 0);
+    assert.equal("onProgress" in report.options, false);
+    assert.equal(progress[0]?.phase, "invocations");
+    assert.equal(progress.at(-1)?.phase, "complete");
+    assert.equal(progress.at(-1)?.attemptedInvocations, 8);
+    assert.equal(progress.at(-1)?.completedInvocations, 8);
+    assert.equal(progress.at(-1)?.percentComplete, 100);
+    assert.ok(progress.every((snapshot, index) => (
+      index === 0
+      || snapshot.attemptedInvocations >= progress[index - 1]!.attemptedInvocations
+    )));
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await running.close();
