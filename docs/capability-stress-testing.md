@@ -53,7 +53,8 @@ Host, and writes receipts under `.build/desktop-runtime-fixture/`.
 
 `test:capability-release` is the top-level evidence orchestrator. It runs each gate
 as a direct child process, stores console output in a per-gate log, records
-the exact Git commit and dirty paths, stops on the first failure by default, and
+the exact Git commit, all dirty paths, and the runtime-source dirty subset, stops
+on the first failure by default, and
 writes a JSON/Markdown lane receipt under `.build/capability-release/`.
 
 - `core`: typecheck, full unit/integration suite, production build, isolated
@@ -71,7 +72,9 @@ targeted rerun (recorded as `releaseEligible: false` even when it passes), and
 `--continue-on-failure` when collecting a complete failure
 inventory. A release requires passing receipts from `locked`, `unlocked`,
 `browser-transition`, and the separate 24-hour capability soak. The orchestrator
-never treats a skipped lane or a precondition failure as a pass.
+never treats a skipped lane, runtime-source dirty run, or precondition failure as
+release eligible. Unrelated documentation WIP remains recorded but does not invalidate
+the executable-source evidence.
 
 | Profile | Clients | Calls/client | MCP session churn | Duration |
 | --- | ---: | ---: | ---: | ---: |

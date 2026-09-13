@@ -63,17 +63,22 @@ const [{ stdout: commit }, { stdout: status }] = await Promise.all([
   execFileAsync("git", ["rev-parse", "HEAD"], { cwd: process.cwd() }),
   execFileAsync("git", ["status", "--short", "--untracked-files=all"], { cwd: process.cwd() }),
 ]);
+const dirtyPaths = status.trim().split("\n").filter(Boolean);
+const sourceDirtyPaths = dirtyPaths.filter(isRuntimeSourceStatus);
+const selectedGatesPassed = failure === undefined
+  && results.length === gates.length
+  && results.every(({ passed }) => passed);
 const report = {
-  ok: failure === undefined && results.length === gates.length && results.every(({ passed }) => passed),
+  ok: selectedGatesPassed,
   releaseEligible: options.only.size === 0
-    && failure === undefined
+    && selectedGatesPassed
     && results.length === completeLaneGates.length
-    && results.every(({ passed }) => passed),
+    && sourceDirtyPaths.length === 0,
   lane: options.lane,
   selection: options.only.size === 0 ? "complete-lane" : "targeted-rerun",
   startedAt: runId,
   finishedAt: new Date().toISOString(),
-  source: { commit: commit.trim(), dirtyPaths: status.trim().split("\n").filter(Boolean) },
+  source: { commit: commit.trim(), dirtyPaths, sourceDirtyPaths },
   session: { awake: session.awake, loggedIn: session.loggedIn, locked: session.locked },
   gates: results,
   requiredGates: completeLaneGates.map(({ name }) => name),
@@ -230,6 +235,20 @@ function normalizeBaseUrl(value: string): string {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("base URL must use http or https");
   return url.toString().replace(/\/$/, "");
+}
+
+function isRuntimeSourceStatus(statusLine: string): boolean {
+  const porcelainPath = statusLine.slice(3).trim();
+  const path = porcelainPath.includes(" -> ") ? porcelainPath.split(" -> ").at(-1)! : porcelainPath;
+  return path === "package.json"
+    || path === "package-lock.json"
+    || path.startsWith("src/")
+    || path.startsWith("scripts/")
+    || path.startsWith("native/")
+    || path.startsWith("native-host/")
+    || path.startsWith("browser-extension/")
+    || path.startsWith("tsconfig")
+    || path.startsWith("vite.config.");
 }
 
 function parseDuration(value: string): number {
