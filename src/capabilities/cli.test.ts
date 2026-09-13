@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,7 @@ const env = {
   DEVSPACE_OAUTH_OWNER_TOKEN: "capability-cli-owner-token-long-enough",
   DEVSPACE_AUTH_MODE: "trusted-local",
   DEVSPACE_CAPABILITIES: "1",
+  DEVSPACE_CAPABILITY_CONFIG_DIR: join(root, "providers"),
   DEVSPACE_LOG_LEVEL: "silent",
 };
 const config = loadConfig(env);
@@ -45,6 +46,25 @@ try {
   ], env);
   assert.equal(missing.code, 1);
   assert.match(missing.stderr, /^capability_not_found:/);
+
+  const manifestPath = join(root, "install-me.json");
+  writeFileSync(manifestPath, JSON.stringify({
+    apiVersion: "devspace.capabilities/v1",
+    kind: "McpProvider",
+    metadata: { id: "test.cli.installed" },
+    spec: {
+      enabled: false,
+      transport: { type: "stdio", command: process.execPath, args: [] },
+      tools: [{
+        tool: "echo",
+        capabilityId: "test.cli.echo",
+        effects: { readOnly: true, destructive: false, idempotent: true, openWorld: false },
+      }],
+    },
+  }));
+  const installed = await runCli(["providers", "add-mcp", "--manifest", manifestPath], env);
+  assert.equal(installed.code, 0);
+  assert.equal(JSON.parse(installed.stdout).restartRequired, true);
 
   console.log("capability CLI tests passed: stable JSON stdout and CI exit codes");
 } finally {

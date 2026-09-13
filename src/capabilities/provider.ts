@@ -36,6 +36,7 @@ export interface ProviderLease {
 export interface ProviderContext {
   signal: AbortSignal;
   reportFailure(error: unknown): void;
+  reportCatalogChanged(): void;
   log(
     level: "debug" | "info" | "warn" | "error",
     event: string,

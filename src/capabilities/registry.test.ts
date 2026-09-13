@@ -56,6 +56,21 @@ try {
   assert.equal(registry.getDescriptor("browser.chrome.take_snapshot")?.providerId,
     "browser.chrome.devtools");
 
+  assert.throws(
+    () => registry.replaceProviderCatalog({
+      providerId: "browser.chrome.devtools",
+      kind: "mcp-stdio",
+      health: ready,
+      capabilities: [{
+        ...snapshot,
+        descriptor: { ...snapshot.descriptor, inputSchema: { type: "object", required: ["changed"] } },
+      }],
+    }),
+    (error) => error instanceof CapabilityError
+      && error.code === "conflict"
+      && /without a version change/.test(error.message),
+  );
+
   const staleCursor = firstPage.nextCursor;
   registry.replaceProviderCatalog({
     providerId: "browser.chrome.devtools",

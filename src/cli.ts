@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as prompts from "@clack/prompts";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
@@ -40,6 +40,7 @@ import {
 import { expandHomePath } from "./roots.js";
 import { shutdownHttpServer } from "./server-shutdown.js";
 import { runMcpCanary } from "./mcp-canary.js";
+import { installMcpProviderManifest } from "./capabilities/mcp-provider-manifest.js";
 
 type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "help" | "version";
 const require = createRequire(import.meta.url);
@@ -487,8 +488,20 @@ async function runCapabilitiesCommand(args: string[]): Promise<void> {
 
 async function runProvidersCommand(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
+  if (subcommand === "add-mcp") {
+    if (rest[0] !== "--manifest" || !rest[1] || rest.length !== 2) {
+      throw new Error("Usage: devspace providers add-mcp --manifest <absolute-path>");
+    }
+    if (!isAbsolute(rest[1])) {
+      throw new Error("The MCP provider manifest path must be absolute.");
+    }
+    const config = loadConfig();
+    const target = installMcpProviderManifest(rest[1], config.capabilities.configDir);
+    console.log(JSON.stringify({ installed: true, path: target, restartRequired: true }));
+    return;
+  }
   if (subcommand !== "list" && subcommand !== "ls") {
-    throw new Error("Usage: devspace providers list [--json]");
+    throw new Error("Usage: devspace providers list [--json] | add-mcp --manifest <absolute-path>");
   }
   const options = capabilityCliOptions(rest);
   await printCapabilityResponse(await capabilityFetch("/providers", options), options);

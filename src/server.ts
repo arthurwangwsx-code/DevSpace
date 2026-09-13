@@ -75,6 +75,7 @@ import { createCapabilityMcpServer } from "./capabilities/mcp-adapter.js";
 import type { ProviderRegistration } from "./capabilities/provider.js";
 import { CapabilityRuntime } from "./capabilities/runtime.js";
 import type { CapabilityPrincipal } from "./capabilities/types.js";
+import { loadMcpProviderRegistrations } from "./capabilities/providers/mcp-provider-loader.js";
 
 type Transport = StreamableHTTPServerTransport;
 const requestContext = new AsyncLocalStorage<{ requestId: string }>();
@@ -1734,7 +1735,10 @@ export function createServer(config = loadConfig(), options: CreateServerOptions
   const capabilityRuntime = config.capabilities.enabled
     ? new CapabilityRuntime({
       stateDir: config.stateDir,
-      providers: options.capabilityProviders,
+      providers: [
+        ...loadMcpProviderRegistrations(config.capabilities.configDir),
+        ...(options.capabilityProviders ?? []),
+      ],
       router: {
         maxConcurrent: config.capabilities.maxConcurrent,
         maxConcurrentPerProvider: config.capabilities.maxConcurrentPerProvider,

@@ -138,6 +138,37 @@ export class ProviderSupervisor {
     await Promise.all([...this.providers.values()].map((managed) => this.start(managed.provider.id)));
   }
 
+  async refresh(providerId: string): Promise<void> {
+    const managed = this.requireReady(providerId);
+    const signal = managed.controller?.signal ?? new AbortController().signal;
+    const discovered = await withTimeout(
+      managed.provider.discover(signal),
+      this.options.discoveryTimeoutMs,
+      "Provider discovery timed out.",
+      signal,
+    );
+    this.registry.replaceProviderCatalog({
+      providerId: managed.provider.id,
+      kind: managed.kind,
+      enabled: managed.enabled,
+      health: managed.health,
+      manifestDigest: managed.manifestDigest,
+      capabilities: discovered.map((capability) => ({
+        descriptor: capability.descriptor,
+        aliases: capability.aliases,
+        binding: {
+          invoke: (argumentsValue, context) => managed.provider.invoke({
+            capabilityId: capability.descriptor.id,
+            descriptor: capability.descriptor,
+            binding: capability.binding,
+            arguments: argumentsValue,
+            lease: context.lease,
+          }, { signal: context.signal }),
+        },
+      })),
+    });
+  }
+
   start(providerId: string): Promise<void> {
     const managed = this.get(providerId);
     if (this.closed) return Promise.reject(new Error("Provider supervisor is closed."));
@@ -199,6 +230,15 @@ export class ProviderSupervisor {
       reportFailure: (error) => {
         if (managed.generation !== generation || this.closed) return;
         void this.handleRuntimeFailure(managed, error);
+      },
+      reportCatalogChanged: () => {
+        if (managed.generation !== generation || this.closed) return;
+        void this.refresh(managed.provider.id).catch((error: unknown) => {
+          this.options.log("warn", "capability.provider.catalog_refresh_failed", {
+            providerId: managed.provider.id,
+            error: normalizeCapabilityError(error).code,
+          });
+        });
       },
       log: this.options.log,
     };

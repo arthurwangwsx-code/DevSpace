@@ -141,6 +141,13 @@ DevSpace gives ChatGPT tools to:
 - discover local agent skills from your skill folders
 - show tool cards and optional change summaries in ChatGPT Apps-compatible hosts
 
+## Capability gateway preview
+
+DevSpace can also mount explicitly allowlisted stdio or Streamable HTTP MCP servers as dynamic
+capabilities while keeping its public API fixed. Set `DEVSPACE_CAPABILITIES=1`, then connect an Agent
+to `/capabilities/mcp` or use `/api/capabilities/v1` from CI. See
+[Mount external MCP servers](docs/mcp-provider-mounts.md) for the secure manifest format and CLI.
+
 ## Mental Model
 
 DevSpace is remote access to selected local folders.

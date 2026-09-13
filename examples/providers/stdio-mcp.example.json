@@ -1,0 +1,31 @@
+{
+  "apiVersion": "devspace.capabilities/v1",
+  "kind": "McpProvider",
+  "metadata": {
+    "id": "example.local.mcp",
+    "title": "Example local MCP"
+  },
+  "spec": {
+    "enabled": false,
+    "transport": {
+      "type": "stdio",
+      "command": "/absolute/path/to/node",
+      "args": ["/absolute/path/to/mcp-server.js"],
+      "envFrom": {}
+    },
+    "tools": [
+      {
+        "tool": "lookup",
+        "capabilityId": "example.local.lookup",
+        "version": "1.0.0",
+        "tags": ["example", "read"],
+        "effects": {
+          "readOnly": true,
+          "destructive": false,
+          "idempotent": true,
+          "openWorld": false
+        }
+      }
+    ]
+  }
+}

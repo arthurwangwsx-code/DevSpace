@@ -1,4 +1,5 @@
 import { CapabilityError } from "./errors.js";
+import { digest } from "./audit-store.js";
 import { parseCapabilityDescriptor } from "./descriptor-schema.js";
 import { searchCapabilityCandidates, type CapabilitySearchResult } from "./search.js";
 import type { SqliteCapabilityCatalogStore } from "./catalog-store.js";
@@ -90,6 +91,14 @@ export class CapabilityRegistry {
         throw new CapabilityError(
           "conflict",
           `Capability ${capability.descriptor.id} is already owned by ${existing.descriptor.providerId}.`,
+        );
+      }
+      if (existing && existing.descriptor.version === capability.descriptor.version
+        && digest({ input: existing.descriptor.inputSchema, output: existing.descriptor.outputSchema })
+          !== digest({ input: capability.descriptor.inputSchema, output: capability.descriptor.outputSchema })) {
+        throw new CapabilityError(
+          "conflict",
+          `Capability ${capability.descriptor.id} changed schema without a version change.`,
         );
       }
     }
