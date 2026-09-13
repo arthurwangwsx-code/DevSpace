@@ -106,13 +106,14 @@ fixture history ceiling and ended at exactly 2,000 tracked records, proving the
 eviction path instead of merely checking its configuration. These bounded runs
 do not replace the 24-hour release gate.
 
-The formal ten-minute soak completed 42,913/42,913 business calls and 5,000 MCP
-session reconnects with 23 ms REST / 27 ms MCP p95. All 26 gates passed: the
-2,000-entry history bound held, the 128-call burst produced 66 accepted and 62
-explicitly rate-limited calls, Provider recovery took 1.52 seconds, process-tree
-RSS peaked at 611.19 MiB, FD count ended 55 to 54 with one listener, and shutdown
-left no Provider process. Post-warm-up RSS growth and fitted slope were both
-negative. Artifact: `.build/capability-stress-soak-10m-final/2026-09-13T03-59-43-839Z`.
+The final formal ten-minute delegated-approval soak completed 43,025/43,025
+business calls and 5,000 MCP session reconnects with 2 ms discovery / 23 ms
+invocation p95. All 26 gates passed: the 2,000-entry history bound held, the
+128-call burst produced 66 accepted and 62 explicitly rate-limited calls,
+Provider recovery took 1.57 seconds, process-tree RSS peaked at 603.84 MiB, FD
+count ended 55 to 54 with one listener, and shutdown left no Provider process.
+Post-warm-up RSS growth and fitted slope were both negative. Artifact:
+`.build/capability-stress-soak-10m-delegated-final/2026-09-13T04-40-54-345Z`.
 The 24-hour release run remains outstanding.
 
 After switching the production default to delegated approval, a final local
