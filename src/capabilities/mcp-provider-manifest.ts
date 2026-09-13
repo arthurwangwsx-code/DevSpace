@@ -183,6 +183,21 @@ export function setMcpProviderEnabled(providerId: string, enabled: boolean, conf
   return loaded.path;
 }
 
+export function replaceMcpProviderManifest(
+  providerId: string,
+  manifest: McpProviderManifest,
+  configDir: string,
+): { path: string; previous: McpProviderManifest } {
+  id.parse(providerId);
+  const parsed = parseMcpProviderManifest(manifest);
+  if (parsed.metadata.id !== providerId) {
+    throw new Error(`MCP provider manifest id must remain ${providerId}`);
+  }
+  const loaded = findMcpProviderManifest(providerId, configDir);
+  replaceManifestAtomically(loaded.path, parsed);
+  return { path: loaded.path, previous: loaded.manifest };
+}
+
 export function archiveMcpProviderManifest(providerId: string, configDir: string): {
   path: string;
   archivedPath: string;

@@ -46,6 +46,15 @@ export class CapabilityManagementProvider implements CapabilityProvider {
         required: ["manifest"],
         additionalProperties: false,
       }, mutation(true)),
+      capability("devspace.providers.update", "Update and reload an MCP Provider", "update", {
+        type: "object",
+        properties: {
+          providerId: { type: "string", minLength: 1 },
+          manifest: { type: "object" },
+        },
+        required: ["providerId", "manifest"],
+        additionalProperties: false,
+      }, mutation(true)),
       capability("devspace.providers.control", "Enable, disable, or reload an MCP Provider", "control", {
         type: "object",
         properties: {
@@ -73,6 +82,12 @@ export class CapabilityManagementProvider implements CapabilityProvider {
         return this.admin.list(principal);
       case "install":
         return this.admin.install(principal, argumentsValue.manifest);
+      case "update":
+        return this.admin.update(
+          principal,
+          requiredString(argumentsValue.providerId, "providerId"),
+          argumentsValue.manifest,
+        );
       case "control":
         return this.admin.action(
           principal,

@@ -34,9 +34,9 @@ devspace providers list --json
 devspace capabilities list --provider example.remote.mcp --json
 ```
 
-For install/load without a restart, use the fixed administrator REST endpoints
+For install/update/load without a restart, use the fixed administrator REST endpoints
 or invoke the catalog capabilities `devspace.providers.install`,
-`devspace.providers.control`, and `devspace.providers.remove` through
+`devspace.providers.update`, `devspace.providers.control`, and `devspace.providers.remove` through
 `capability_invoke`. See [Dynamic Provider management](dynamic-provider-management.md).
 
 In OAuth mode, the CLI accepts an audience-bound token through

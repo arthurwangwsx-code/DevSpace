@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -75,6 +75,60 @@ try {
     item.id === "test.dynamic.mcp.prompts.get"), true);
   const installedRevision = afterInstall.body.meta.catalogRevision;
 
+  const updatedManifest = {
+    ...manifest,
+    metadata: { ...manifest.metadata, title: "Updated dynamic fixture" },
+    spec: { ...manifest.spec, discoveredToolVersion: "2.0.0" },
+  };
+  const updated = await invokeManagement(client, "devspace.providers.update", {
+    providerId: "test.dynamic.mcp",
+    manifest: updatedManifest,
+  });
+  assert.equal(updated.status, "succeeded");
+  assert.equal((updated.result as any).updated, true);
+  assert.equal((updated.result as any).health.state, "ready");
+  assert.ok((updated.result as any).catalogRevision > installedRevision);
+  assert.equal((await client.listTools()).tools.length, 8);
+  const afterUpdate = await getJson(`${base}/capabilities?providerId=test.dynamic.mcp`);
+  assert.equal(afterUpdate.body.data.items.find((item: any) =>
+    item.id === "test.dynamic.mcp.echo")?.version, "2.0.0");
+  assert.equal(
+    JSON.parse(readFileSync(join(providerDirectory, "test.dynamic.mcp.json"), "utf8")).metadata.title,
+    "Updated dynamic fixture",
+  );
+
+  const mismatched = await putJson(`${base}/admin/providers/test.dynamic.mcp`, {
+    manifest: { ...updatedManifest, metadata: { id: "test.dynamic.other" } },
+  });
+  assert.equal(mismatched.response.status, 400);
+  assert.equal(mismatched.body.error.code, "invalid_arguments");
+  assert.equal(
+    JSON.parse(readFileSync(join(providerDirectory, "test.dynamic.mcp.json"), "utf8")).metadata.id,
+    "test.dynamic.mcp",
+  );
+
+  const failedUpdate = await putJson(`${base}/admin/providers/test.dynamic.mcp`, {
+    manifest: {
+      ...updatedManifest,
+      spec: {
+        ...updatedManifest.spec,
+        transport: { type: "stdio", command: join(root, "missing-mcp-executable"), args: [] },
+      },
+    },
+  });
+  assert.equal(failedUpdate.response.status, 503);
+  assert.equal(failedUpdate.body.error.code, "provider_unavailable");
+  assert.match(failedUpdate.body.error.message, /previous configuration was restored/);
+  assert.equal(
+    JSON.parse(readFileSync(join(providerDirectory, "test.dynamic.mcp.json"), "utf8")).spec.transport.command,
+    process.execPath,
+  );
+  const afterRollback = await getJson(`${base}/admin/providers`);
+  assert.equal(afterRollback.body.data.providers[0].runtime.state, "ready");
+  const catalogAfterRollback = await getJson(`${base}/capabilities?providerId=test.dynamic.mcp`);
+  assert.equal(catalogAfterRollback.body.data.items.find((item: any) =>
+    item.id === "test.dynamic.mcp.echo")?.version, "2.0.0");
+
   const disabled = await postJson(`${base}/admin/providers/test.dynamic.mcp/actions`, { action: "disable" });
   assert.equal(disabled.response.status, 200);
   assert.equal(disabled.body.data.enabled, false);
@@ -105,7 +159,7 @@ try {
   const finalProviders = await getJson(`${base}/providers`);
   assert.equal(finalProviders.body.data.items.some((item: any) => item.id === "test.dynamic.mcp"), false);
 
-  console.log("provider admin integration passed: fixed MCP install, protocol assets, REST disable, MCP enable/reload/remove, catalog revisions");
+  console.log("provider admin integration passed: fixed MCP install/update, atomic rollback, REST lifecycle, protocol assets, catalog revisions");
 } finally {
   await client?.close().catch(() => {});
   await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -130,6 +184,15 @@ async function getJson(url: string) {
 async function postJson(url: string, body: unknown) {
   const response = await fetch(url, {
     method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { response, body: await response.json() as any };
+}
+
+async function putJson(url: string, body: unknown) {
+  const response = await fetch(url, {
+    method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });

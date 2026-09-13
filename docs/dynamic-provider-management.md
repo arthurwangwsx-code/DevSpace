@@ -1,6 +1,6 @@
 # Dynamic MCP Provider management
 
-DevSpace can install, load, disable, reload, and remove downstream MCP Providers
+DevSpace can install, update, load, disable, reload, and remove downstream MCP Providers
 without restarting the DevSpace process. The public capability MCP still exposes
 exactly eight fixed meta-tools. Provider administration appears as ordinary
 dynamic capabilities in the catalog, so adding another downstream MCP changes
@@ -22,6 +22,7 @@ corresponding invoke/admin scopes and Grants.
 | --- | --- | --- |
 | `GET` | `/api/capabilities/v1/admin/providers` | List configured manifests and live health. |
 | `POST` | `/api/capabilities/v1/admin/providers` | Validate, persist, start, discover, and register one Provider. |
+| `PUT` | `/api/capabilities/v1/admin/providers/:id` | Atomically replace one manifest, hot-reload it, and restore the previous version if the replacement is unusable. |
 | `POST` | `/api/capabilities/v1/admin/providers/:id/actions` | Run `enable`, `disable`, or `reload` immediately. |
 | `DELETE` | `/api/capabilities/v1/admin/providers/:id` | Stop, unregister, retire its catalog entries, and archive its manifest. |
 
@@ -63,12 +64,45 @@ found immediately through `GET /capabilities`, `capability_list`, or
 `capability_search`. Clients should use the returned `catalogRevision` to
 invalidate cached catalog data.
 
+Update an existing Provider without restarting DevSpace:
+
+```bash
+curl -X PUT http://127.0.0.1:7676/api/capabilities/v1/admin/providers/example.dynamic.mcp \
+  -H 'content-type: application/json' \
+  -H "authorization: Bearer $DEVSPACE_CAPABILITY_BEARER_TOKEN" \
+  --data '{
+    "manifest": {
+      "apiVersion": "devspace.capabilities/v1",
+      "kind": "McpProvider",
+      "metadata": { "id": "example.dynamic.mcp", "title": "Example MCP v2" },
+      "spec": {
+        "enabled": true,
+        "transport": {
+          "type": "stdio",
+          "command": "/absolute/path/to/example-mcp-v2",
+          "args": []
+        },
+        "discoverAllTools": true,
+        "discoveredToolVersion": "2.0.0"
+      }
+    }
+  }'
+```
+
+The path ID and `metadata.id` must match. DevSpace atomically persists the new
+manifest, replaces the live downstream connection, and requires the resulting
+Provider to be `ready`, `degraded`, or intentionally `disabled`. Startup,
+discovery, or catalog-registration failures restore both the previous manifest
+and the previous live Provider before the request returns an error. Capability
+schema changes must use a new capability version.
+
 ## Management through the fixed MCP
 
 The built-in `devspace.providers.admin` Provider publishes these catalog entries:
 
 - `devspace.providers.list`
 - `devspace.providers.install`
+- `devspace.providers.update`
 - `devspace.providers.control`
 - `devspace.providers.remove`
 
@@ -92,6 +126,24 @@ Conceptually:
 }
 ```
 
+An update uses the same fixed `capability_invoke` tool:
+
+```json
+{
+  "name": "capability_invoke",
+  "arguments": {
+    "capabilityId": "devspace.providers.update",
+    "arguments": {
+      "providerId": "example.dynamic.mcp",
+      "manifest": { "apiVersion": "devspace.capabilities/v1", "kind": "McpProvider", "metadata": { "id": "example.dynamic.mcp" }, "spec": {} }
+    }
+  }
+}
+```
+
+The abbreviated `manifest` above only illustrates the envelope; a real request
+must include a complete manifest accepted by the schema.
+
 `reload` constructs a new downstream client from the persisted manifest, stops
 the old child/connection, swaps the registration, rediscovers its tools, and
 increments the catalog revision. With `discoverAllTools=true`, downstream tool-list
@@ -108,7 +160,8 @@ untrusted connection metadata and never become executable Agent instructions.
 
 Provider manifests are stored as current-user-owned regular files with mode
 `0600`; symlink manifests and group/world-readable manifests fail closed.
-Lifecycle updates use an atomic file replacement. `remove` is recoverable: the
+Lifecycle updates use an atomic file replacement. `update` restores the previous
+file and live registration when the replacement cannot become usable. `remove` is recoverable: the
 manifest moves into `DEVSPACE_CAPABILITY_CONFIG_DIR/.removed/`; if runtime
 removal fails it is restored, otherwise the Provider is stopped and its live
 catalog entries are retired.

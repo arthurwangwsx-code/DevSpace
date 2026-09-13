@@ -4,6 +4,7 @@ import {
   archiveMcpProviderManifest,
   loadMcpProviderManifests,
   parseMcpProviderManifest,
+  replaceMcpProviderManifest,
   restoreArchivedMcpProviderManifest,
   setMcpProviderEnabled,
   writeMcpProviderManifest,
@@ -53,6 +54,74 @@ export class CapabilityProviderAdmin {
         throw error;
       }
       return this.result(manifest.metadata.id, { installed: true, path });
+    });
+  }
+
+  update(
+    principal: CapabilityPrincipal,
+    providerId: string,
+    value: unknown,
+  ): Promise<JsonValue> {
+    return this.serial(async () => {
+      this.requireAdmin(principal);
+      const manifest = parseMcpProviderManifest(value);
+      if (manifest.metadata.id !== providerId) {
+        throw new CapabilityError(
+          "invalid_arguments",
+          `Manifest metadata.id must match providerId ${providerId}.`,
+        );
+      }
+      const { path, previous } = replaceMcpProviderManifest(
+        providerId,
+        manifest,
+        this.config.configDir,
+      );
+      try {
+        await this.runtime.reloadProvider(
+          principal,
+          createMcpProviderRegistration(manifest, this.environment),
+        );
+        this.requireUsable(providerId, manifest.spec.enabled, "updated");
+      } catch (error) {
+        let rollbackError: unknown;
+        try {
+          replaceMcpProviderManifest(providerId, previous, this.config.configDir);
+          await this.runtime.reloadProvider(
+            principal,
+            createMcpProviderRegistration(previous, this.environment),
+          );
+          this.requireUsable(providerId, previous.spec.enabled, "restored");
+        } catch (candidate) {
+          rollbackError = candidate;
+        }
+        if (rollbackError) {
+          throw new CapabilityError(
+            "internal_error",
+            "Provider update failed and the previous Provider could not be restored.",
+            {
+              cause: error,
+              details: {
+                providerId,
+                rollbackError: rollbackError instanceof Error
+                  ? rollbackError.message
+                  : "unknown rollback failure",
+              },
+            },
+          );
+        }
+        throw new CapabilityError(
+          "provider_unavailable",
+          "Updated Provider did not become usable; the previous configuration was restored.",
+          {
+            cause: error,
+            details: {
+              providerId,
+              updateError: error instanceof Error ? error.message : "unknown update failure",
+            },
+          },
+        );
+      }
+      return this.result(providerId, { updated: true, path });
     });
   }
 
@@ -121,6 +190,27 @@ export class CapabilityProviderAdmin {
       .find(({ manifest }) => manifest.metadata.id === providerId);
     if (!loaded) throw new CapabilityError("capability_not_found", `Unknown configured provider: ${providerId}`);
     return loaded;
+  }
+
+  private requireUsable(providerId: string, enabled: boolean, phase: string): void {
+    const health = this.runtime.supervisor.getHealth(providerId);
+    const accepted = enabled
+      ? health?.state === "ready" || health?.state === "degraded"
+      : health?.state === "disabled";
+    if (!accepted) {
+      throw new CapabilityError(
+        "provider_unavailable",
+        `Provider was not usable after it was ${phase}.`,
+        {
+          details: {
+            providerId,
+            phase,
+            state: health?.state ?? "unknown",
+            ...(health?.reasonCode ? { reasonCode: health.reasonCode } : {}),
+          },
+        },
+      );
+    }
   }
 
   private requireAdmin(principal: CapabilityPrincipal): void {

@@ -7,6 +7,7 @@ import {
   archiveMcpProviderManifest,
   loadMcpProviderManifests,
   parseMcpProviderManifest,
+  replaceMcpProviderManifest,
   setMcpProviderEnabled,
 } from "./mcp-provider-manifest.js";
 
@@ -94,6 +95,24 @@ try {
   assert.equal(JSON.parse(readFileSync(installed, "utf8")).spec.enabled, false);
   setMcpProviderEnabled("test.external.mcp", true, join(root, "installed"));
   assert.equal(JSON.parse(readFileSync(installed, "utf8")).spec.enabled, true);
+  const updated = parseMcpProviderManifest({
+    ...parsed,
+    metadata: { ...parsed.metadata, title: "Updated Provider" },
+  });
+  const replacement = replaceMcpProviderManifest(
+    "test.external.mcp",
+    updated,
+    join(root, "installed"),
+  );
+  assert.equal(replacement.path, installed);
+  assert.equal(replacement.previous.metadata.title, undefined);
+  assert.equal(JSON.parse(readFileSync(installed, "utf8")).metadata.title, "Updated Provider");
+  assert.throws(() => replaceMcpProviderManifest(
+    "test.external.mcp",
+    parseMcpProviderManifest({ ...updated, metadata: { id: "test.external.other" } }),
+    join(root, "installed"),
+  ), /manifest id must remain test\.external\.mcp/);
+  assert.equal(JSON.parse(readFileSync(installed, "utf8")).metadata.title, "Updated Provider");
   const archived = archiveMcpProviderManifest("test.external.mcp", join(root, "installed"));
   assert.equal(existsSync(archived.path), false);
   assert.equal(existsSync(archived.archivedPath), true);

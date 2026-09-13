@@ -145,6 +145,17 @@ export function createCapabilityHttpRouter(options: CapabilityHttpRouterOptions)
     }
     return requireProviderAdmin(options).install(principal(req), body.manifest);
   }));
+  router.put("/admin/providers/:providerId", ...admin, handle(options.runtime, (req) => {
+    const body = objectBody(req.body);
+    if (!("manifest" in body)) {
+      throw new CapabilityError("invalid_arguments", "manifest is required.");
+    }
+    return requireProviderAdmin(options).update(
+      principal(req),
+      pathParam(req.params.providerId, "providerId"),
+      body.manifest,
+    );
+  }));
   router.post("/admin/providers/:providerId/actions", ...admin, handle(options.runtime, (req) => {
     const body = objectBody(req.body);
     const action = optionalEnum(body.action, ["enable", "disable", "reload"] as const, "action");
