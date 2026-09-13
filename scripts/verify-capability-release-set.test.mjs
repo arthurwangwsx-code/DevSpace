@@ -24,6 +24,20 @@ try {
     ],
     "browser-transition": ["production_service_identity", "production_browser_lock_matrix"],
   };
+
+  for (const [lane, required] of Object.entries(expected)) {
+    const listed = spawnSync(process.execPath, [
+      join(root, "node_modules", "tsx", "dist", "cli.mjs"),
+      join(root, "scripts", "test-capability-release.ts"),
+      "--lane", lane,
+      "--list",
+    ], { cwd: root, encoding: "utf8" });
+    assert.equal(listed.status, 0, listed.stderr || listed.stdout);
+    const names = JSON.parse(listed.stdout).gates.map((gate) => gate.name);
+    assert.deepEqual(names, required, `${lane} release lane must match the current gate contract`);
+    assert.equal(new Set(names).size, names.length, `${lane} release lane gates must be unique`);
+  }
+
   const paths = {};
   for (const [lane, required] of Object.entries(expected)) {
     const declared = lane === "locked"
