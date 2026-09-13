@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CapabilityError } from "../errors.js";
 import { parseMcpProviderManifest } from "../mcp-provider-manifest.js";
@@ -12,10 +15,27 @@ assert.equal(generated.spec.tools.length, 14);
 const generatedById = new Map(generated.spec.tools.map((tool) => [tool.capabilityId, tool]));
 assert.equal(generatedById.get("desktop.macos.list_windows")!.requiresLease, true);
 assert.equal(generatedById.get("desktop.macos.list_windows")!.permissions.length, 0);
-assert.equal(generatedById.get("desktop.macos.snapshot_app")!.version, "2.0.0");
+assert.equal(generatedById.get("desktop.macos.snapshot_app")!.version, "2.1.0");
 assert.equal(generatedById.get("desktop.macos.screenshot_window")!.effects.readOnly, true);
 assert.equal(generatedById.get("desktop.macos.screenshot_window")!.permissions[0]!.id, "macos.screen-capture");
 assert.equal(generatedById.get("desktop.macos.click_element")!.effects.readOnly, false);
+
+const appRoot = mkdtempSync(join(tmpdir(), "devspace-desktop-manifest-test-"));
+try {
+  const bundle = join(appRoot, "DevSpaceDesktopHost.app");
+  const executable = join(bundle, "Contents", "MacOS", "devspace-desktop-helper");
+  mkdirSync(join(bundle, "Contents", "MacOS"), { recursive: true });
+  writeFileSync(join(bundle, "Contents", "Info.plist"), "<plist/>");
+  writeFileSync(executable, "#!/bin/sh\nexit 0\n");
+  chmodSync(executable, 0o755);
+  const appManifest = createMacosDesktopManifest(executable, "darwin");
+  assert.equal(appManifest.spec.transport.type, "stdio");
+  assert.equal(appManifest.spec.transport.command, process.execPath);
+  assert.equal(appManifest.spec.transport.args.at(-1), realpathSync(bundle));
+  assert.match(appManifest.spec.transport.args[0]!, /launchservices-stdio-bridge\.mjs$/);
+} finally {
+  rmSync(appRoot, { recursive: true, force: true });
+}
 
 const fixture = fileURLToPath(new URL("../../../test-fixtures/fake-desktop-helper-mcp.ts", import.meta.url));
 const manifest = parseMcpProviderManifest({
@@ -30,6 +50,13 @@ await provider.start(context());
 try {
   assert.equal((await provider.health(new AbortController().signal)).state, "ready");
   const discovered = await provider.discover(new AbortController().signal);
+  const activated = discovered.find(({ descriptor }) => descriptor.id === "desktop.macos.activate_app")!;
+  const activatedProperties = activated.descriptor.inputSchema.properties as Record<string, unknown> | undefined;
+  assert.equal(activatedProperties?.bundleId, undefined);
+  assert.equal(activatedProperties?.processId, undefined);
+  assert.deepEqual(activated.descriptor.inputSchema.required ?? [], []);
+  const click = discovered.find(({ descriptor }) => descriptor.id === "desktop.macos.click_point")!;
+  assert.deepEqual(click.descriptor.inputSchema.required, ["x", "y"]);
   const lease = await provider.open({
     resourceType: "app_window",
     selector: { bundleId: "com.example.fixture" },

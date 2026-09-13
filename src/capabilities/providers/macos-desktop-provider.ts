@@ -1,8 +1,10 @@
-import { accessSync, constants, realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { accessSync, constants, existsSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { CapabilityError } from "../errors.js";
 import { parseMcpProviderManifest, type McpProviderManifest } from "../mcp-provider-manifest.js";
 import type {
+  ProviderCapability,
   ProviderInvocation,
   ProviderInvocationContext,
   ProviderLease,
@@ -29,6 +31,20 @@ const MUTATION = { readOnly: false, destructive: false, idempotent: false, openW
 
 export class MacosDesktopProvider extends McpClientProvider {
   private serial = Promise.resolve();
+
+  override async discover(signal: AbortSignal): Promise<ProviderCapability[]> {
+    const capabilities = await super.discover(signal);
+    return capabilities.map((capability) => {
+      if (!capability.descriptor.execution.requiresLease) return capability;
+      return {
+        ...capability,
+        descriptor: {
+          ...capability.descriptor,
+          inputSchema: leaseScopedInputSchema(capability.descriptor.inputSchema),
+        },
+      };
+    });
+  }
 
   override async health(signal: AbortSignal): Promise<ProviderHealth> {
     const transportHealth = await super.health(signal);
@@ -112,19 +128,33 @@ export class MacosDesktopProvider extends McpClientProvider {
   }
 }
 
+function leaseScopedInputSchema(inputSchema: JsonObject): JsonObject {
+  const schema = structuredClone(inputSchema);
+  const properties = schema.properties;
+  if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+    delete properties.bundleId;
+    delete properties.processId;
+  }
+  if (Array.isArray(schema.required)) {
+    schema.required = schema.required.filter((name) => name !== "bundleId" && name !== "processId");
+  }
+  return schema;
+}
+
 export function createMacosDesktopManifest(
   command: string,
   platform: NodeJS.Platform = process.platform,
 ): McpProviderManifest {
   if (platform !== "darwin") throw new Error("The macOS desktop provider requires macOS.");
   const resolved = desktopExecutable(command);
+  const transport = desktopTransport(resolved);
   return parseMcpProviderManifest({
     apiVersion: "devspace.capabilities/v1",
     kind: "McpProvider",
     metadata: { id: PROVIDER_ID, title: "macOS Accessibility Desktop Helper" },
     spec: {
       enabled: true,
-      transport: { type: "stdio", command: resolved, args: [] },
+      transport,
       tools: [
         mapping("desktop_status", "desktop.macos.status", "读取桌面 Helper 权限状态", false, READ_ONLY, STATUS_REQUIREMENTS),
         mapping("desktop_list_apps", "desktop.macos.list_apps", "列出正在运行的 GUI 应用", false, READ_ONLY, LOCKED_REQUIREMENTS),
@@ -145,6 +175,27 @@ export function createMacosDesktopManifest(
   });
 }
 
+function desktopTransport(executable: string) {
+  const bundlePath = appBundleForExecutable(executable);
+  if (!bundlePath) return { type: "stdio" as const, command: executable, args: [] };
+  const bridge = fileURLToPath(new URL("../../../scripts/macos/launchservices-stdio-bridge.mjs", import.meta.url));
+  accessSync(bridge, constants.R_OK);
+  return {
+    type: "stdio" as const,
+    command: process.execPath,
+    args: [bridge, bundlePath],
+  };
+}
+
+function appBundleForExecutable(executable: string): string | undefined {
+  if (dirname(executable).split("/").at(-1) !== "MacOS") return undefined;
+  const contentsPath = dirname(dirname(executable));
+  if (contentsPath.split("/").at(-1) !== "Contents") return undefined;
+  const bundlePath = dirname(contentsPath);
+  if (!bundlePath.endsWith(".app") || !existsSync(join(bundlePath, "Contents", "Info.plist"))) return undefined;
+  return bundlePath;
+}
+
 function mapping(
   tool: string,
   capabilityId: string,
@@ -157,7 +208,7 @@ function mapping(
     tool,
     capabilityId,
     title,
-    version: requiresLease ? "2.0.0" : "1.0.0",
+    version: requiresLease ? "2.1.0" : "1.0.0",
     tags: ["desktop", "macos", effects.readOnly ? "read" : "mutation"],
     aliases: [],
     effects,

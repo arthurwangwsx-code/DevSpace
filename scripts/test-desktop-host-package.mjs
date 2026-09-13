@@ -36,6 +36,22 @@ try {
   assert.equal(result.permissionProbeTransport, "launch-services");
   assert.equal(result.permissions?.version, "0.4.1");
   assert.equal(waitForProcessExit(executable, 3_000), true, "permission probe helper remained running");
+  const bridgeRequest = [
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: {
+      protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "bridge-test", version: "1" },
+    } },
+    { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "desktop_status", arguments: {} } },
+  ].map((value) => JSON.stringify(value)).join("\n") + "\n";
+  const bridge = spawnSync(process.execPath, ["scripts/macos/launchservices-stdio-bridge.mjs", bundle], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    input: bridgeRequest,
+    timeout: 10_000,
+  });
+  assert.equal(bridge.status, 0, `${bridge.stderr}\n${bridge.stdout}`);
+  const bridgeReplies = bridge.stdout.trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(bridgeReplies[0]?.result?.serverInfo?.version, "0.4.1");
+  assert.equal(bridgeReplies[1]?.result?.structuredContent?.version, "0.4.1");
   const client = new Client({ name: "desktop-host-package-test", version: "1.0.0" });
   const transport = new StdioClientTransport({ command: executable, args: [], stderr: "pipe" });
   try {

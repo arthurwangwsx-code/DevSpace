@@ -391,17 +391,40 @@ func desktopStatus() -> [String: Any] {
 }
 
 func listApps() -> [[String: Any]] {
-    NSWorkspace.shared.runningApplications
+    var applications = Dictionary(uniqueKeysWithValues: NSWorkspace.shared.runningApplications
         .filter { $0.activationPolicy == .regular && !$0.isTerminated }
-        .compactMap { app in
-            guard let bundleId = app.bundleIdentifier else { return nil }
-            return [
-                "bundleId": bundleId,
-                "name": app.localizedName ?? "",
-                "processId": app.processIdentifier,
-                "frontmost": app.isActive,
-            ] as [String: Any]
+        .map { ($0.processIdentifier, $0) })
+
+    // A long-lived LSUIElement host does not necessarily pump AppKit's main run loop, so
+    // NSWorkspace's runningApplications snapshot can lag behind applications launched after
+    // the helper. Merge the owners of currently visible layer-zero windows. This keeps the
+    // API constrained to real GUI applications instead of exposing every background process.
+    if let entries = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements],
+        kCGNullWindowID
+    ) as? [[String: Any]] {
+        for entry in entries {
+            guard let owner = entry[kCGWindowOwnerPID as String] as? NSNumber,
+                  let layer = entry[kCGWindowLayer as String] as? NSNumber,
+                  layer.intValue == 0 else { continue }
+            let processId = owner.int32Value
+            guard applications[processId] == nil,
+                  let app = NSRunningApplication(processIdentifier: processId),
+                  app.activationPolicy == .regular,
+                  !app.isTerminated else { continue }
+            applications[processId] = app
         }
+    }
+
+    return applications.values.compactMap { app in
+        guard let bundleId = app.bundleIdentifier else { return nil }
+        return [
+            "bundleId": bundleId,
+            "name": app.localizedName ?? "",
+            "processId": app.processIdentifier,
+            "frontmost": app.isActive,
+        ] as [String: Any]
+    }
         .sorted { ($0["bundleId"] as? String ?? "") < ($1["bundleId"] as? String ?? "") }
 }
 

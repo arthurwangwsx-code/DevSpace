@@ -15,6 +15,7 @@ const artifactDir = join(options.outputRoot, runId);
 const steps: Step[] = [];
 const leases = new Set<string>();
 const fixturePids = new Set<number>();
+const baselineFixturePids = new Set<number>();
 let session: Awaited<ReturnType<SystemSessionStateProbe["probe"]>> | undefined;
 let failure: string | undefined;
 
@@ -31,6 +32,7 @@ try {
   });
 
   const alreadyRunning = await fixtureApps();
+  for (const { processId } of alreadyRunning) baselineFixturePids.add(processId);
   assert.equal(alreadyRunning.length, 0,
     `desktop fixture is already running with PID(s): ${alreadyRunning.map(({ processId }) => processId).join(",")}`);
   const firstPid = await timed("launch_fixture_generation_1", launchFixture);
@@ -143,6 +145,9 @@ try {
 } finally {
   for (const leaseId of [...leases]) await closeLease(leaseId).catch(() => {});
   for (const processId of [...fixturePids]) await terminateProcess(processId).catch(() => {});
+  for (const processId of await fixtureProcessIdsFromSystem()) {
+    if (!baselineFixturePids.has(processId)) await terminateProcess(processId).catch(() => {});
+  }
 }
 
 const report = {
@@ -217,6 +222,17 @@ async function fixtureApps(): Promise<Array<{ processId: number; name?: string }
     const app = entry as Record<string, unknown>;
     if (app.bundleId !== BUNDLE_ID || typeof app.processId !== "number") return [];
     return [{ processId: app.processId, ...(typeof app.name === "string" ? { name: app.name } : {}) }];
+  });
+}
+
+async function fixtureProcessIdsFromSystem(): Promise<number[]> {
+  const executable = join(options.fixtureApp, "Contents", "MacOS", "DevSpaceDesktopFixture");
+  const { stdout } = await execFileAsync("/bin/ps", ["-axo", "pid=,command="], {
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  return stdout.split("\n").flatMap((line) => {
+    const match = line.match(/^\s*(\d+)\s+(.+)$/);
+    return match?.[2] === executable ? [Number(match[1])] : [];
   });
 }
 
