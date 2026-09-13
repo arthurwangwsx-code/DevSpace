@@ -63,17 +63,23 @@ async function runFixtureCanary(client: Client, appPath: string): Promise<Record
     assert.equal(activated.isError, undefined);
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 200));
     let beforeJson = "";
+    let beforeTree: unknown;
     for (let attempt = 0; attempt < 30; attempt += 1) {
       const before = await client.callTool({
         name: "desktop_snapshot_app",
         arguments: { bundleId: "com.devspace.desktop-fixture", maxDepth: 8, maxNodes: 500 },
       });
+      beforeTree = before.structuredContent;
       beforeJson = JSON.stringify(before.structuredContent);
       if (beforeJson.includes("DevSpace Fixture Label")) break;
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
     }
     assert.match(beforeJson, /DevSpace Fixture Label/);
     assert.doesNotMatch(beforeJson, /DO_NOT_LEAK_SECURE_VALUE/);
+    const button = findAxNode(beforeTree, (node) => node.title === "Increment 0");
+    const input = findAxNode(beforeTree, (node) => node.value === "fixture-start");
+    assert.ok(button, "fixture button is missing from the AX snapshot");
+    assert.ok(input, "fixture input is missing from the AX snapshot");
     const screenshot = await client.callTool({
       name: "desktop_screenshot_app",
       arguments: { bundleId: "com.devspace.desktop-fixture", maxWidth: 800, maxHeight: 600 },
@@ -86,20 +92,101 @@ async function runFixtureCanary(client: Client, appPath: string): Promise<Record
     assert.equal(typeof screenshotValue.data, "string");
     assert.deepEqual(Buffer.from(screenshotValue.data as string, "base64").subarray(0, 8),
       Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 1_100));
+
+    await waitForUserYield();
+    const clicked = await client.callTool({
+      name: "desktop_click_point",
+      arguments: { bundleId: "com.devspace.desktop-fixture", ...center(button) },
+    });
+    assert.equal(clicked.isError, undefined);
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    const afterClick = await client.callTool({
+      name: "desktop_snapshot_app",
+      arguments: { bundleId: "com.devspace.desktop-fixture", maxDepth: 8, maxNodes: 500 },
+    });
+    assert.match(JSON.stringify(afterClick.structuredContent), /Clicked 1/);
+
+    await waitForUserYield();
+    const outsideClick = await client.callTool({
+      name: "desktop_click_point",
+      arguments: { bundleId: "com.devspace.desktop-fixture", x: -10_000, y: -10_000 },
+    });
+    assert.equal(outsideClick.isError, true);
+
+    await waitForUserYield();
+    const focused = await client.callTool({
+      name: "desktop_click_point",
+      arguments: { bundleId: "com.devspace.desktop-fixture", ...center(input) },
+    });
+    assert.equal(focused.isError, undefined);
+    await waitForUserYield();
     const typed = await client.callTool({
       name: "desktop_type_text",
       arguments: { bundleId: "com.devspace.desktop-fixture", text: "typed-by-devspace-helper" },
     });
     assert.equal(typed.isError, undefined);
+    await waitForUserYield();
+    const pressed = await client.callTool({
+      name: "desktop_press_key",
+      arguments: { bundleId: "com.devspace.desktop-fixture", key: "Left" },
+    });
+    assert.equal(pressed.isError, undefined);
+    await waitForUserYield();
+    const rejectedKey = await client.callTool({
+      name: "desktop_press_key",
+      arguments: { bundleId: "com.devspace.desktop-fixture", key: "A" },
+    });
+    assert.equal(rejectedKey.isError, true);
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
     const after = await client.callTool({
       name: "desktop_snapshot_app",
       arguments: { bundleId: "com.devspace.desktop-fixture", maxDepth: 8, maxNodes: 500 },
     });
     assert.match(JSON.stringify(after.structuredContent), /typed-by-devspace-helper/);
-    return { fixtureAxInputAndScreenshotPassed: true };
+    return { fixtureAxScreenshotClickInputAndKeyPassed: true };
   } finally {
     if (processId !== undefined) process.kill(processId, "SIGTERM");
   }
+}
+
+type AxNode = {
+  title?: unknown;
+  value?: unknown;
+  position?: { x?: unknown; y?: unknown };
+  size?: { width?: unknown; height?: unknown };
+  children?: unknown;
+};
+
+function findAxNode(value: unknown, matches: (node: AxNode) => boolean): AxNode | undefined {
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = findAxNode(child, matches);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const node = value as AxNode;
+  if (matches(node)) return node;
+  for (const child of Object.values(node)) {
+    const found = findAxNode(child, matches);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function center(node: AxNode): { x: number; y: number } {
+  const x = node.position?.x;
+  const y = node.position?.y;
+  const width = node.size?.width;
+  const height = node.size?.height;
+  assert.equal(typeof x, "number");
+  assert.equal(typeof y, "number");
+  assert.equal(typeof width, "number");
+  assert.equal(typeof height, "number");
+  return { x: x + width / 2, y: y + height / 2 };
+}
+
+function waitForUserYield(): Promise<void> {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, 1_100));
 }
