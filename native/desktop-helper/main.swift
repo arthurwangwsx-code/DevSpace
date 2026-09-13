@@ -3,7 +3,7 @@ import ApplicationServices
 import Foundation
 import ScreenCaptureKit
 
-let helperVersion = "0.4.2"
+let helperVersion = "0.4.3"
 let userActivityYieldSeconds = 1.0
 let snapshotMaxAgeSeconds = 30.0
 let snapshotCacheLimit = 16
@@ -303,7 +303,7 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         ) == .success else {
             throw HelperError(message: "The accessibility element could not be focused.")
         }
-        try requireFocusedElementOwnedByProcess(app.processIdentifier)
+        _ = try focusedElementOwnedByProcess(app.processIdentifier)
         return [
             "focused": true, "verified": true,
             "snapshotId": snapshotId, "elementId": elementId,
@@ -356,8 +356,22 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         let bundleId = try requiredString(arguments, "bundleId")
         let app = try runningApplication(bundleId, expectedProcessId(arguments))
         try requireFrontmost(app)
-        try requireFocusedElementOwnedByProcess(app.processIdentifier)
-        var units = Array(try requiredString(arguments, "text").utf16)
+        let focused = try focusedElementOwnedByProcess(app.processIdentifier)
+        let text = try requiredString(arguments, "text")
+        if AXUIElementSetAttributeValue(
+            focused,
+            kAXSelectedTextAttribute as CFString,
+            text as CFTypeRef
+        ) == .success {
+            return [
+                "typed": true,
+                "characters": text.utf16.count,
+                "method": "AXSelectedText",
+                "bundleId": bundleId,
+                "processId": app.processIdentifier,
+            ]
+        }
+        var units = Array(text.utf16)
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
         else { throw HelperError(message: "Could not create keyboard events.") }
@@ -368,6 +382,7 @@ func callTool(_ name: String, _ arguments: [String: Any]) throws -> [String: Any
         return [
             "typed": true,
             "characters": units.count,
+            "method": "CGEventUnicode",
             "bundleId": bundleId,
             "processId": app.processIdentifier,
         ]
@@ -467,7 +482,7 @@ func pressKey(_ arguments: [String: Any]) throws -> [String: Any] {
     let bundleId = try requiredString(arguments, "bundleId")
     let app = try runningApplication(bundleId, expectedProcessId(arguments))
     try requireFrontmost(app)
-    try requireFocusedElementOwnedByProcess(app.processIdentifier)
+    _ = try focusedElementOwnedByProcess(app.processIdentifier)
     let key = try requiredString(arguments, "key")
     guard let code = keyCode(key) else { throw HelperError(message: "Key is not allowlisted.") }
     let modifiers = try optionalStringArray(arguments, "modifiers")
@@ -682,7 +697,7 @@ func requirePointInApplicationWindow(_ app: NSRunningApplication, _ point: CGPoi
     }
 }
 
-func requireFocusedElementOwnedByProcess(_ processId: pid_t) throws {
+func focusedElementOwnedByProcess(_ processId: pid_t) throws -> AXUIElement {
     let system = AXUIElementCreateSystemWide()
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(
@@ -698,6 +713,7 @@ func requireFocusedElementOwnedByProcess(_ processId: pid_t) throws {
           focusedProcessId == processId else {
         throw HelperError(message: "The focused element does not belong to the leased application.")
     }
+    return element
 }
 
 func cachedElement(
