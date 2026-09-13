@@ -187,11 +187,15 @@ devspace doctor
 
 ## Documentation
 
-- [Setup Guide](https://github.com/Waishnav/devspace/blob/main/docs/setup.md)
-- [ChatGPT Coding Workflow](https://github.com/Waishnav/devspace/blob/main/docs/chatgpt-coding-workflow.md)
-- [Configuration Reference](https://github.com/Waishnav/devspace/blob/main/docs/configuration.md)
-- [Security Model](https://github.com/Waishnav/devspace/blob/main/docs/security.md)
-- [Troubleshooting Gotchas](https://github.com/Waishnav/devspace/blob/main/docs/gotchas.md)
+- [Product Capability Map](docs/product-capability-map.md) — start here for the complete product design, feature inventory, architecture boundaries, and documentation map
+- [Setup Guide](docs/setup.md)
+- [ChatGPT Coding Workflow](docs/chatgpt-coding-workflow.md)
+- [Configuration Reference](docs/configuration.md)
+- [Security Model](docs/security.md)
+- [Troubleshooting Gotchas](docs/gotchas.md)
+- [Capability API Architecture Principles](docs/capability-api-principles.md)
+- [Browser Extension Provider](docs/browser-extension-architecture.md)
+- [macOS Desktop Helper](docs/macos-desktop-helper.md)
 - [Running DevSpace in Lima (Chinese)](docs/lima-devspace.md)
 - [MCP Resource Control and High-Concurrency Stability (Chinese)](docs/mcp-resource-control.md)
 - [Universal Capability Runtime Implementation Plan (Chinese)](docs/capability-runtime-implementation-plan.md)
