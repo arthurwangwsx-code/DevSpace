@@ -169,6 +169,18 @@ export class McpClientProvider implements CapabilityProvider {
       { signal },
     );
     if (result.isError) {
+      const content = Array.isArray(result.content) ? result.content : [];
+      const text = content
+        .filter((item): item is { type: "text"; text: string } => Boolean(
+          item && typeof item === "object" && item.type === "text" && typeof item.text === "string",
+        ))
+        .map((item) => item.text)
+        .join(" ");
+      if (/accessibility permission is required|screen(?: |-)capture permission is required/i.test(text)) {
+        throw new CapabilityError("permission_required", "The downstream provider requires local user approval.", {
+          details: { action: "Grant the requested permission to the stable provider executable, then restart it." },
+        });
+      }
       throw new CapabilityError("internal_error", "The downstream MCP tool returned an error.");
     }
     return result.structuredContent

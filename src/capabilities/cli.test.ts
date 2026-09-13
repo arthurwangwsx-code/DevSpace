@@ -72,6 +72,14 @@ try {
   assert.equal(chrome.code, 0);
   assert.equal(JSON.parse(chrome.stdout).connection, "current-chrome-auto-connect");
 
+  if (process.platform === "darwin") {
+    const desktop = await runCli([
+      "providers", "add-desktop", "--command", process.execPath,
+    ], { ...env, DEVSPACE_CAPABILITY_CONFIG_DIR: join(root, "desktop-providers") });
+    assert.equal(desktop.code, 0);
+    assert.equal(JSON.parse(desktop.stdout).providerId, "desktop.macos.accessibility");
+  }
+
   const principalId = `local:${process.getuid?.() ?? "user"}`;
   const grant = await runCli([
     "grants", "add", "--url", url,

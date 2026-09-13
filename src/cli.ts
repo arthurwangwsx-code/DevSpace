@@ -45,6 +45,7 @@ import {
   createChromeDevToolsManifest,
   findChromeDevToolsMcpCommand,
 } from "./capabilities/providers/chrome-devtools-provider.js";
+import { createMacosDesktopManifest } from "./capabilities/providers/macos-desktop-provider.js";
 
 type Command = "serve" | "init" | "doctor" | "verify" | "config" | "agents" | "capabilities" | "providers" | "grants" | "help" | "version";
 const require = createRequire(import.meta.url);
@@ -392,6 +393,7 @@ function printHelp(): void {
       "  devspace capabilities list|search|describe|open|call|status|cancel|close [options]",
       "  devspace providers list [--json]",
       "  devspace providers add-chrome [--command <absolute-path>]",
+      "  devspace providers add-desktop --command <absolute-path>",
       "  devspace grants list|add|revoke [options]",
       "  devspace -v, --version   Print the installed version",
       "",
@@ -497,6 +499,23 @@ async function runCapabilitiesCommand(args: string[]): Promise<void> {
 
 async function runProvidersCommand(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
+  if (subcommand === "add-desktop") {
+    if (rest[0] !== "--command" || !rest[1] || rest.length !== 2 || !isAbsolute(rest[1])) {
+      throw new Error("Usage: devspace providers add-desktop --command <absolute-path>");
+    }
+    const config = loadConfig();
+    const target = writeMcpProviderManifest(
+      createMacosDesktopManifest(rest[1]),
+      config.capabilities.configDir,
+    );
+    console.log(JSON.stringify({
+      installed: true,
+      path: target,
+      providerId: "desktop.macos.accessibility",
+      restartRequired: true,
+    }));
+    return;
+  }
   if (subcommand === "add-chrome") {
     let command: string | undefined;
     if (rest.length > 0) {
@@ -532,7 +551,7 @@ async function runProvidersCommand(args: string[]): Promise<void> {
     return;
   }
   if (subcommand !== "list" && subcommand !== "ls") {
-    throw new Error("Usage: devspace providers list [--json] | add-mcp --manifest <absolute-path> | add-chrome [--command <absolute-path>]");
+    throw new Error("Usage: devspace providers list [--json] | add-mcp --manifest <absolute-path> | add-chrome [--command <absolute-path>] | add-desktop --command <absolute-path>");
   }
   const options = capabilityCliOptions(rest);
   await printCapabilityResponse(await capabilityFetch("/providers", options), options);

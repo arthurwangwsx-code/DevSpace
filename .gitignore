@@ -11,3 +11,6 @@ artifacts/stress/
 !/参考工程/README.md
 !/参考工程/sources.lock.json
 !/参考工程/sync-references.mjs
+.build/
+.build/
+.build/
