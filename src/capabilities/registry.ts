@@ -182,7 +182,7 @@ export class CapabilityRegistry {
     const items = [...this.entries.values()]
       .filter(({ descriptor }) => canDiscover(descriptor))
       .filter(({ descriptor }) => query.providerId || query.tag === "internal-backend"
-        || !descriptor.tags.includes("internal-backend"))
+        || !isHiddenBackendCapability(descriptor))
       .filter(({ descriptor }) => !query.providerId || descriptor.providerId === query.providerId)
       .filter(({ descriptor }) => !query.tag || descriptor.tags.includes(query.tag))
       .map((entry) => this.toSummary(entry))
@@ -209,7 +209,7 @@ export class CapabilityRegistry {
     const candidates = [...this.entries.values()]
       .filter(({ descriptor }) => canDiscover(descriptor))
       .filter(({ descriptor }) => providerIds.size > 0 || requiredTags.has("internal-backend")
-        || !descriptor.tags.includes("internal-backend"))
+        || !isHiddenBackendCapability(descriptor))
       .filter(({ descriptor }) => providerIds.size === 0 || providerIds.has(descriptor.providerId))
       .filter(({ descriptor }) => [...requiredTags].every((tag) => descriptor.tags.includes(tag)))
       .map((entry) => ({
@@ -253,6 +253,16 @@ export class CapabilityRegistry {
       },
     };
   }
+}
+
+function isHiddenBackendCapability(descriptor: CapabilityDescriptor): boolean {
+  if (descriptor.tags.includes("internal-backend")) return true;
+  // Migration compatibility: catalogs created before BrowserControlProvider
+  // existed may still contain the old implementation-facing extension IDs.
+  // Keep them available for explicit provider diagnostics but never surface
+  // them in the default second-level capability index.
+  return descriptor.providerId === "browser.chrome.extension"
+    || descriptor.id.startsWith("browser.extension.");
 }
 
 function capabilityMetadataSearchTerms(metadata: JsonObject | undefined): string[] {

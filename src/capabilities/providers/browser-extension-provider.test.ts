@@ -66,7 +66,7 @@ extension.on("data", (chunk) => {
 });
 
 const capabilities = await provider.discover(lifetime.signal);
-assert.equal(capabilities.length, 25);
+assert.equal(capabilities.length, 27);
 assert.equal(capabilities.every(({ descriptor }) => descriptor.id.startsWith("browser.")), true);
 assert.equal(capabilities.some(({ descriptor }) => descriptor.id.includes(".extension.")), false);
 assert.equal(capabilities.some(({ descriptor }) => descriptor.id.includes(".chrome.")), false);
@@ -82,7 +82,7 @@ registry.replaceProviderCatalog({
     binding: { invoke: async () => ({ ok: true }) },
   })),
 });
-assert.equal(registry.capabilityCountForProvider("browser.control"), 25);
+assert.equal(registry.capabilityCountForProvider("browser.control"), 27);
 const byId = new Map(capabilities.map((entry) => [entry.descriptor.id, entry]));
 const profiles = byId.get("browser.profile.list")!;
 assert.deepEqual(await provider.invoke({
@@ -97,6 +97,8 @@ assert.ok(byId.get("browser.page.snapshot")?.aliases?.includes("browser.chrome.t
 assert.ok(byId.get("browser.page.snapshot")?.aliases?.includes("browser.extension.snapshot"));
 assert.equal(byId.get("browser.page.evaluate")?.descriptor.effects.openWorld, true);
 assert.ok(byId.get("browser.file.upload"));
+assert.ok(byId.get("browser.file.download_status"));
+assert.ok(byId.get("browser.file.wait_download"));
 assert.equal(byId.get("browser.page.click")?.descriptor.metadata?.domain, "browser");
 assert.equal(byId.get("browser.page.click")?.descriptor.metadata?.resource, "page");
 assert.equal(byId.get("browser.page.click")?.descriptor.metadata?.action, "click");

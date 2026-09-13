@@ -15,6 +15,7 @@ let nativeDisconnectListener;
 let reconnectCallback;
 let nativeConnectCount = 0;
 const downloads = [];
+let downloadState = "complete";
 const debuggerCommands = [];
 const port = {
   onMessage: { addListener(listener) { nativeMessageListener = listener; } },
@@ -57,7 +58,9 @@ const chrome = {
     async sendCommand(_target, method, params = {}) {
       debuggerCommands.push({ method, params });
       if (method === "Runtime.evaluate") {
-        if (String(params.expression).startsWith("document.querySelector")) return { result: { objectId: "object-1" } };
+        if (params.returnByValue !== true && String(params.expression).includes("data-devspace-index")) {
+          return { result: { objectId: "object-1" } };
+        }
         return { result: { value: true, type: "boolean" } };
       }
       if (method === "DOM.describeNode") return { node: { backendNodeId: 99 } };
@@ -70,6 +73,7 @@ const chrome = {
   },
   downloads: {
     async download(options) { downloads.push(options); return 42; },
+    async search({ id }) { return id === 42 ? [{ id: 42, state: downloadState, paused: false, filename: "/tmp/file.txt", url: "https://example.test/file", bytesReceived: 12, totalBytes: 12 }] : []; },
   },
   alarms: {
     create() {},
@@ -130,6 +134,10 @@ assert.equal(tabs.has(7), true);
 const downloaded = await request("download", { clientId: "devspace", url: "https://example.test/file", filename: "file.txt" });
 assert.equal(downloaded.result.downloadId, 42);
 assert.equal(downloads[0].saveAs, false);
+const downloadStatus = await request("download_status", { clientId: "devspace", downloadId: 42 });
+assert.equal(downloadStatus.result.state, "complete");
+const completed = await request("wait_download", { clientId: "devspace", downloadId: 42, timeoutMs: 100 });
+assert.equal(completed.result.filename, "/tmp/file.txt");
 
 const opened = await request("open_tab", { clientId: "devspace", url: "https://fixture.test/" });
 assert.equal(opened.result.ownership, "agent");

@@ -5,6 +5,7 @@ const tabOwner = new Map();
 const attached = new Set();
 const consoleEvents = new Map();
 const networkEvents = new Map();
+const lastNetworkActivity = new Map();
 const MAX_EVENT_BUFFER = 500;
 let port = null;
 let reconnectTimer = null;
@@ -138,14 +139,40 @@ async function openTab(clientId, url = "about:blank") {
 }
 
 const SNAPSHOT_JS = `(() => {
-  const elements = []; const selector = 'a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=combobox],[role=option],[role=menuitem],[contenteditable=true],summary'; let index = 0;
-  for (const el of document.querySelectorAll(selector)) {
-    const r = el.getBoundingClientRect(), s = getComputedStyle(el);
-    if (r.width < 2 || r.height < 2 || s.display === 'none' || s.visibility === 'hidden') continue;
-    const label = (el.getAttribute('aria-label') || el.innerText || el.value || el.getAttribute('title') || el.getAttribute('placeholder') || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
-    el.setAttribute('data-devspace-index', String(index)); elements.push({ index: index++, tag: el.tagName.toLowerCase(), label, x: Math.round(r.left+r.width/2), y: Math.round(r.top+r.height/2) });
-    if (index >= 300) break;
+  const elements = [];
+  const selector = 'a,button,input,textarea,select,[role=button],[role=link],[role=textbox],[role=combobox],[role=option],[role=menuitem],[contenteditable=true],summary';
+  let index = 0;
+  function absolutePoint(el) {
+    let r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+    let win = el.ownerDocument?.defaultView;
+    try {
+      while (win && win !== win.parent && win.frameElement) {
+        const fr = win.frameElement.getBoundingClientRect(); x += fr.left; y += fr.top; win = win.parent;
+      }
+    } catch {}
+    return { x: Math.round(x), y: Math.round(y) };
   }
+  function visit(root, framePath = []) {
+    if (!root || index >= 500) return;
+    for (const el of root.querySelectorAll(selector)) {
+      if (index >= 500) break;
+      const r = el.getBoundingClientRect(), s = el.ownerDocument?.defaultView?.getComputedStyle(el) || getComputedStyle(el);
+      if (r.width < 2 || r.height < 2 || s.display === 'none' || s.visibility === 'hidden') continue;
+      const label = (el.getAttribute('aria-label') || el.innerText || el.value || el.getAttribute('title') || el.getAttribute('placeholder') || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
+      const point = absolutePoint(el);
+      el.setAttribute('data-devspace-index', String(index));
+      const isShadow = typeof ShadowRoot !== 'undefined' && el.getRootNode() instanceof ShadowRoot;
+      elements.push({ index: index++, tag: el.tagName.toLowerCase(), label, x: point.x, y: point.y, ...(framePath.length ? { framePath } : {}), ...(isShadow ? { shadow: true } : {}) });
+    }
+    for (const el of root.querySelectorAll('*')) {
+      if (index >= 500) break;
+      if (el.shadowRoot) visit(el.shadowRoot, framePath);
+      if (el.tagName === 'IFRAME') {
+        try { if (el.contentDocument) visit(el.contentDocument, [...framePath, el.getAttribute('name') || el.id || 'iframe']); } catch {}
+      }
+    }
+  }
+  visit(document);
   return { title: document.title, url: location.href, elements };
 })()`;
 async function snapshot(tabId) {
@@ -165,7 +192,11 @@ async function click(tabId, params) {
 }
 
 async function elementPoint(tabId, index) {
-  const expression = `(() => { const e=document.querySelector('[data-devspace-index="${Number(index)}"]'); if(!e)return null; const r=e.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`;
+  const expression = findElementExpression(index, `
+    let r=e.getBoundingClientRect(), x=r.left+r.width/2, y=r.top+r.height/2, win=e.ownerDocument?.defaultView;
+    try { while(win && win!==win.parent && win.frameElement){ const fr=win.frameElement.getBoundingClientRect(); x+=fr.left; y+=fr.top; win=win.parent; } } catch {}
+    return {x,y};
+  `);
   const point = await send(tabId, "Runtime.evaluate", { expression, returnByValue: true });
   if (!point.result.value) throw new Error(`snapshot element ${index} is unavailable`);
   return point.result.value;
@@ -207,21 +238,20 @@ async function scroll(tabId, p) {
 }
 
 async function selectOption(tabId, index, value) {
-  const script = `(() => {
-    const el=document.querySelector('[data-devspace-index="${Number(index)}"]');
-    if(!el || el.tagName !== 'SELECT') return {ok:false};
-    el.value=${JSON.stringify(String(value))};
-    el.dispatchEvent(new Event('input',{bubbles:true}));
-    el.dispatchEvent(new Event('change',{bubbles:true}));
-    return {ok:true,value:el.value};
-  })()`;
+  const script = findElementExpression(index, `
+    if(e.tagName !== 'SELECT') return {ok:false};
+    e.value=${JSON.stringify(String(value))};
+    e.dispatchEvent(new Event('input',{bubbles:true}));
+    e.dispatchEvent(new Event('change',{bubbles:true}));
+    return {ok:true,value:e.value};
+  `);
   const result = await evaluate(tabId, script, false);
   if (!result.value?.ok) throw new Error(`snapshot element ${index} is not a selectable <select>`);
   return result.value;
 }
 
 async function setInputFiles(tabId, index, files) {
-  const expression = `document.querySelector('[data-devspace-index="${Number(index)}"]')`;
+  const expression = findElementExpression(index, "return e;");
   const evaluated = await send(tabId, "Runtime.evaluate", { expression });
   if (!evaluated.result?.objectId) throw new Error(`snapshot element ${index} is unavailable`);
   const described = await send(tabId, "DOM.describeNode", { objectId: evaluated.result.objectId });
@@ -231,20 +261,85 @@ async function setInputFiles(tabId, index, files) {
   return { files: files.length };
 }
 
+function findElementExpression(index, body) {
+  return `(() => {
+    const wanted=${JSON.stringify(String(Number(index)))};
+    function find(root){
+      if(!root)return null;
+      for(const el of root.querySelectorAll('*')){
+        if(el.getAttribute && el.getAttribute('data-devspace-index')===wanted)return el;
+        if(el.shadowRoot){const found=find(el.shadowRoot);if(found)return found;}
+        if(el.tagName==='IFRAME'){try{const found=find(el.contentDocument);if(found)return found;}catch{}}
+      }
+      return null;
+    }
+    const e=find(document); if(!e)return null;
+    ${body}
+  })()`;
+}
+
 async function waitFor(tabId, p) {
   const timeoutMs = Math.min(Math.max(Number(p.timeoutMs || 5000), 0), 30000);
   const intervalMs = Math.min(Math.max(Number(p.intervalMs || 100), 25), 1000);
   const deadline = Date.now() + timeoutMs;
+  if (p.networkIdleMs !== undefined) await attach(tabId);
   for (;;) {
-    const script = p.selector
-      ? `Boolean(document.querySelector(${JSON.stringify(String(p.selector))}))`
-      : p.text
-        ? `Boolean(document.body && document.body.innerText.includes(${JSON.stringify(String(p.text))}))`
-        : "document.readyState === 'complete'";
-    const result = await evaluate(tabId, script, false);
-    if (result.value === true) return { matched: true };
+    let matched = false;
+    let condition = "load";
+    if (p.urlEquals !== undefined || p.urlContains !== undefined) {
+      const tab = await chrome.tabs.get(tabId);
+      const url = tab.url || "";
+      matched = p.urlEquals !== undefined
+        ? url === String(p.urlEquals)
+        : url.includes(String(p.urlContains));
+      condition = "url";
+    } else if (p.networkIdleMs !== undefined) {
+      const idleMs = Math.min(Math.max(Number(p.networkIdleMs || 500), 0), 30000);
+      const last = lastNetworkActivity.get(tabId) || 0;
+      matched = Date.now() - last >= idleMs;
+      condition = "network_idle";
+    } else {
+      const script = p.selector
+        ? `Boolean(document.querySelector(${JSON.stringify(String(p.selector))}))`
+        : p.text
+          ? `Boolean(document.body && document.body.innerText.includes(${JSON.stringify(String(p.text))}))`
+          : "document.readyState === 'complete'";
+      const result = await evaluate(tabId, script, false);
+      matched = result.value === true;
+      condition = p.selector ? "selector" : p.text ? "text" : "load";
+    }
+    if (matched) return { matched: true, condition };
     if (Date.now() >= deadline) throw new Error("wait condition timed out");
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+async function downloadStatus(downloadId) {
+  const items = await chrome.downloads.search({ id: Number(downloadId) });
+  const item = items?.[0];
+  if (!item) throw new Error(`download ${downloadId} was not found`);
+  return {
+    downloadId: item.id,
+    state: item.state,
+    paused: Boolean(item.paused),
+    filename: item.filename,
+    url: item.url,
+    bytesReceived: item.bytesReceived,
+    totalBytes: item.totalBytes,
+    error: item.error,
+  };
+}
+
+async function waitDownload(downloadId, timeoutMs = 30000, intervalMs = 100) {
+  const timeout = Math.min(Math.max(Number(timeoutMs || 30000), 0), 120000);
+  const interval = Math.min(Math.max(Number(intervalMs || 100), 25), 1000);
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const value = await downloadStatus(downloadId);
+    if (value.state === "complete") return value;
+    if (value.state === "interrupted") throw new Error(`download ${downloadId} was interrupted${value.error ? `: ${value.error}` : ""}`);
+    if (Date.now() >= deadline) throw new Error(`download ${downloadId} timed out`);
+    await new Promise((resolve) => setTimeout(resolve, interval));
   }
 }
 
@@ -278,12 +373,14 @@ function onDebuggerEvent(source, method, params) {
       source: "log", level: entry.level, text: entry.text, url: entry.url, timestamp: entry.timestamp,
     });
   } else if (method === "Network.requestWillBeSent") {
+    lastNetworkActivity.set(tabId, Date.now());
     const request = params.request || {};
     pushBounded(networkEvents, tabId, {
       phase: "request", requestId: params.requestId, method: request.method, url: request.url,
       type: params.type, timestamp: params.timestamp, headers: sanitizeNetworkHeaders(request.headers),
     });
   } else if (method === "Network.responseReceived") {
+    lastNetworkActivity.set(tabId, Date.now());
     const response = params.response || {};
     pushBounded(networkEvents, tabId, {
       phase: "response", requestId: params.requestId, url: response.url, status: response.status,
@@ -355,6 +452,8 @@ const handlers = {
     });
     return { downloadId };
   },
+  download_status: async (p) => downloadStatus(p.downloadId),
+  wait_download: async (p) => waitDownload(p.downloadId, p.timeoutMs, p.intervalMs),
 };
 async function handle(message, replyPort) {
   await ensureStateReady();
@@ -387,6 +486,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   attached.delete(tabId);
   consoleEvents.delete(tabId);
   networkEvents.delete(tabId);
+  lastNetworkActivity.delete(tabId);
 });
 chrome.alarms.create("devspace-reconnect", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "devspace-reconnect") void connect(); });

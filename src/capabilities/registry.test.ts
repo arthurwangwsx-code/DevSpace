@@ -145,6 +145,21 @@ try {
     providerIds: ["browser.chrome.devtools"],
   }).items[0]?.capability.id, "browser.chrome.take_snapshot");
 
+  const legacyExtension = capability("browser.extension.click", "Legacy extension click", ["browser", "extension"]);
+  legacyExtension.descriptor.providerId = "browser.chrome.extension";
+  visibility.replaceProviderCatalog({
+    providerId: "browser.chrome.extension",
+    kind: "legacy-extension",
+    health: ready,
+    capabilities: [legacyExtension],
+  });
+  assert.equal(visibility.search({ query: "legacy extension click" }).items.some(
+    ({ capability }) => capability.id === "browser.extension.click"), false);
+  assert.equal(visibility.search({
+    query: "legacy extension click",
+    providerIds: ["browser.chrome.extension"],
+  }).items.some(({ capability }) => capability.id === "browser.extension.click"), true);
+
   const permissionAware = new CapabilityRegistry();
   const statusCapability = capability("desktop.macos.status", "Desktop status", ["desktop"]);
   statusCapability.descriptor.providerId = "desktop.macos.accessibility";

@@ -197,6 +197,25 @@ redacted JSON/Markdown receipt under `.build/browser-extension-matrix/`.
 - Agent-created tabs and user/adopted tabs have different cleanup semantics.
 - Existing Chrome DevTools provider remains available for deep debugging.
 
+## v0.3 reliability and control additions
+
+- The native host survives DevSpace process restarts and reconnects to the
+  stable Unix socket without requiring a Chrome extension reload.
+- `browser.page.wait` supports selector/text/load plus URL and network-idle
+  conditions.
+- Browser downloads expose status and completion waiting as canonical
+  second-level capabilities.
+- Semantic snapshots and element lookup traverse open Shadow DOM and
+  same-origin iframes so click/select/upload can keep using one stable element
+  index model.
+- Legacy persisted `browser.extension.*` catalog entries are hidden from the
+  default second-level index; they remain visible only through explicit legacy
+  provider diagnostics.
+- Real-profile canonical regression on 2026-09-13 passed 17/17 exercised
+  operations through `browser.control`: snapshot, click, type, select,
+  evaluate, wait, scroll, HTML, console, network, performance, screenshot,
+  navigate, back, forward, reload, and lease cleanup.
+
 ## 2026-09-13 real-profile validation
 
 Validated on the user's installed Chrome profile with extension ID

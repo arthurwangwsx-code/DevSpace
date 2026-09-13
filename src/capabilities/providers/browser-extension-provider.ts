@@ -65,7 +65,7 @@ export class BrowserControlProvider implements CapabilityProvider {
       capability("browser.page.evaluate", "Evaluate JavaScript in an acquired browser page", "evaluate", true, MUTATION, { expression: { type: "string" }, awaitPromise: { type: "boolean" } }, ["expression"], ["browser.extension.evaluate", "page javascript"]),
       capability("browser.page.html", "Read the current browser page HTML", "get_html", true, READ_ONLY, {}, [], ["browser.extension.get_html", "page source", "html"]),
       capability("browser.page.wait", "Wait for a selector, text or page load", "wait_for", true, READ_ONLY, {
-        selector: { type: "string" }, text: { type: "string" }, timeoutMs: { type: "integer", minimum: 0, maximum: 30000 }, intervalMs: { type: "integer", minimum: 25, maximum: 1000 },
+        selector: { type: "string" }, text: { type: "string" }, urlEquals: { type: "string" }, urlContains: { type: "string" }, networkIdleMs: { type: "integer", minimum: 0, maximum: 30000 }, timeoutMs: { type: "integer", minimum: 0, maximum: 30000 }, intervalMs: { type: "integer", minimum: 25, maximum: 1000 },
       }, [], ["browser.extension.wait_for", "wait selector", "wait text", "wait load"]),
       capability("browser.debug.console", "Read buffered browser console messages", "list_console", true, READ_ONLY, { limit: { type: "integer", minimum: 1, maximum: 500 } }, [], ["browser.extension.list_console_messages", "browser.chrome.list_console_messages", "console logs"]),
       capability("browser.debug.network", "Read buffered browser network activity with sensitive headers redacted", "list_network", true, READ_ONLY, { limit: { type: "integer", minimum: 1, maximum: 500 } }, [], ["browser.extension.list_network_requests", "browser.chrome.list_network_requests", "network requests"]),
@@ -73,6 +73,12 @@ export class BrowserControlProvider implements CapabilityProvider {
       capability("browser.file.download", "Download a URL with the selected browser profile", "download", false, MUTATION, {
         url: { type: "string" }, filename: { type: "string" }, saveAs: { type: "boolean" },
       }, ["url"], ["browser.extension.download", "download file"]),
+      capability("browser.file.download_status", "Read browser download status", "download_status", false, READ_ONLY, {
+        downloadId: { type: "integer" }, profileId: { type: "string" },
+      }, ["downloadId"], ["download progress", "download status"]),
+      capability("browser.file.wait_download", "Wait for a browser download to complete", "wait_download", false, READ_ONLY, {
+        downloadId: { type: "integer" }, timeoutMs: { type: "integer", minimum: 0, maximum: 120000 }, intervalMs: { type: "integer", minimum: 25, maximum: 1000 }, profileId: { type: "string" },
+      }, ["downloadId"], ["wait download", "download complete"]),
     ];
   }
   async open(request: ProviderOpenRequest, context: ProviderInvocationContext): Promise<ProviderLease> {
@@ -114,7 +120,15 @@ export class BrowserControlProvider implements CapabilityProvider {
     }
     const leaseProfileId = typeof request.lease?.handle.profileId === "string" ? request.lease.handle.profileId : undefined;
     const profileId = leaseProfileId ?? requestedProfileId;
-    try { return await this.bridge.call(command, params, context.signal, 10_000, profileId); }
+    try {
+      return await this.bridge.call(
+        command,
+        params,
+        context.signal,
+        request.descriptor.execution.defaultTimeoutMs,
+        profileId,
+      );
+    }
     catch (error) {
       if (/not connected|disconnected|connection (?:failed|was replaced)|bridge stopped/i.test(String(error))) {
         throw new CapabilityError("provider_unavailable", "DevSpace Browser Bridge extension is not connected.", { cause: error });
