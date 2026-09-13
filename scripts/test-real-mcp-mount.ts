@@ -40,7 +40,9 @@ let baselineChildCount = 0;
 let childCountAfterInstall = 0;
 let childCountAfterRemove = -1;
 let catalogRevisionAfterInstall = 0;
+let catalogRevisionAfterUpdate = 0;
 let catalogRevisionAfterRemove = 0;
+let updatedCapabilityVersion = "";
 let failure: string | undefined;
 
 try {
@@ -91,6 +93,27 @@ try {
   });
   assert.match(JSON.stringify(searched.structuredContent), /take_snapshot/);
 
+  const updatedManifest = {
+    ...manifest,
+    metadata: { ...manifest.metadata, title: "Updated Real Chrome DevTools MCP" },
+    spec: { ...manifest.spec, discoveredToolVersion: "2.0.0" },
+  };
+  const updated = await invokeManagement(client, "devspace.providers.update", {
+    providerId: "test.real.chrome-devtools",
+    manifest: updatedManifest,
+  });
+  assert.equal(updated.status, "succeeded");
+  assert.equal(numberField(updated.result, "capabilityCount"), capabilityCount);
+  catalogRevisionAfterUpdate = numberField(updated.result, "catalogRevision");
+  assert.ok(catalogRevisionAfterUpdate > catalogRevisionAfterInstall);
+  collectProviderChildren(providerChildren, baselineChildren);
+  const updatedCatalog = await getJson(`${base}/capabilities?providerId=test.real.chrome-devtools&limit=200`);
+  const updatedListPages = updatedCatalog.body.data.items.find((entry: { id?: string }) =>
+    entry.id === "test.real.chrome-devtools.list_pages");
+  updatedCapabilityVersion = updatedListPages?.version ?? "";
+  assert.equal(updatedCapabilityVersion, "2.0.0");
+  assert.equal((await client.listTools()).tools.length, 8);
+
   const disabled = await postJson(`${base}/admin/providers/test.real.chrome-devtools/actions`, { action: "disable" });
   assert.equal(disabled.response.status, 200);
   assert.equal(disabled.body.data.enabled, false);
@@ -114,7 +137,7 @@ try {
   });
   assert.equal(removed.status, "succeeded");
   catalogRevisionAfterRemove = numberField(removed.result, "catalogRevision");
-  assert.ok(catalogRevisionAfterRemove > catalogRevisionAfterInstall);
+  assert.ok(catalogRevisionAfterRemove > catalogRevisionAfterUpdate);
   await waitForPidsExit([...providerChildren], 5_000);
   childCountAfterRemove = [...providerChildren].filter(pidIsAlive).length;
   assert.equal(childCountAfterRemove, 0);
@@ -138,7 +161,9 @@ const report = {
   childCountAfterInstall,
   childCountAfterRemove,
   catalogRevisionAfterInstall,
+  catalogRevisionAfterUpdate,
   catalogRevisionAfterRemove,
+  updatedCapabilityVersion,
   ...(failure ? { failure } : {}),
 };
 await writeFile(join(artifactDir, "summary.json"), `${JSON.stringify(report, null, 2)}\n`);
@@ -226,7 +251,7 @@ function pidIsAlive(pid: number): boolean {
 }
 
 function renderMarkdown(value: typeof report): string {
-  return `# Real MCP mount acceptance\n\n- Result: ${value.ok ? "PASS" : "FAIL"}\n- Provider: ${value.providerPackage} ${value.providerVersion}\n- Fixed outer tools: ${value.fixedOuterToolCount}\n- Discovered capabilities: ${value.capabilityCount}\n- Baseline child processes: ${value.baselineChildCount}\n- Provider processes after install/remove: ${value.childCountAfterInstall}/${value.childCountAfterRemove}\n- Catalog revisions install/remove: ${value.catalogRevisionAfterInstall}/${value.catalogRevisionAfterRemove}\n${value.failure ? `- Failure: ${value.failure}\n` : ""}`;
+  return `# Real MCP mount acceptance\n\n- Result: ${value.ok ? "PASS" : "FAIL"}\n- Provider: ${value.providerPackage} ${value.providerVersion}\n- Fixed outer tools: ${value.fixedOuterToolCount}\n- Discovered capabilities: ${value.capabilityCount}\n- Updated capability version: ${value.updatedCapabilityVersion}\n- Baseline child processes: ${value.baselineChildCount}\n- Provider processes after install/remove: ${value.childCountAfterInstall}/${value.childCountAfterRemove}\n- Catalog revisions install/update/remove: ${value.catalogRevisionAfterInstall}/${value.catalogRevisionAfterUpdate}/${value.catalogRevisionAfterRemove}\n${value.failure ? `- Failure: ${value.failure}\n` : ""}`;
 }
 
 function safeError(error: unknown): string {
