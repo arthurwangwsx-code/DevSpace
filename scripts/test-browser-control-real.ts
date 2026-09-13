@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import { existsSync } from "node:fs";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,10 +11,17 @@ const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const baseUrl = (process.env.DEVSPACE_BROWSER_REAL_BASE_URL
   ?? "http://127.0.0.1:7676/api/capabilities/v1").replace(/\/$/, "");
 const uploadFile = join(projectRoot, "package.json");
+const runId = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
+const artifactDir = join(
+  process.env.DEVSPACE_BROWSER_REAL_OUTPUT ?? join(projectRoot, ".build", "browser-control-real"),
+  runId,
+);
+const downloadName = `devspace-browser-control-e2e-${runId}.txt`;
 const steps: string[] = [];
 let fixtureServer: Server | undefined;
 let leaseId: string | undefined;
 let downloadedFile: string | undefined;
+let failure: string | undefined;
 
 try {
   const fixture = await startFixture();
@@ -102,7 +109,7 @@ try {
 
   const download = objectValue(await invoke("browser.file.download", {
     url: `${fixture.url}download`,
-    filename: "DevSpace/devspace-browser-control-e2e.txt",
+    filename: `DevSpace/${downloadName}`,
     saveAs: false,
   }));
   assert.ok(Number.isInteger(download.downloadId));
@@ -121,6 +128,9 @@ try {
     assert.equal((await readFile(downloadedFile, "utf8")), "devspace-download-ok\n");
   }
   pass("download_wait_status");
+} catch (error) {
+  failure = safeError(error);
+  process.exitCode = 1;
 } finally {
   if (leaseId) {
     await requestJson("DELETE", `${baseUrl}/leases/${leaseId}`).catch(() => {});
@@ -130,11 +140,24 @@ try {
     await rm(downloadedFile, { force: true }).catch(() => {});
     await rm(dirname(downloadedFile), { recursive: false }).catch(() => {});
   } else {
-    await rm(join(homedir(), "Downloads", "DevSpace", "devspace-browser-control-e2e.txt"), { force: true }).catch(() => {});
+    await rm(join(homedir(), "Downloads", "DevSpace", downloadName), { force: true }).catch(() => {});
   }
 }
 
-console.log(JSON.stringify({ ok: true, baseUrl, passed: steps.length, steps }, null, 2));
+const report = {
+  ok: failure === undefined,
+  mode: "live-current-profile",
+  baseUrl,
+  startedAt: runId,
+  finishedAt: new Date().toISOString(),
+  passed: steps.length,
+  steps,
+  ...(failure ? { failure } : {}),
+};
+await mkdir(artifactDir, { recursive: true });
+await writeFile(join(artifactDir, "summary.json"), `${JSON.stringify(report, null, 2)}\n`);
+await writeFile(join(artifactDir, "summary.md"), renderMarkdown(report));
+console.log(JSON.stringify({ ...report, artifactDir }, null, 2));
 
 async function invoke(capabilityId: string, argumentsValue: Record<string, unknown>, useLease = false): Promise<unknown> {
   const response = await requestJson("POST", `${baseUrl}/invocations`, {
@@ -237,6 +260,15 @@ function objectArray(value: unknown): Array<Record<string, any>> {
 function pass(name: string): void {
   steps.push(name);
   process.stdout.write(`PASS ${name}\n`);
+}
+
+function renderMarkdown(reportValue: typeof report): string {
+  const rows = reportValue.steps.map((step) => `| PASS | ${step} |`).join("\n");
+  return `# Browser control real-profile smoke\n\n- Result: ${reportValue.ok ? "PASS" : "FAIL"}\n- Mode: ${reportValue.mode}\n- Base URL: ${reportValue.baseUrl}\n- Passed steps: ${reportValue.passed}\n${reportValue.failure ? `- Failure: ${reportValue.failure}\n` : ""}\n| Result | Step |\n| --- | --- |\n${rows}\n`;
+}
+
+function safeError(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 }
 
 function sleep(ms: number): Promise<void> {
