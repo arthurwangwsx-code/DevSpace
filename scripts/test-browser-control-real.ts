@@ -62,9 +62,20 @@ try {
   const shadow = requiredElement(elements, "Shadow Action");
   const frame = requiredElement(elements, "Frame Action");
   const upload = requiredElement(elements, "Upload fixture");
+  const secure = requiredElement(elements, "Secure fixture input");
   assert.equal(shadow.shadow, true);
   assert.ok(Array.isArray(frame.framePath) && frame.framePath.length > 0);
+  assert.equal(secure.secure, true);
   pass("shadow_iframe_discovery");
+
+  const secureMarker = "DevSpace secure fixture value";
+  await invoke("browser.page.click", { index: secure.index }, true);
+  await invoke("browser.page.type", { text: secureMarker }, true);
+  const secureSnapshot = objectValue(await invoke("browser.page.snapshot", {}, true));
+  assert.equal(secureSnapshot.title, `secure-length:${secureMarker.length}`);
+  assert.equal(JSON.stringify(secureSnapshot).includes(secureMarker), false, "secure input value leaked into snapshot");
+  assert.equal(requiredElement(objectArray(secureSnapshot.elements), "Secure fixture input").secure, true);
+  pass("secure_input_write_redaction");
 
   await invoke("browser.page.click", { index: shadow.index }, true);
   assert.equal(objectValue(await invoke("browser.page.evaluate", { expression: "document.title" }, true)).value, "shadow-clicked");
@@ -218,6 +229,7 @@ async function startFixture(): Promise<{ server: Server; url: string }> {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(`<!doctype html><meta charset="utf-8"><title>DevSpace Browser Control E2E</title>
       <input type="file" aria-label="Upload fixture">
+      <input type="password" placeholder="Secure fixture input" oninput="document.title='secure-length:'+this.value.length">
       <div id="shadow-host"></div>
       <iframe id="frame-one" name="frame-one" src="/frame" style="width:500px;height:120px"></iframe>
       <script>

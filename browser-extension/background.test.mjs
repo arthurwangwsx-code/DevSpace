@@ -125,6 +125,12 @@ assert.equal(fileCommand?.params.backendNodeId, 99);
 assert.equal(fileCommand?.params.files[0], "/tmp/a.txt");
 const perf = await request("performance", { clientId: "devspace", tabId: 7 });
 assert.equal(perf.result.metrics[0].name, "TaskDuration");
+await request("snapshot", { clientId: "devspace", tabId: 7 });
+const snapshotCommand = debuggerCommands.find(({ method, params }) =>
+  method === "Runtime.evaluate" && String(params.expression).includes("const secure = inputType === 'password'"));
+assert.ok(snapshotCommand, "snapshot must identify password inputs as secure");
+assert.match(snapshotCommand.params.expression, /\(secure \? '' : el\.value\)/);
+assert.match(snapshotCommand.params.expression, /secure \? \{ secure: true \}/);
 const shot = await request("screenshot", { clientId: "devspace", tabId: 7, format: "jpeg", quality: 75, fullPage: true });
 assert.equal(shot.result.mimeType, "image/jpeg");
 assert.equal(debuggerCommands.find(({ method }) => method === "Page.captureScreenshot")?.params.captureBeyondViewport, true);

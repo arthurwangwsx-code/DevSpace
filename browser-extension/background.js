@@ -158,11 +158,13 @@ const SNAPSHOT_JS = `(() => {
       if (index >= 500) break;
       const r = el.getBoundingClientRect(), s = el.ownerDocument?.defaultView?.getComputedStyle(el) || getComputedStyle(el);
       if (r.width < 2 || r.height < 2 || s.display === 'none' || s.visibility === 'hidden') continue;
-      const label = (el.getAttribute('aria-label') || el.innerText || el.value || el.getAttribute('title') || el.getAttribute('placeholder') || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
+      const inputType = el.tagName === 'INPUT' ? String(el.getAttribute('type') || 'text').toLowerCase() : '';
+      const secure = inputType === 'password';
+      const label = (el.getAttribute('aria-label') || el.innerText || (secure ? '' : el.value) || el.getAttribute('title') || el.getAttribute('placeholder') || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
       const point = absolutePoint(el);
       el.setAttribute('data-devspace-index', String(index));
       const isShadow = typeof ShadowRoot !== 'undefined' && el.getRootNode() instanceof ShadowRoot;
-      elements.push({ index: index++, tag: el.tagName.toLowerCase(), label, x: point.x, y: point.y, ...(framePath.length ? { framePath } : {}), ...(isShadow ? { shadow: true } : {}) });
+      elements.push({ index: index++, tag: el.tagName.toLowerCase(), label, x: point.x, y: point.y, ...(framePath.length ? { framePath } : {}), ...(isShadow ? { shadow: true } : {}), ...(secure ? { secure: true } : {}) });
     }
     for (const el of root.querySelectorAll('*')) {
       if (index >= 500) break;
