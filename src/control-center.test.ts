@@ -29,6 +29,17 @@ try {
   const authorized = await fetch(`${base}/api/config`, { headers: { authorization: "Bearer control-token" } });
   assert.equal(authorized.status, 200);
 
+  const savedTunnelKey = await fetch(`${base}/api/actions/tunnel.saveApiKey`, {
+    method: "POST",
+    headers: { authorization: "Bearer control-token", "content-type": "application/json" },
+    body: JSON.stringify({ apiKey: "runtime-test-key" }),
+  });
+  assert.equal(savedTunnelKey.status, 200);
+  const savedTunnelKeyBody = await savedTunnelKey.json() as { result?: { path?: string } };
+  assert.ok(savedTunnelKeyBody.result?.path);
+  assert.equal(readFileSync(savedTunnelKeyBody.result.path!, "utf8"), "runtime-test-key\n");
+  assert.equal((await import("node:fs")).statSync(savedTunnelKeyBody.result.path!).mode & 0o777, 0o600);
+
   const emptyRoots = await fetch(`${base}/api/config`, {
     method: "PUT",
     headers: { authorization: "Bearer control-token", "content-type": "application/json" },
@@ -63,6 +74,37 @@ try {
 
   assert.throws(() => __test.normalizeControlCenterConfig({ allowedRoots: [], port: 7676 }), /At least one allowed workspace root/);
   assert.throws(() => __test.normalizeControlCenterConfig({ allowedRoots: [dir], port: 70000 }), /Port must be between/);
+  assert.throws(
+    () => __test.requireConfiguredWorkspaceRoots({}),
+    (error: unknown) => {
+      const typed = error as Error & { statusCode?: number };
+      assert.equal(typed.statusCode, 400);
+      assert.match(typed.message, /Choose at least one workspace folder/);
+      return true;
+    },
+  );
+  const preset = __test.normalizeControlCenterConfig({
+    allowedRoots: [dir],
+    port: 17676,
+    tunnel: {
+      enabled: false,
+      preset: "tunnel-client",
+      tunnelId: "tunnel_test",
+      apiKeyFile: "/tmp/devspace-test-key",
+      command: process.execPath,
+    },
+  });
+  assert.equal(preset.tunnel?.preset, "tunnel-client");
+  assert.deepEqual(preset.tunnel?.args, [
+    "run",
+    "--control-plane.api-key=file:${apiKeyFile}",
+    "--control-plane.tunnel-id=${tunnelId}",
+    "--mcp.server-url=${localMcpUrl}",
+  ]);
+  assert.throws(() => __test.normalizeControlCenterConfig({
+    allowedRoots: [dir],
+    tunnel: { enabled: true, preset: "tunnel-client", command: process.execPath, tunnelId: null, apiKeyFile: null },
+  }), /Tunnel ID is required/);
 
   await assert.rejects(
     () => __test.runCommand("/bin/sh", ["-c", "printf fail >&2; exit 7"]),
@@ -75,7 +117,7 @@ try {
     },
   );
 
-  console.log("control center tests passed: auth, headers, config safety, explicit clears, file mode, command failure semantics");
+  console.log("control center tests passed: auth, headers, config safety, tunnel preset, explicit clears, file mode, command failure semantics");
 } finally {
   await running.close();
 }

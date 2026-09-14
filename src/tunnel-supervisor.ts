@@ -77,9 +77,12 @@ export class TunnelSupervisor {
     const config = this.config;
     if (!config?.command) return;
     const publicBaseUrl = config.publicBaseUrl ?? "";
+    const apiKeyFile = config.apiKeyFile ? expandHomePath(config.apiKeyFile) : "";
     const replace = (value: string) => value
       .replaceAll("${localMcpUrl}", this.localMcpUrl)
-      .replaceAll("${publicBaseUrl}", publicBaseUrl);
+      .replaceAll("${publicBaseUrl}", publicBaseUrl)
+      .replaceAll("${tunnelId}", config.tunnelId ?? "")
+      .replaceAll("${apiKeyFile}", apiKeyFile);
     const command = replace(expandHomePath(config.command));
     const args = (config.args ?? []).map(replace);
     const cwd = config.cwd ? resolve(expandHomePath(config.cwd)) : undefined;
@@ -90,6 +93,8 @@ export class TunnelSupervisor {
           ...process.env,
           DEVSPACE_LOCAL_MCP_URL: this.localMcpUrl,
           DEVSPACE_PUBLIC_BASE_URL: publicBaseUrl,
+          DEVSPACE_TUNNEL_ID: config.tunnelId ?? "",
+          DEVSPACE_TUNNEL_API_KEY_FILE: apiKeyFile,
           ...(config.environment ?? {}),
         },
         stdio: ["ignore", "inherit", "inherit"],

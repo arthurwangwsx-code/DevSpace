@@ -22,10 +22,15 @@ const runtime = join(resources, "runtime");
 const appRoot = join(resources, "devspace");
 const executable = join(macos, "DevSpace");
 const desktopBundle = join(root, ".build", "DevSpaceDesktopHost.app");
+const browserManifest = JSON.parse(readFileSync(join(root, "browser-extension", "manifest.json"), "utf8"));
+const deploymentArch = process.arch === "arm64" ? "arm64" : "x86_64";
+const appIconSource = join(root, "docs", "assets", "devspace-logo-light.png");
 
 if (existsSync(output)) rmSync(output, { recursive: true, force: true });
-if (!existsSync(join(root, "dist", "cli.js"))) {
+if (process.env.DEVSPACE_SKIP_APP_RUNTIME_BUILD !== "1") {
   execFileSync("npm", ["run", "build"], { cwd: root, stdio: "inherit" });
+} else if (!existsSync(join(root, "dist", "cli.js"))) {
+  throw new Error("DEVSPACE_SKIP_APP_RUNTIME_BUILD=1 requires an existing dist/cli.js build.");
 }
 if (!existsSync(desktopBundle)) {
   execFileSync("/bin/sh", [join(root, "scripts", "build-desktop-host.sh"), desktopBundle], {
@@ -43,8 +48,9 @@ mkdirSync(appRoot, { recursive: true });
 
 execFileSync("xcrun", [
   "swiftc", "-O",
+  "-target", `${deploymentArch}-apple-macosx13.0`,
   "-framework", "AppKit",
-  "-framework", "WebKit",
+  "-framework", "SwiftUI",
   join(root, "native", "control-center", "main.swift"),
   "-o", executable,
 ], { cwd: root, stdio: "inherit" });
@@ -58,7 +64,32 @@ for (const entry of ["dist", "node_modules", "scripts", "native-host", "browser-
 }
 removeNodeBinDirectories(join(appRoot, "node_modules"));
 
+const browserBuildDir = join(root, ".build", "app-browser-extension-build");
+const browserReleaseDir = join(appRoot, "releases", `browser-extension-${browserManifest.version}`);
+execFileSync(nodeSource, [join(root, "scripts", "package-browser-extension.mjs")], {
+  cwd: root,
+  stdio: "inherit",
+  env: {
+    ...process.env,
+    DEVSPACE_BROWSER_BUILD_DIR: browserBuildDir,
+    DEVSPACE_BROWSER_RELEASE_DIR: browserReleaseDir,
+  },
+});
+
 cpSync(desktopBundle, join(resources, "DevSpaceDesktopHost.app"), { recursive: true });
+
+if (existsSync(appIconSource)) {
+  const iconset = join(root, ".build", "DevSpace.iconset");
+  rmSync(iconset, { recursive: true, force: true });
+  mkdirSync(iconset, { recursive: true });
+  for (const [points, pixels] of [[16, 16], [16, 32], [32, 32], [32, 64], [128, 128], [128, 256], [256, 256], [256, 512], [512, 512], [512, 1024]]) {
+    const scale = pixels === points ? "" : "@2x";
+    const target = join(iconset, `icon_${points}x${points}${scale}.png`);
+    execFileSync("/usr/bin/sips", ["-z", String(pixels), String(pixels), appIconSource, "--out", target], { stdio: "ignore" });
+  }
+  execFileSync("/usr/bin/iconutil", ["-c", "icns", iconset, "-o", join(resources, "DevSpace.icns")], { stdio: "inherit" });
+  rmSync(iconset, { recursive: true, force: true });
+}
 
 writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -67,6 +98,7 @@ writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8
 <key>CFBundleIdentifier</key><string>com.devspace.control-center</string>
 <key>CFBundleName</key><string>DevSpace</string>
 <key>CFBundleDisplayName</key><string>DevSpace</string>
+<key>CFBundleIconFile</key><string>DevSpace</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>${packageJson.version}</string>
 <key>CFBundleVersion</key><string>${bundleVersion(packageJson.version)}</string>

@@ -26,6 +26,9 @@ export interface DevspaceUserConfig {
 export interface DevspaceTunnelConfig {
   enabled?: boolean;
   autoStart?: boolean;
+  preset?: "tunnel-client" | "custom";
+  tunnelId?: string;
+  apiKeyFile?: string;
   command?: string;
   args?: string[];
   cwd?: string;

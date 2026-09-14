@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,7 +31,9 @@ export interface RunningControlCenter {
 
 export const __test = {
   normalizeControlCenterConfig,
+  requireConfiguredWorkspaceRoots,
   runCommand,
+  inspectSetupReadiness,
 };
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -177,16 +179,41 @@ function normalizeTunnelConfig(value: unknown, current: DevspaceTunnelConfig | u
   const environment = input.environment === undefined
     ? current?.environment
     : normalizeStringRecord(input.environment, "tunnel.environment");
+  const preset = input.preset === "custom" ? "custom" : input.preset === "tunnel-client" ? "tunnel-client" : current?.preset;
+  const tunnelId = nullableString(input.tunnelId, current?.tunnelId);
+  const apiKeyFile = nullableString(input.apiKeyFile, current?.apiKeyFile);
+  const command = nullableString(input.command, current?.command) ?? (preset === "tunnel-client" ? detectTunnelClient() : undefined);
+  const normalizedArgs = preset === "tunnel-client"
+    ? ["run", "--control-plane.api-key=file:${apiKeyFile}", "--control-plane.tunnel-id=${tunnelId}", "--mcp.server-url=${localMcpUrl}"]
+    : args;
+  const enabled = bool(input.enabled, current?.enabled ?? false);
+  if (enabled && preset === "tunnel-client") {
+    if (!command) throw new Error("tunnel-client is enabled but no executable was found. Select the executable in Tunnel settings.");
+    if (!tunnelId) throw new Error("Tunnel ID is required when the tunnel-client preset is enabled.");
+    if (!apiKeyFile) throw new Error("Tunnel API-key file is required when the tunnel-client preset is enabled.");
+  }
   return {
-    enabled: bool(input.enabled, current?.enabled ?? false),
+    enabled,
     autoStart: bool(input.autoStart, current?.autoStart ?? true),
-    command: nullableString(input.command, current?.command),
-    args,
+    preset,
+    tunnelId,
+    apiKeyFile,
+    command,
+    args: normalizedArgs,
     cwd: nullableString(input.cwd, current?.cwd),
     publicBaseUrl: normalizeOptionalUrl(input.publicBaseUrl, "tunnel.publicBaseUrl") ?? current?.publicBaseUrl ?? null,
     restartOnExit: bool(input.restartOnExit, current?.restartOnExit ?? true),
     environment,
   };
+}
+
+function detectTunnelClient(): string | undefined {
+  const candidates = [
+    join(homedir(), ".local", "bin", "tunnel-client"),
+    "/opt/homebrew/bin/tunnel-client",
+    "/usr/local/bin/tunnel-client",
+  ];
+  return candidates.find((path) => existsSync(path));
 }
 
 function normalizeStringRecord(value: unknown, name: string): Record<string, string> {
@@ -222,8 +249,46 @@ function normalizeOptionalUrl(value: unknown, name: string): string | null | und
 async function runControlAction(action: string, body: Record<string, unknown>): Promise<unknown> {
   const node = process.execPath;
   switch (action) {
+    case "setup.status":
+      return inspectSetupReadiness();
+    case "tunnel.installClient":
+      return runCommand(node, [join(packageRoot, "scripts", "install-tunnel-client.mjs")]);
+    case "tunnel.saveApiKey": {
+      const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+      if (!apiKey) throw new Error("Runtime API key is required.");
+      const secretsDir = join(loadDevspaceFiles().dir, "secrets");
+      const path = join(secretsDir, "openai-tunnel-api-key");
+      mkdirSync(secretsDir, { recursive: true, mode: 0o700 });
+      writeFileSync(path, `${apiKey}\n`, { mode: 0o600 });
+      chmodSync(path, 0o600);
+      return { saved: true, path };
+    }
+    case "browser.prepare": {
+      const installed = await runCommand(node, [join(packageRoot, "native-host", "install.mjs")]);
+      const extension = bundledBrowserExtension();
+      if (!extension) throw new Error("Bundled Browser extension is missing. Reinstall DevSpace.");
+      const revealed = await runCommand("/usr/bin/open", ["-R", extension.unpackedPath]);
+      const chrome = await runCommand("/usr/bin/open", ["-a", "Google Chrome", "chrome://extensions"]);
+      return {
+        installed,
+        revealed,
+        chrome,
+        extension,
+        remainingUserSteps: [
+          "Enable Developer mode in chrome://extensions.",
+          "Click Load unpacked.",
+          "Select the DevSpace Browser Bridge folder revealed in Finder.",
+          "Return to DevSpace and run Browser Doctor.",
+        ],
+      };
+    }
     case "browser.installHost":
       return runCommand(node, [join(packageRoot, "native-host", "install.mjs")]);
+    case "browser.revealExtension": {
+      const extension = bundledBrowserExtension();
+      if (!extension) throw new Error("Bundled Browser extension is missing. Reinstall DevSpace.");
+      return { extension, reveal: await runCommand("/usr/bin/open", ["-R", extension.unpackedPath]) };
+    }
     case "browser.doctor":
       return runCommand(node, [join(packageRoot, "scripts", "doctor-browser-extension.mjs")]);
     case "browser.openExtensions":
@@ -244,8 +309,17 @@ async function runControlAction(action: string, body: Record<string, unknown>): 
       return runCommand(node, [join(packageRoot, "scripts", "doctor-desktop-host.mjs"), "--request-permissions"]);
     case "desktop.doctor":
       return runCommand(node, [join(packageRoot, "scripts", "doctor-desktop-host.mjs")]);
+    case "permissions.openAccessibility":
+      return openSystemSettings("Privacy_Accessibility");
+    case "permissions.openScreenRecording":
+      return openSystemSettings("Privacy_ScreenCapture");
+    case "permissions.openFullDiskAccess":
+      return openSystemSettings("Privacy_AllFiles");
+    case "permissions.fullDiskAccessStatus":
+      return probeFullDiskAccess();
     case "service.install": {
       const files = loadDevspaceFiles();
+      requireConfiguredWorkspaceRoots(files.config);
       const args = [
         join(packageRoot, "scripts", "macos", "install-service.mjs"),
         "--node", process.execPath,
@@ -260,6 +334,7 @@ async function runControlAction(action: string, body: Record<string, unknown>): 
     case "service.restart": {
       if (process.platform !== "darwin") throw new Error("DevSpace login service requires macOS.");
       const files = loadDevspaceFiles();
+      requireConfiguredWorkspaceRoots(files.config);
       return runCommand(node, [
         join(packageRoot, "scripts", "macos", "install-service.mjs"),
         "--node", process.execPath,
@@ -302,10 +377,98 @@ async function runControlAction(action: string, body: Record<string, unknown>): 
   }
 }
 
+function requireConfiguredWorkspaceRoots(config: DevspaceUserConfig): void {
+  if (config.allowedRoots?.length) return;
+  const error = new Error("Choose at least one workspace folder before starting the DevSpace login service.") as Error & { statusCode?: number };
+  error.statusCode = 400;
+  throw error;
+}
+
+function openSystemSettings(anchor: string): Promise<{ command: string; code: number; stdout: string; stderr: string }> {
+  if (process.platform !== "darwin") throw new Error("macOS permission settings are only available on macOS.");
+  return runCommand("/usr/bin/open", [`x-apple.systempreferences:com.apple.preference.security?${anchor}`]);
+}
+
+function bundledBrowserExtension(): { releaseDir: string; unpackedPath: string; zipPath?: string; installText?: string } | undefined {
+  const releasesDir = join(packageRoot, "releases");
+  let candidates: string[] = [];
+  try {
+    candidates = readdirSync(releasesDir).filter((name) => name.startsWith("browser-extension-")).sort().reverse();
+  } catch {}
+  for (const name of candidates) {
+    const releaseDir = join(releasesDir, name);
+    const unpackedPath = join(releaseDir, "unpacked");
+    if (!existsSync(join(unpackedPath, "manifest.json"))) continue;
+    let zipPath: string | undefined;
+    try {
+      zipPath = readdirSync(releaseDir).map((entry) => join(releaseDir, entry)).find((entry) => entry.endsWith(".zip"));
+    } catch {}
+    const installText = join(releaseDir, "INSTALL.txt");
+    return { releaseDir, unpackedPath, zipPath, installText: existsSync(installText) ? installText : undefined };
+  }
+  const sourceUnpacked = join(packageRoot, "browser-extension");
+  return existsSync(join(sourceUnpacked, "manifest.json"))
+    ? { releaseDir: sourceUnpacked, unpackedPath: sourceUnpacked }
+    : undefined;
+}
+
+function probeFullDiskAccess(): { verified: boolean | null; checkedPaths: string[]; readablePaths: string[]; note: string } {
+  if (process.platform !== "darwin") return { verified: null, checkedPaths: [], readablePaths: [], note: "Full Disk Access verification is macOS-only." };
+  const candidates = [
+    join(homedir(), "Library", "Mail"),
+    join(homedir(), "Library", "Messages"),
+    join(homedir(), "Library", "Safari"),
+  ].filter((path) => existsSync(path));
+  const readablePaths: string[] = [];
+  for (const path of candidates) {
+    try {
+      readdirSync(path, { withFileTypes: true });
+      readablePaths.push(path);
+    } catch {}
+  }
+  return {
+    verified: candidates.length === 0 ? null : readablePaths.length > 0,
+    checkedPaths: candidates,
+    readablePaths,
+    note: "Best-effort protected-path probe. macOS does not expose a universal Full Disk Access status API for every launch topology.",
+  };
+}
+
 function serviceIdentity(port: number): { uid: number; label: string; plistPath: string } {
   const uid = process.getuid?.() ?? Number(process.env.UID ?? 0);
   const label = `com.devspace.${uid}.${port}`;
   return { uid, label, plistPath: join(homedir(), "Library", "LaunchAgents", `${label}.plist`) };
+}
+
+async function inspectSetupReadiness(): Promise<{ ready: boolean; blockers: string[]; browser: unknown; desktop: unknown; fullDiskAccess: unknown; service: unknown }> {
+  const files = loadDevspaceFiles();
+  const blockers: string[] = [];
+  if (!files.config.allowedRoots?.length) blockers.push("workspace");
+  const browser = await runCommandResult(process.execPath, [join(packageRoot, "scripts", "doctor-browser-extension.mjs")]);
+  const desktop = process.platform === "darwin"
+    ? await runCommandResult(process.execPath, [join(packageRoot, "scripts", "doctor-desktop-host.mjs")])
+    : { code: 1, json: { supported: false } };
+  const fullDiskAccess = probeFullDiskAccess();
+  const identity = serviceIdentity(files.config.port ?? 7676);
+  const service = { startAtLogin: existsSync(identity.plistPath), label: identity.label };
+  if (!(browser.json as { healthy?: boolean } | undefined)?.healthy) blockers.push("browser");
+  if (!(desktop.json as { permissionsReady?: boolean } | undefined)?.permissionsReady) blockers.push("computerUse");
+  if (!service.startAtLogin) blockers.push("startup");
+  const tunnelRequired = files.config.tunnel?.enabled === true;
+  if (tunnelRequired && !files.config.tunnel?.command) blockers.push("tunnel");
+  return { ready: blockers.length === 0, blockers, browser: browser.json ?? browser, desktop: desktop.json ?? desktop, fullDiskAccess, service };
+}
+
+async function runCommandResult(command: string, args: string[], env?: Record<string, string>): Promise<{ command: string; code: number; stdout: string; stderr: string; json?: unknown }> {
+  if (!existsSync(command) && command.startsWith("/")) return { command, code: 127, stdout: "", stderr: `Executable does not exist: ${command}` };
+  return new Promise((resolveCommand) => {
+    execFile(command, args, { cwd: packageRoot, env: { ...process.env, ...env }, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
+      const code = typeof (error as { code?: unknown } | null)?.code === "number" ? Number((error as { code: number }).code) : error ? 1 : 0;
+      let json: unknown;
+      try { json = JSON.parse(stdout); } catch {}
+      resolveCommand({ command: [command, ...args].join(" "), code, stdout: stdout.slice(-64_000), stderr: stderr.slice(-64_000), json });
+    });
+  });
 }
 
 async function runCommand(command: string, args: string[], env?: Record<string, string>): Promise<{ command: string; code: number; stdout: string; stderr: string }> {

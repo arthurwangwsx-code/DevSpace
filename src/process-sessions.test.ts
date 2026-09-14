@@ -127,7 +127,7 @@ assert.match(inputResult.output, /input:hello/);
 const defaultInteractive = await manager.start({
   workspaceId: "workspace-a",
   cwd: process.cwd(),
-  command: `${node} -e "process.stdin.once('data', data => setTimeout(() => { console.log('default-input:' + data.toString().trim()); process.exit(0); }, 100))"`,
+  command: `${node} -e "process.stdin.once('data', data => setTimeout(() => { console.log('default-input:' + data.toString().trim()); process.exit(0); }, 25))"`,
   yieldTimeMs: 5,
 });
 assert.equal(defaultInteractive.running, true);
@@ -324,7 +324,10 @@ try {
   });
   assert.equal(retained.running, true);
   assert.ok(retained.sessionId);
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  // Leave enough wall-clock room for the child Node process itself to start
+  // under a loaded full-suite run before its 20 ms timer fires. This test is
+  // about completed-session capacity eviction, not process startup latency.
+  await new Promise((resolve) => setTimeout(resolve, 500));
 
   const replacement = await retainedManager.start({
     workspaceId: "workspace-a",

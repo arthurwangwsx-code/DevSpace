@@ -18,6 +18,14 @@ if (!existsSync(app)) throw new Error(`Missing ${app}; run npm run build:control
 const appVersion = execFileSync("/usr/libexec/PlistBuddy", ["-c", "Print :CFBundleShortVersionString", join(app, "Contents", "Info.plist")], { encoding: "utf8" }).trim();
 if (appVersion !== pkg.version) throw new Error(`DevSpace.app version ${appVersion} does not match package version ${pkg.version}. Rebuild the App before packaging.`);
 
+// Release packaging must never publish a visually valid outer App whose
+// onboarding payload is incomplete. This gate verifies the native shell,
+// embedded runtime, Browser Bridge payload and Desktop Host together.
+execFileSync(process.execPath, [join(root, "scripts", "test-control-center-app-package.mjs"), app], {
+  cwd: root,
+  stdio: "inherit",
+});
+
 rmSync(outputDir, { recursive: true, force: true });
 mkdirSync(outputDir, { recursive: true });
 execFileSync("codesign", ["--verify", "--deep", "--strict", app], { stdio: "inherit" });
@@ -77,6 +85,12 @@ writeFileSync(releaseJson, JSON.stringify({
 const installScript = join(outputDir, "install.sh");
 cpSync(join(root, "scripts", "install.sh"), installScript);
 execFileSync("/bin/chmod", ["755", installScript]);
+if (process.env.DEVSPACE_SKIP_RELEASE_DMG_ACCEPTANCE !== "1") {
+  execFileSync(process.execPath, [join(root, "scripts", "macos", "test-release-dmg.mjs"), dmg], {
+    cwd: root,
+    stdio: "inherit",
+  });
+}
 console.log(JSON.stringify({ version: pkg.version, arch, app, dmg, zip, sums, releaseJson, installScript, gatekeeper, notarized: Boolean(process.env.DEVSPACE_NOTARY_PROFILE) }, null, 2));
 
 function sha256(file) {

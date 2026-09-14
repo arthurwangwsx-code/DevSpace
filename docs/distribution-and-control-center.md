@@ -16,6 +16,7 @@ The product-facing macOS application is the Control Center. It owns onboarding a
 
 - configure allowed workspace roots, port and public URL;
 - configure a managed tunnel command and arguments;
+- install/update the official OpenAI tunnel-client with release checksum verification for the common Tunnel preset;
 - install/diagnose the Browser Native Messaging bridge;
 - guide Chrome extension installation;
 - install/diagnose the macOS Desktop Host and request TCC permissions explicitly;
@@ -23,7 +24,7 @@ The product-facing macOS application is the Control Center. It owns onboarding a
 - display local/public MCP endpoints and health;
 - later host update/rollback and release-channel controls.
 
-The app embeds a known Node executable plus the DevSpace runtime. The Swift shell starts a loopback-only Control Center server and renders it in `WKWebView`. This gives the product a native App identity while keeping configuration and action logic in the same Node code used by the CLI.
+The app embeds a known Node executable plus the DevSpace runtime. The Swift shell starts a loopback-only Control Center server and presents a native SwiftUI control surface over that shared API. The existing Web Control Center remains a fallback/debug surface rather than the primary product UI. Detailed onboarding and visual rules are defined in [`native-macos-onboarding-and-control-center.md`](native-macos-onboarding-and-control-center.md).
 
 The macOS app also owns a menu-bar status item. The status item is intentionally operational rather than decorative: it shows whether the Core service is running and exposes **Show Control Center**, **Start Service**, **Restart Service**, **Stop Service**, **Refresh Status**, and **Quit DevSpace**. Closing the Control Center window does not implicitly stop the Core service.
 
@@ -44,6 +45,13 @@ The user sees one product, while privileges and crashes remain isolated internal
 ## 3. Unified configuration
 
 GUI, CLI and login service read `~/.devspace/config.json`. Secrets remain separate from normal project files. The GUI must not invent a second database of settings.
+
+DevSpace intentionally supports **one active product instance per macOS user**. App mode and script/CLI mode
+share the same instance and configuration; installing `DevSpace.app` on a machine that previously ran the
+source/CLI form is a takeover/upgrade path, not a second-instance path. The old script service must be stopped
+before the App-owned login service is activated on the same port. Browser Native Messaging registration and
+the Desktop Host remain machine/user-level shared components so Chrome setup and macOS TCC grants retain a
+stable identity.
 
 Tunnel configuration is a first-class section:
 
@@ -102,19 +110,24 @@ The Control Center leads the user through these states:
 
 1. **Core** — choose allowed roots and local port.
 2. **Tunnel** — enable/disable managed tunnel, command, arguments and public URL.
-3. **Browser** — install Native Host, open Chrome extension page, run doctor.
-4. **Computer Use** — install stable Desktop Host, request Accessibility and Screen Recording, run doctor.
+3. **Browser** — install Native Host, reveal the extension bundled inside `DevSpace.app`, open Chrome extension page, follow the bounded Load Unpacked confirmation, run doctor.
+4. **Computer Use** — install stable Desktop Host, guide Accessibility and Screen Recording authorization, optionally guide Full Disk Access for protected workspace roots, run doctor.
 5. **Auto start** — install and activate the login service.
 6. **Ready** — show local/public MCP URLs and client setup information.
 
 System-owned confirmation steps remain explicit. DevSpace must not bypass macOS TCC or Chrome security prompts.
 
-The steady-state Control Center is organized into four pages:
+The native steady-state Control Center is organized into focused pages rather than one dense settings form:
 
-1. **Overview** — Core running state, runtime architecture, managed Tunnel state, Start/Restart/Stop, and Doctor.
-2. **Settings** — workspace allowlist, port/public URL, Tunnel command/arguments/cwd/restart policy, login startup controls, and common permission actions.
-3. **Browser** — Native Host installation, Chrome extension management entry, and Browser Doctor.
-4. **Computer Use** — Desktop Host installation, Accessibility/Screen Recording permission request, and Desktop Doctor.
+1. **Overview** — readiness summary, local/public MCP endpoints and common service actions.
+2. **Setup** — first-run checklist for workspace, Tunnel, Browser, Computer Use and startup.
+3. **Workspaces** — explicit workspace allowlist and local MCP port.
+4. **Tunnel** — friendly tunnel-client preset (Tunnel ID + credential file) or advanced custom command mode.
+5. **Browser** — bundled Browser Bridge setup, Chrome guidance and Browser Doctor.
+6. **Permissions** — Accessibility, Screen Recording, optional Full Disk Access and Desktop Host verification.
+7. **Startup** — login service state and controls.
+8. **Updates** — check, transactional update and rollback.
+9. **Diagnostics** — doctors plus the Web Control Center fallback.
 
 All normal product settings must be operable from the GUI. Terminal remains a development and automation interface, not a prerequisite for routine configuration. `Save & Restart Service` persists the same config used by the CLI and then activates the service through the shared service installer.
 
@@ -124,9 +137,11 @@ All normal product settings must be operable from the GUI. Terminal remains a de
 
 ```text
 DevSpace.app/
-  Contents/MacOS/DevSpace              Swift + WebKit shell
+  Contents/MacOS/DevSpace              native SwiftUI/AppKit shell
   Contents/Resources/runtime/node      embedded Node executable
   Contents/Resources/devspace/         built DevSpace package/runtime
+  Contents/Resources/devspace/releases/browser-extension-<version>/
+                                        bundled Chrome bridge payload
   Contents/Resources/DevSpaceDesktopHost.app   optional prebuilt helper
 ```
 
@@ -192,7 +207,11 @@ Implemented in the repository:
 - native menu-bar service state with Start/Restart/Stop/Show/Quit shortcuts;
 - Control Center actions for Browser Native Host, Chrome extension page, Browser doctor, Desktop Host install/permissions/doctor, service install/activate/doctor;
 - `devspace control-center` CLI entry;
-- native macOS `DevSpace.app` WebKit shell with embedded Node/runtime packaging;
+- native macOS `DevSpace.app` SwiftUI shell with embedded Node/runtime packaging and Web fallback;
+- native first-run Setup Assistant for Workspaces, Tunnel, Browser, permissions and login startup;
+- Browser setup action that installs the Native Host, reveals the bundled extension and opens Chrome's
+  extensions page without bypassing Chrome's user confirmation boundary;
+- guided Accessibility, Screen Recording and optional Full Disk Access settings with doctor/probe feedback;
 - CLI/script development path remains available.
 - release bootstrap `install.sh` plus machine-readable `release.json`;
 - shared Updater Core for App install, GitHub release update, rollback and uninstall;
@@ -215,6 +234,10 @@ A release is portable only when all of the following are proven on a clean Mac u
 - upgrade preserves config/auth and TCC identity;
 - rollback restores the previous runnable release;
 - uninstall removes service/runtime registrations without deleting user projects.
+
+The repository also runs a bounded final-artifact gate (`npm run test:macos-release-dmg`) that mounts the
+generated DMG, verifies the App signature/version, cold-starts it with an isolated config directory, checks
+owner-auth file permissions, and exercises the Browser Native Host installer directly from the mounted App.
 
 ## 11. Script installation and transactional updates
 

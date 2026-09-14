@@ -225,6 +225,7 @@ devspace doctor
 ## Documentation
 
 - [Product Capability Map](docs/product-capability-map.md) — start here for the complete product design, feature inventory, architecture boundaries, and documentation map
+- [Native macOS Onboarding](docs/native-macos-onboarding-and-control-center.md) — SwiftUI Control Center, Browser installation and permission-guided first run
 - [Distribution, Control Center, and Tunnel Architecture](docs/distribution-and-control-center.md)
 - [Setup Guide](docs/setup.md)
 - [ChatGPT Coding Workflow](docs/chatgpt-coding-workflow.md)
