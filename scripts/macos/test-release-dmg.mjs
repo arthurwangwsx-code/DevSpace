@@ -25,7 +25,11 @@ mkdirSync(configDir, { recursive: true });
 let child;
 
 try {
-  execFileSync("/usr/bin/hdiutil", ["attach", "-nobrowse", "-readonly", "-mountpoint", mountPoint, dmg], { stdio: "ignore" });
+  execFileSync("/usr/bin/hdiutil", ["attach", "-nobrowse", "-readonly", "-mountpoint", mountPoint, dmg], {
+    stdio: "ignore",
+    timeout: 30_000,
+    killSignal: "SIGKILL",
+  });
   const app = join(mountPoint, "DevSpace.app");
   const executable = join(app, "Contents", "MacOS", "DevSpace");
   const resources = join(app, "Contents", "Resources");
@@ -37,6 +41,7 @@ try {
   child = spawn(executable, [], {
     env: { ...process.env, DEVSPACE_CONFIG_DIR: configDir, DEVSPACE_CONTROL_PORT: String(port) },
     stdio: "ignore",
+    detached: true,
   });
   const auth = join(configDir, "auth.json");
   await waitFor(() => existsSync(auth) && statSync(auth).size > 0, 20_000, "DevSpace.app did not initialize auth.json");
@@ -59,12 +64,29 @@ try {
 
   console.log(`release DMG acceptance passed: ${basename(dmg)} (v${version})`);
 } finally {
-  if (child && child.exitCode === null) {
-    child.kill("SIGTERM");
-    await waitFor(() => child.exitCode !== null, 3_000).catch(() => child.kill("SIGKILL"));
-  }
+  await terminateProcessGroup(child);
   try { execFileSync("/usr/bin/hdiutil", ["detach", "-force", mountPoint], { stdio: "ignore" }); } catch {}
   rmSync(temporary, { recursive: true, force: true });
+}
+
+async function terminateProcessGroup(child) {
+  if (!child?.pid || child.exitCode !== null) return;
+  try { process.kill(-child.pid, "SIGTERM"); } catch {}
+  try {
+    await waitFor(() => !processExists(child.pid), 3_000);
+  } catch {
+    try { process.kill(-child.pid, "SIGKILL"); } catch {}
+    await waitFor(() => !processExists(child.pid), 2_000).catch(() => undefined);
+  }
+}
+
+function processExists(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function waitFor(predicate, timeoutMs, message = "timed out") {
