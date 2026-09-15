@@ -64,6 +64,34 @@ export async function installTunnelClient(options = {}) {
   }
 }
 
+export async function downloadTunnelClient(options = {}) {
+  const releaseApi = options.releaseApi ?? process.env.DEVSPACE_TUNNEL_CLIENT_RELEASE_API ?? OFFICIAL_RELEASE_API;
+  const outputPath = resolve(options.outputPath ?? process.env.DEVSPACE_TUNNEL_CLIENT_PATH ?? join(process.cwd(), "tunnel-client"));
+  const release = await fetchJson(releaseApi);
+  const selected = selectReleaseAsset(release, options.platform, options.arch);
+  const [archiveBytes, checksumsText] = await Promise.all([
+    fetchBytes(selected.archive.browser_download_url), fetchText(selected.checksums.browser_download_url),
+  ]);
+  const expected = checksumFor(checksumsText, selected.archive.name);
+  const actual = createHash("sha256").update(archiveBytes).digest("hex");
+  if (actual !== expected) throw new Error(`SHA-256 mismatch for ${selected.archive.name}: expected ${expected}, got ${actual}`);
+  const temporary = mkdtempSync(join(tmpdir(), "devspace-tunnel-client-bundle-"));
+  try {
+    const archivePath = join(temporary, basename(selected.archive.name));
+    const extracted = join(temporary, "extracted");
+    mkdirSync(extracted, { recursive: true });
+    writeFileSync(archivePath, archiveBytes, { mode: 0o600 });
+    execFileSync("/usr/bin/ditto", ["-x", "-k", archivePath, extracted], { stdio: "ignore" });
+    const binary = findFile(extracted, "tunnel-client");
+    if (!binary) throw new Error("Downloaded tunnel-client archive does not contain the tunnel-client executable.");
+    mkdirSync(dirname(outputPath), { recursive: true });
+    copyFileSync(binary, outputPath);
+    chmodSync(outputPath, 0o755);
+    const version = execFileSync(outputPath, ["--version"], { encoding: "utf8", timeout: 5_000 }).trim();
+    return { outputPath, version, release: selected.tag, asset: selected.archive.name, sha256: actual };
+  } finally { rmSync(temporary, { recursive: true, force: true }); }
+}
+
 async function fetchJson(url) {
   const response = await fetch(url, { headers: { Accept: "application/vnd.github+json", "User-Agent": "DevSpace" }, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) throw new Error(`Unable to query tunnel-client release (${response.status}).`);

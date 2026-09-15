@@ -70,6 +70,11 @@ what DevSpace can do after it is enabled, and which confirmation belongs to macO
 
 ### 2. Remote Tunnel
 
+The production App bundles a checksum-verified official `tunnel-client` under
+`Contents/Resources/runtime/tunnel-client`. A clean Mac therefore does not need
+to install the Tunnel runtime before first use. The GUI update action remains
+available as an optional verified override for a newer Tunnel release.
+
 The common Tunnel UI exposes:
 
 - Enable managed Tunnel.

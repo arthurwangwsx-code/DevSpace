@@ -139,6 +139,7 @@ All normal product settings must be operable from the GUI. Terminal remains a de
 DevSpace.app/
   Contents/MacOS/DevSpace              native SwiftUI/AppKit shell
   Contents/Resources/runtime/node      embedded Node executable
+  Contents/Resources/runtime/tunnel-client  embedded verified Tunnel runtime
   Contents/Resources/devspace/         built DevSpace package/runtime
   Contents/Resources/devspace/releases/browser-extension-<version>/
                                         bundled Chrome bridge payload

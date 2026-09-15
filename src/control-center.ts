@@ -209,6 +209,7 @@ function normalizeTunnelConfig(value: unknown, current: DevspaceTunnelConfig | u
 
 function detectTunnelClient(): string | undefined {
   const candidates = [
+    join(packageRoot, "..", "runtime", "tunnel-client"),
     join(homedir(), ".local", "bin", "tunnel-client"),
     "/opt/homebrew/bin/tunnel-client",
     "/usr/local/bin/tunnel-client",

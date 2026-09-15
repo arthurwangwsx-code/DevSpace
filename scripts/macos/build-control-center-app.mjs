@@ -19,6 +19,10 @@ const contents = join(output, "Contents");
 const macos = join(contents, "MacOS");
 const resources = join(contents, "Resources");
 const runtime = join(resources, "runtime");
+const bundledTunnelClient = join(runtime, "tunnel-client");
+// The official Tunnel runtime is part of the portable product image. It is
+// fetched at build time with the same SHA-256 verification used by the GUI
+// updater, then signed as part of the enclosing App bundle.
 const appRoot = join(resources, "devspace");
 const executable = join(macos, "DevSpace");
 const desktopBundle = join(root, ".build", "DevSpaceDesktopHost.app");
@@ -58,6 +62,8 @@ chmodSync(executable, 0o755);
 
 cpSync(nodeSource, join(runtime, "node"));
 chmodSync(join(runtime, "node"), 0o755);
+const tunnelInstallerEnv = { ...process.env, DEVSPACE_TUNNEL_CLIENT_PATH: bundledTunnelClient };
+execFileSync(nodeSource, [join(root, "scripts", "install-tunnel-client.mjs")], { cwd: root, stdio: "inherit", env: tunnelInstallerEnv });
 for (const entry of ["dist", "node_modules", "scripts", "native-host", "browser-extension", "native", "package.json"]) {
   const source = join(root, entry);
   if (existsSync(source)) cpSync(source, join(appRoot, entry), { recursive: true, dereference: true });

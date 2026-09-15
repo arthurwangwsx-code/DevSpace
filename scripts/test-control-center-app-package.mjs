@@ -11,6 +11,9 @@ if (process.platform !== "darwin") {
 
 const app = resolve(process.argv[2] ?? ".build/DevSpace.app");
 const resources = join(app, "Contents", "Resources");
+const tunnelClient = join(resources, "runtime", "tunnel-client");
+assert.equal(existsSync(tunnelClient), true, "bundled tunnel-client is missing");
+assert.match(execFileSync(tunnelClient, ["--version"], { encoding: "utf8", timeout: 5_000 }).trim(), /\d+\.\d+\.\d+/, "bundled tunnel-client must be executable");
 const packageRoot = join(resources, "devspace");
 const browserReleases = join(packageRoot, "releases");
 
